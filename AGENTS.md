@@ -23,7 +23,7 @@ published apps, so mobile push goes through a relay that we host.
 | Device identity | ECDSA **P-256** key pair per device (not Ed25519: .NET has no built-in Ed25519, and the iOS Secure Enclave only supports P-256) |
 | Clients | Avalonia everywhere (desktop + mobile), platform services behind interfaces |
 | Extra data (v1) | Photos & videos, contacts, calendars. Not SMS/iMessage: iOS has no API, Google Play restricts SMS |
-| Distribution | Third parties self-host → push relay (`ASync.PushRelay`) that we host holds the APNs/FCM keys |
+| Distribution | Third parties self-host → a minimal stateless push relay that we host (free Cloudflare Worker) holds the APNs/FCM keys; self-hosters can also push directly or run their own relay (see "Push") |
 | Database | PostgreSQL 16 (EF Core + Npgsql) |
 | App identifiers | `ua.pp.chds.async`: the Android application id and the iOS bundle id |
 | Packages | Central versions in `Directory.Packages.props` with transitive pinning |
@@ -38,7 +38,7 @@ published apps, so mobile push goes through a relay that we host.
                      ASP.NET Core 10 server (async-server, Docker)
                      ├─ PostgreSQL 16: accounts, devices, config, index metadata
                      ├─ Storage back-ends per user: local / S3 / WebDAV / SFTP / SMB
-                     └─ wake-ups ──► Push relay (hosted by us) ──► APNs / FCM / UnifiedPush
+                     └─ wake-ups ──► push relay (ours, or direct/own) ──► APNs / FCM; UnifiedPush direct
 ```
 
 ## Solution layout
@@ -60,7 +60,9 @@ src/
   ASync.App.Desktop/      (later) Win/Linux/macOS head: tray + background service host
   ASync.App.iOS/          (later) PhotoKit, Contacts, EventKit, BGTaskScheduler, APNs, background URLSession
   ASync.App.Android/      (later) MediaStore, Contacts/CalendarProvider, WorkManager, FCM/UnifiedPush
-  ASync.PushRelay/        (later) separate service we host: APNs/FCM keys, forwards "wake" messages
+  ASync.Push/             (later) APNs/FCM/UnifiedPush sender, used by the server (direct mode) and the relay
+  ASync.PushRelay/        (later) ASync.Push behind POST /v1/wake, Docker image async-push-relay
+relay/cloudflare-worker/  (later) the same relay in TypeScript for free Cloudflare Workers (our hosted relay)
 scripts/
   smoke-devices.cs        end-to-end check of sign-in and device provisioning against a running server
 ```
@@ -209,12 +211,58 @@ right after enrollment.
 - **Server scheduler:** knows each device's expected schedule. It wakes overdue devices through the relay and
   alerts the user after a grace period.
 
-## Push relay (M4)
+## Push (M4)
 
-- Self-hosted servers register once and get an instance id and secret.
-- Devices give their server an opaque relay token, and the server calls `POST relay/wake {token}`.
-- The relay knows no users and no data, and the payload is only "wake". It has per-instance rate limits.
-- Builds that carry their own APNs/FCM keys can push directly without the relay.
+APNs and FCM only accept pushes signed with the keys of whoever publishes the app. The keys for our apps
+(`ua.pp.chds.async`) stay with us, so other people's servers reach their devices through a relay that we
+host.
+
+```
+device ──push token──► its ASync server ──POST /v1/wake──► relay ──► APNs (iOS) / FCM (Android)
+```
+
+**The relay is minimal and stateless:**
+- One endpoint, `POST /v1/wake {platform, token, kind}`, where `kind` is `silent` or `overdue`.
+- No database, no accounts and no registration of servers.
+- The payload is only "wake". The overdue notice uses a localized string built into the app (`loc-key`), so
+  no user data or server text passes through.
+- A push token only works for our app, so a leaked token can only wake that app. Rate limits per token and
+  per IP (and Cloudflare rate-limit rules) cover that.
+- Later, only if abuse happens: automatic per-server keys, or tokens sealed by the relay.
+
+**Push messages:**
+- **iOS silent:** `apns-push-type: background`, priority 5, `content-available: 1`. Apple throttles these.
+- **iOS overdue:** an alert built from a `loc-key` string in the app.
+- **FCM:** high-priority data messages through the HTTP v1 API, authenticated with an OAuth token from the
+  service-account JSON.
+
+**Two implementations of the same protocol:**
+1. **`relay/cloudflare-worker/`**: about 150 lines of TypeScript on the free Cloudflare Workers tier. This is
+   our hosted relay, at e.g. `push.chds.pp.ua`.
+   - Apple's push service requires HTTP/2. Before building, test that a Worker can deliver to APNs
+     (`@fivesheepco/cloudflare-apns2` claims it can).
+   - If it can't, host the .NET relay on Google Cloud Run's free tier instead.
+2. **`ASync.Push`** (a .NET library) **plus `ASync.PushRelay`** (that library behind the same endpoint, as a
+   Docker image). The server also uses `ASync.Push` directly ("direct mode").
+
+**Server setting: how this server sends pushes**
+
+| `Push__Mode` | Who uses it | Needs |
+|---|---|---|
+| `Relay` (default) | Self-hosters using our published apps | Nothing. `Push__RelayUrl` defaults to our relay |
+| `Direct` | Self-hosters who build the apps under their own bundle id | Their APNs `.p8` key, Key ID, Team ID and bundle id; FCM service-account JSON |
+| `Relay` + custom `Push__RelayUrl` | Self-hosters with their own builds and several servers | Their own relay: deploy the Worker (free Cloudflare) or the `async-push-relay` container |
+
+**UnifiedPush** (F-Droid and de-Googled Android) never uses a relay: the server posts straight to the
+device's distributor endpoint (for example ntfy).
+
+**What our hosted relay needs:**
+- An Apple Developer account and an APNs `.p8` key for `ua.pp.chds.async`.
+- A Firebase project and its service-account JSON.
+- A Cloudflare account (free) and a DNS name.
+
+If the relay is down, devices still run their own scheduled background tasks; only server-triggered
+wake-ups are missed.
 
 ## Extra data sources (M4)
 

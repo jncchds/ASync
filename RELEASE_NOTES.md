@@ -14,5 +14,6 @@
   - Challenge–response sign-in with per-device ECDSA P-256 keys.
   - Revocation that takes effect immediately.
   - The device list shows name, platform, version and last seen.
+- docs: **Push design**: a minimal, stateless relay (one endpoint, no database) as a free Cloudflare Worker and as a .NET container, plus a direct mode for self-hosters with their own app builds. App id `ua.pp.chds.async`.
 - feat: `scripts/smoke-devices.cs` runs an end-to-end check of sign-in and every device flow against a
   running server.
