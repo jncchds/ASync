@@ -25,7 +25,7 @@ published apps, so mobile push goes through a relay that we host.
 | Extra data (v1) | Photos & videos, contacts, calendars. Not SMS/iMessage: iOS has no API, Google Play restricts SMS |
 | Distribution | Third parties self-host → push relay (`ASync.PushRelay`) that we host holds the APNs/FCM keys |
 | Database | PostgreSQL 16 (EF Core + Npgsql) |
-| App identifiers | Android application id `is.pp.chds.async`; iOS bundle id not decided yet |
+| App identifiers | `ua.pp.chds.async`: the Android application id and the iOS bundle id |
 | Packages | Central versions in `Directory.Packages.props` with transitive pinning |
 
 ## Architecture overview
@@ -250,7 +250,7 @@ right after enrollment.
 
 Open questions:
 - Should there be a SQLite option for small installs?
-- Apple and Google developer accounts, iOS bundle id (Android is `is.pp.chds.async`), relay domain.
+- Apple and Google developer accounts, relay domain.
 - License.
 - Product name: "ASync" is hard to search for.
 
