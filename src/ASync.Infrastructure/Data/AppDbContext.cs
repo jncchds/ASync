@@ -17,6 +17,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<EnrollmentToken> EnrollmentTokens => Set<EnrollmentToken>();
     public DbSet<PendingDeviceCode> PendingDeviceCodes => Set<PendingDeviceCode>();
     public DbSet<StorageBackend> StorageBackends => Set<StorageBackend>();
+    public DbSet<Folder> Folders => Set<Folder>();
+    public DbSet<FolderDevice> FolderDevices => Set<FolderDevice>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -58,6 +60,30 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(s => s.LastCheckError).HasMaxLength(1000);
             e.HasIndex(s => s.UserId);
             e.HasOne(s => s.User).WithMany().HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<Folder>(e =>
+        {
+            e.Property(f => f.Name).HasMaxLength(100);
+            e.Property(f => f.RootPath).HasMaxLength(500);
+            e.Property(f => f.Mode).HasConversion<string>().HasMaxLength(20);
+            e.Property(f => f.Encryption).HasConversion<string>().HasMaxLength(20);
+            e.Property(f => f.Kind).HasConversion<string>().HasMaxLength(20);
+            e.Property(f => f.RetentionJson).HasColumnType("jsonb");
+            e.HasIndex(f => f.UserId);
+            e.HasOne(f => f.User).WithMany().HasForeignKey(f => f.UserId).OnDelete(DeleteBehavior.Cascade);
+            // A back-end with folders on it cannot be deleted by accident.
+            e.HasOne(f => f.StorageBackend).WithMany().HasForeignKey(f => f.StorageBackendId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        b.Entity<FolderDevice>(e =>
+        {
+            e.HasIndex(d => new { d.FolderId, d.DeviceId }).IsUnique();
+            e.Property(d => d.LocalPath).HasMaxLength(1000);
+            e.Property(d => d.Direction).HasConversion<string>().HasMaxLength(20);
+            e.Property(d => d.LastSyncMessage).HasMaxLength(1000);
+            e.HasOne(d => d.Folder).WithMany(f => f.Devices).HasForeignKey(d => d.FolderId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(d => d.Device).WithMany().HasForeignKey(d => d.DeviceId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<PendingDeviceCode>(e =>

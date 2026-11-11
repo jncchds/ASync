@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using ASync.Api;
 using ASync.Api.Auth;
 using ASync.Api.HostedServices;
+using ASync.Api.Hubs;
 using ASync.Api.Services;
 using ASync.Core.Interfaces;
 using ASync.Core.Models;
@@ -45,6 +46,11 @@ builder.Services.AddSingleton<PublicUrl>();
 builder.Services.AddScoped<DeviceProvisioningService>();
 builder.Services.AddScoped<IStorageBackendRepository, StorageBackendRepository>();
 builder.Services.AddScoped<StorageBackendService>();
+builder.Services.AddScoped<IFolderRepository, FolderRepository>();
+builder.Services.AddScoped<FolderService>();
+builder.Services.AddSingleton<FolderLeaseService>();
+builder.Services.AddSingleton<FolderBackendCache>();
+builder.Services.AddHostedService<FolderBackendSweeper>();
 builder.Services.AddHostedService<CleanupService>();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -131,6 +137,11 @@ if (builder.Configuration.GetValue<bool>("TrustForwardedHeaders"))
     });
 }
 
+// ── SignalR (/hubs/sync: notifications only) ──────────────────────────────────
+builder.Services.AddSignalR()
+    .AddJsonProtocol(o => o.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
+builder.Services.AddSingleton<ISyncNotifier, SyncNotifier>();
+
 // ── API ───────────────────────────────────────────────────────────────────────
 // Enums travel as strings, in controllers and (from M2) SignalR alike.
 builder.Services.AddControllers()
@@ -164,6 +175,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.MapControllers();
+app.MapHub<SyncHub>("/hubs/sync");
 app.MapHealthChecks("/health").AllowAnonymous();
 
 // React SPA fallback — serve index.html for all non-API routes

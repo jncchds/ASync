@@ -63,3 +63,19 @@ public interface IStorageBackendRepository
     Task UpdateAsync(StorageBackend backend);
     Task DeleteAsync(StorageBackend backend);
 }
+
+public interface IFolderRepository
+{
+    /// <summary>The user's folders with their devices and back-end.</summary>
+    Task<List<Folder>> GetForUserAsync(int userId);
+    Task<Folder?> GetAsync(int id);
+    /// <summary>The folders a device is attached to (each with this device's membership only in <c>Devices</c>).</summary>
+    Task<List<Folder>> GetForDeviceAsync(Guid deviceId);
+    Task<FolderDevice?> GetMembershipAsync(int folderId, Guid deviceId);
+    Task<bool> AnyUsingBackendAsync(int storageBackendId);
+    Task<List<Folder>> GetOnBackendAsync(int storageBackendId);
+    Task<Folder> AddAsync(Folder folder);
+    Task SaveAsync();
+    Task DeleteAsync(Folder folder);
+    Task RemoveDeviceAsync(FolderDevice membership);
+}

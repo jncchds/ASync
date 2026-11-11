@@ -148,6 +148,132 @@ namespace ASync.Infrastructure.Migrations
                     b.ToTable("EnrollmentTokens");
                 });
 
+            modelBuilder.Entity("ASync.Core.Models.Folder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Encryption")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.PrimitiveCollection<string[]>("Excludes")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.Property<int>("IntervalMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ProtectedRepositoryKey")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("RepositoryReady")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("RetentionJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("RootPath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("StorageBackendId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TrashKeepDays")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("VersionsKeepDays")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StorageBackendId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("Folders");
+                });
+
+            modelBuilder.Entity("ASync.Core.Models.FolderDevice", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Direction")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("FolderId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastSyncAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastSyncMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool?>("LastSyncOk")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LocalPath")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("Paused")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceId");
+
+                    b.HasIndex("FolderId", "DeviceId")
+                        .IsUnique();
+
+                    b.ToTable("FolderDevices");
+                });
+
             modelBuilder.Entity("ASync.Core.Models.PendingDeviceCode", b =>
                 {
                     b.Property<int>("Id")
@@ -349,6 +475,44 @@ namespace ASync.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ASync.Core.Models.Folder", b =>
+                {
+                    b.HasOne("ASync.Core.Models.StorageBackend", "StorageBackend")
+                        .WithMany()
+                        .HasForeignKey("StorageBackendId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ASync.Core.Models.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StorageBackend");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ASync.Core.Models.FolderDevice", b =>
+                {
+                    b.HasOne("ASync.Core.Models.Device", "Device")
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ASync.Core.Models.Folder", "Folder")
+                        .WithMany("Devices")
+                        .HasForeignKey("FolderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Device");
+
+                    b.Navigation("Folder");
+                });
+
             modelBuilder.Entity("ASync.Core.Models.RefreshToken", b =>
                 {
                     b.HasOne("ASync.Core.Models.AppUser", "User")
@@ -371,6 +535,11 @@ namespace ASync.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("ASync.Core.Models.AppUser", b =>
+                {
+                    b.Navigation("Devices");
+                });
+
+            modelBuilder.Entity("ASync.Core.Models.Folder", b =>
                 {
                     b.Navigation("Devices");
                 });

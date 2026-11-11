@@ -51,11 +51,13 @@ public class StorageBackendsController : ControllerBase
 
     /// <summary>Removes the back-end's configuration. The data stored on it is left untouched.</summary>
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, [FromServices] IFolderRepository folders)
     {
         var backend = await _backends.GetAsync(id);
         if (backend is null || !StorageBackendService.CanUse(backend, User.UserId())) return NotFound();
         if (!StorageBackendService.CanEdit(backend, User.UserId(), IsAdmin)) return Forbid();
+        if (await folders.AnyUsingBackendAsync(id))
+            return BadRequest(new { message = "Folders are stored here. Remove those folders first." });
         await _service.DeleteAsync(backend);
         return NoContent();
     }
