@@ -27,6 +27,8 @@ published apps, so mobile push goes through a relay that we host.
 | Database | PostgreSQL 16 (EF Core + Npgsql) |
 | App identifiers | `ua.pp.chds.async`: the Android application id and the iOS bundle id |
 | Packages | Central versions in `Directory.Packages.props` with transitive pinning |
+| Engine crypto | BCL only, so it runs unchanged on iOS/Android: AES-256-GCM with per-object HKDF subkeys, HMAC-SHA256 blob ids, PBKDF2-SHA256 (600k) for passphrases. Not BLAKE3/XChaCha20 (not in the BCL) |
+| Repository encryption | Always on. Transport folders' repository key is wrapped by a server-held key (the storage provider sees ciphertext; the server can still browse); E2E folders' only by the user's passphrase and recovery key |
 
 ## Architecture overview
 
@@ -49,11 +51,13 @@ Projects marked *(later)* do not exist yet.
 src/
   ASync.Contracts/        DTOs and enums shared by server and clients (no deps). Single source of truth for the API.
   ASync.Core/             Domain models, repository interfaces, pure logic (Security/Codes, Security/DeviceKeys)
-  ASync.Infrastructure/   EF Core (AppDbContext, Migrations/), Repositories/; later Storage/ adapters
+  ASync.Engine/           storage interface + LocalBackend, chunking (FastCDC), crypto, repository format, backup/restore,
+                          retention/prune/check, plain layout. BCL-only: shared by the server and every client
+  ASync.Storage/          remote back-ends: S3, WebDAV, SFTP, SMB + factory and connection test
+  ASync.Infrastructure/   EF Core (AppDbContext, Migrations/), Repositories/
   ASync.Api/              Controllers/, Auth/, Services/, HostedServices/, Program.cs; wwwroot/ = built SPA
   async-ui/               React 19 + Vite 8 + TS: axios api.ts, react-router 7, one index.css
   ASync.Tests/            xUnit, hand-written fakes
-  ASync.Engine/           (later) chunking (FastCDC), hashing (BLAKE3), manifests, diff/merge, crypto, repo format
   ASync.Client.Core/      (later) client agent: local SQLite state, scanner/watcher, scheduler, API client
   ASync.Cli/              (later) headless agent + admin CLI (System.CommandLine), Docker image async-cli
   ASync.App/              (later) Avalonia shared UI (CommunityToolkit.Mvvm)
@@ -65,6 +69,8 @@ src/
 relay/cloudflare-worker/  (later) the same relay in TypeScript for free Cloudflare Workers (our hosted relay)
 scripts/
   smoke-devices.cs        end-to-end check of sign-in and device provisioning against a running server
+  smoke-storage.cs        end-to-end check of storage back-end management (Local + S3)
+  test-backends-env.sh    ASYNC_TEST_* variables for the containers of docker-compose.test.yml
 ```
 
 ## Data model
@@ -78,11 +84,16 @@ Implemented (M0):
   LastSeenAt, RevokedAt.
 - **EnrollmentToken**: CodeHash, Label, Reusable, UsedCount, ExpiresAt, RevokedAt.
 - **PendingDeviceCode**: DeviceCodeHash, UserCodeHash, Name, Platform, PublicKey, Status, ExpiresAt, DeviceId.
-- **DataProtectionKeys**: the ASP.NET Data Protection key ring (OIDC cookies; later back-end credentials).
+- **DataProtectionKeys**: the ASP.NET Data Protection key ring (OIDC cookies, back-end credentials).
+
+Implemented (M1):
+
+- **StorageBackend**: UserId (null = shared), Name, Type, ProtectedSettings (Data Protection, purpose
+  `ASync.StorageBackend.Settings.v1`), CreatedAt, UpdatedAt, LastCheckedAt, LastCheckOk, LastCheckError.
 
 Planned:
 
-- **StorageBackend** (per user, or shared by an admin): Type, encrypted config, Quota, Health.
+- **StorageBackend.Quota**, periodic health checks.
 - **Folder**: Mode, Encryption, Kind (`Files`/`Photos`/`Contacts`/`Calendars`), StorageBackendId, RootPath,
   Schedule, Retention, Filters, Revision.
 - **FolderDevice**: device ↔ folder: local path, direction override, paused, metered/battery rules, last sync point.
@@ -158,20 +169,103 @@ code lives in `Services/DeviceProvisioningService.cs` (API: `DevicesController` 
 Planned: certificate pinning (`fp=` in the pair URI) for self-signed servers; the push target is registered
 right after enrollment.
 
-## Storage back-ends and layouts (M1)
+## Storage back-ends (M1)
 
-- **Plain layout** (default for Mirror/TwoWay without E2E): real files on the back-end, so Nextcloud or SMB
-  still shows normal folders. Old versions and deletions go to `.async/versions/` and `.async/trash/` with
-  retention.
-- **Repository layout** (Backup mode, and any E2E folder): content-addressed chunk packs plus snapshot
-  manifests, similar to restic or kopia. This gives deduplication, cheap snapshots and encrypted names.
-  - E2E chunks are encrypted on the device with XChaCha20-Poly1305 using a per-folder key.
-  - The folder key is wrapped by the user's key, which is wrapped by a passphrase and a printable recovery key.
-  - The server stores only the wrapped forms.
-- **`IStorageBackend`** has Stat, List, OpenRead (ranged), Write (temp file then rename where possible),
-  Delete and Move. Both layouts sit on top of it.
-- **Libraries:** AWSSDK.S3 (MinIO, B2, R2 and Wasabi), SSH.NET, SMBLibrary, and a thin WebDAV client.
-- **Credentials:** encrypted with Data Protection, whose key ring is in the database.
+`IStorageBackend` (`src/ASync.Engine/Storage`) is the only thing the layouts need. It has six methods:
+Stat, List (flat or recursive), OpenRead (with a byte range), Write, Delete and Move.
+- Paths are `/`-separated, relative to the back-end root, and normalized by `StoragePath`, which rejects
+  `.` and `..`.
+- Directories are implicit: writing creates parents.
+- Writes are atomic: back-ends write to a temporary name (`*.async-tmp`, hidden from listings) and then
+  rename, or use atomic uploads (S3).
+- Every back-end passes the same conformance suite (`BackendConformanceTests`).
+
+| Type | Implementation | Notes |
+|---|---|---|
+| `Local` | `LocalBackend` | Admin-only, and only under `Storage:LocalRoots` (default `/data`, the Docker volume) |
+| `S3` | `S3Backend` (AWSSDK.S3 4) | Any S3-compatible service. The SDK's default request checksums are turned off for compatibility. The file mtime is kept in `x-amz-meta-mtime`. Move = copy + delete (objects up to 5 GB). A missing bucket is reported clearly; ASync never creates buckets |
+| `WebDav` | `WebDavBackend` (HttpClient) | PROPFIND Depth 1, walked level by level. Uploads go to a temporary name, then MOVE with `Overwrite: T`. MKCOL creates parents. `X-OC-Mtime` sets the mtime on Nextcloud. Automatic redirects are off, because HttpClient drops the auth header on redirect |
+| `Sftp` | `SftpBackend` (SSH.NET) | Password or OpenSSH key. Host key pinned by SHA-256 fingerprint: trusted on first use, and pinned on the first successful test of a saved back-end. Writes use posix-rename |
+| `Smb` | `SmbBackend` (SMBLibrary) | Managed SMB 2/3, no mount needed. Always port 445. Rename uses `FileRenameInformation` with replace |
+
+- `PrefixedBackend` scopes a back-end to a sub-directory. It is used for an S3 bucket prefix and for each
+  user's `users/<id>/` area on shared back-ends.
+- **Management** (`StorageBackendService`, `/api/storage-backends`):
+  - Users manage their own back-ends. Shared back-ends, and all Local ones, are admin-only.
+  - Settings are polymorphic JSON (`StorageSettings`, `type` discriminator), encrypted with Data Protection.
+  - Secrets are write-only. Responses list which ones are set, and an update that leaves one empty keeps it.
+  - A connection test may reuse stored secrets only for a back-end the caller can edit, so a user cannot send
+    a shared back-end's password to a host of their choosing.
+  - A test writes, reads, lists, renames and deletes a file under `.async-check/`.
+- **Test servers:** `docker-compose.test.yml` runs SeaweedFS (S3 — MinIO no longer publishes Docker Hub
+  images), atmoz/sftp, Apache WebDAV and Samba. `scripts/test-backends-env.sh` exports the `ASYNC_TEST_*`
+  variables. Without them the remote tests are skipped.
+- **Known gap:** a back-end can be pointed at hosts on the server's private network (SSRF). That is fine for
+  self-hosting with trusted users; a multi-tenant deployment would need an allow-list.
+
+## Repository layout (M1, Backup and E2E folders)
+
+A self-contained, encrypted, deduplicated store (`src/ASync.Engine/Repository`). Everything needed to
+restore is on the back-end, so a repository survives losing the server and its database.
+
+```
+config               plaintext JSON: format version, id, chunker parameters
+keys/<id>            repository keys wrapped by a passphrase (PBKDF2-SHA256, 600k), recovery key or server key
+data/<xx>/<pack>     packs: encrypted blobs | encrypted header | header length (4 bytes LE); pack id = SHA-256
+index/<id>           encrypted: pack → blob entries (rebuildable from pack headers)
+snapshots/<id>       encrypted snapshot (id = Guid v7, time-sortable)
+locks/<id>           encrypted lock files: shared (backup, restore) or exclusive (prune); stale after 30 min
+```
+
+- **Keys:**
+  - Two 256-bit keys: the encryption key and the id key.
+  - Blob id = HMAC-SHA256(id key, plaintext), so stored data reveals no known-file hashes.
+  - Every object is version (1) | salt (16) | nonce (12) | AES-256-GCM ciphertext | tag (16). The key is
+    HKDF(encryption key, salt), so random nonces never repeat under one key.
+  - Whole objects are bound to their kind (associated data `async-object:<kind>`).
+- **Blobs:** a flag byte (raw or Brotli quality 3, kept only when at least 5% smaller), then encryption.
+  Packs are flushed at 16 MB, with data and tree blobs kept in separate packs.
+- **Chunking:** FastCDC with normalized chunking: min 512 KiB, average 1 MiB, max 8 MiB.
+  - The gear table is derived from SHA-256 of fixed text, and the 64-bit hash's top bits are used as the
+    mask.
+  - **Changing the table or the parameters changes every chunk id**, so treat them as part of the format.
+- **Trees:** one JSON blob per directory, with nodes sorted by name, so an unchanged directory produces the
+  same blob. Nodes store size, mtime (Unix ms), the Unix mode, and content blob ids or a subtree id.
+  Symlinks are stored and never followed.
+- **Backup** (`BackupRunner`):
+  - Takes a shared lock and reloads the index, to deduplicate against everything stored.
+  - With a parent snapshot, files with the same size and mtime are reused without being read.
+  - Unreadable files go into `Stats.Errors` (the first 100), and the previous version is kept if there was
+    one.
+  - Exclude patterns work like gitignore (`Glob`).
+  - Data is flushed before the snapshot is written.
+- **Restore** (`RestoreRunner`): optionally a sub-path only. Each file is written to a temp file and renamed,
+  with its mtime and mode restored. Files with the same size and mtime are skipped, so a restore can resume.
+  Names that could escape the target are rejected.
+- **Maintenance** (`RepositoryMaintenance`):
+  - `ForgetAsync(RetentionPolicy)` applies last, hourly, daily, weekly, monthly, yearly and within rules,
+    per source. It always keeps the newest snapshot.
+  - `PruneAsync` takes an exclusive lock. It deletes unused packs and repacks those more than 30% unused.
+    The order is crash-safe: new packs, new index, then delete old indexes, then delete old packs.
+  - `CheckAsync(readDataFraction)` verifies the structure and, for a sample of packs, every blob.
+- **Key files:** they can be added and removed, but never the last one. Changing a passphrase writes a new
+  key file and re-encrypts nothing.
+
+## Plain layout (M1, Mirror/TwoWay without E2E)
+
+`PlainStore` (`src/ASync.Engine/Plain`) keeps real files on the back-end, so a Nextcloud, SMB share or bucket
+still shows normal folders:
+
+```
+.async/versions/<path>~<stamp>     earlier versions (stamp = UTC time + random suffix, e.g. 20261111T120000123Z-3fa2)
+.async/trash/<stamp>/<path>        deleted files
+.async/incoming/<id>               uploads in progress; moved into place when complete
+```
+
+- `PutAsync` uploads to `incoming`, moves the old file to `versions`, then moves the new one into place.
+- Deletions go to the trash. Versions and trashed files can be restored, and the current file then becomes a
+  version.
+- `CleanUpAsync(versionsAge, trashAge, maxVersionsPerFile)` enforces retention and removes abandoned uploads.
 
 ## Sync protocol (M2)
 
@@ -287,7 +381,9 @@ wake-ups are missed.
 1. **M0 — scaffold (done, v0.1.0).** Solution, central packages, server with auth (local and OIDC), devices
    and provisioning (QR/enrollment code, device code, challenge sign-in, revocation), React UI (sign-in,
    devices, approval page, users), Docker, compose, CI, docs.
-2. **M1 — engine and storage:** `ASync.Engine`, the five storage adapters, back-end management in the UI.
+2. **M1 — engine and storage (done, v0.1.0).** `ASync.Engine` (repository and plain layouts, backup and
+   restore, retention, prune, check), the five storage back-ends with a conformance suite against real
+   servers, and back-end management (API and UI).
 3. **M2 — sync over the CLI:** the sync protocol and `async-cli` (enroll, Backup, Mirror, TwoWay). Folders,
    snapshot browsing and restore in the UI.
 4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
@@ -312,5 +408,11 @@ Open questions:
   tests pass `null!` for the context.
 - **Enums** serialize as strings in controllers (`JsonStringEnumConverter`); SignalR must match when it is
   added.
+- **Storage settings JSON:** each derived record's `Type` override needs its own `[JsonIgnore]`, or it
+  clashes with the `type` discriminator. Controllers set `AllowOutOfOrderMetadataProperties`.
+- **Engine JSON** goes through the source-generated `EngineJson` context, so it works with trimming and AOT
+  on iOS.
+- **SMB** always uses port 445 (SMBLibrary has no port option). The test Samba is reached on its container
+  IP.
 - **SPA:** `vite build` writes to `src/ASync.Api/wwwroot` (gitignored). The Docker image builds the UI
   itself.

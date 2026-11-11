@@ -46,6 +46,10 @@ public static class StorageBackendFactory
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
+            // S3 services often answer "Access Denied" for a bucket that does not exist: say what is wrong.
+            var s3 = (backend as PrefixedBackend)?.Inner as S3Backend ?? backend as S3Backend;
+            if (s3 is not null && await s3.BucketExistsAsync(ct) == false)
+                return new StorageTestResultDto(false, $"The bucket '{s3.Bucket}' does not exist. Create it with your storage provider first.", null, null);
             return new StorageTestResultDto(false, Describe(e), null, Fingerprint(backend));
         }
         finally

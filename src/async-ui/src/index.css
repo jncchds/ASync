@@ -140,6 +140,25 @@ pre.command {
 .divider { display: flex; align-items: center; gap: 0.75rem; color: var(--text-muted); font-size: 0.8rem; margin: 1rem 0; }
 .divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
 
+/* ── Storage ── */
+.type-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.6rem; margin-bottom: 1rem; }
+.type-option {
+  display: flex; flex-direction: column; gap: 0.2rem; text-align: left; padding: 0.7rem 0.8rem;
+  background: var(--input-bg); color: var(--text); border: 1px solid var(--border);
+}
+.type-option:hover { background: var(--accent-faint); color: var(--text); }
+.type-option.selected { border-color: var(--accent); background: var(--accent-faint); }
+.type-option span { font-size: 0.8rem; }
+.form-row .full { grid-column: 1 / -1; }
+.field-hint { display: block; font-size: 0.75rem; margin-top: 0.2rem; }
+.backend-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.backend { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+.backend-main { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+.backend-main code { font-size: 0.8rem; overflow-wrap: anywhere; }
+.backend-status span { font-size: 0.85rem; margin: 0; }
+.badge { font-size: 0.7rem; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); margin-left: 0.35rem; }
+.badge.shared { border-color: var(--accent); color: var(--accent); }
+
 @media (max-width: 640px) {
   .topbar { flex-wrap: wrap; gap: 0.5rem 1rem; padding: 0.6rem 1rem; }
   .topbar nav { order: 3; flex-basis: 100%; }

@@ -181,3 +181,40 @@ export const createUser = (username: string, password: string, isAdmin: boolean)
   api.post<AdminUser>('/users', { username, password, isAdmin }).then(r => r.data)
 export const setUserPassword = (id: number, newPassword: string) => api.put(`/users/${id}/password`, { newPassword })
 export const setUserRole = (id: number, isAdmin: boolean) => api.put<AdminUser>(`/users/${id}/role`, { isAdmin }).then(r => r.data)
+
+// ── Storage back-ends ─────────────────────────────────────────────────────────
+
+export type StorageType = 'Local' | 'S3' | 'WebDav' | 'Sftp' | 'Smb'
+
+/** Connection settings; `type` selects the shape. Secrets come back as null (see `secretsSet`). */
+export type StorageSettings = { type: StorageType } & Record<string, string | number | boolean | null | undefined>
+
+export interface StorageBackend {
+  id: number
+  name: string
+  type: StorageType
+  settings: StorageSettings
+  secretsSet: string[]
+  description: string
+  shared: boolean
+  canEdit: boolean
+  createdAt: string
+  lastCheckedAt: string | null
+  lastCheckOk: boolean | null
+  lastCheckError: string | null
+}
+
+export interface StorageOptions { localRoots: string[]; canCreateLocal: boolean; canCreateShared: boolean }
+
+export interface StorageTestResult { ok: boolean; error: string | null; latencyMs: number | null; hostKeyFingerprint: string | null }
+
+export interface SaveStorageBackend { name: string; settings: StorageSettings; shared: boolean }
+
+export const getStorageBackends = () => api.get<StorageBackend[]>('/storage-backends').then(r => r.data)
+export const getStorageOptions = () => api.get<StorageOptions>('/storage-backends/options').then(r => r.data)
+export const createStorageBackend = (req: SaveStorageBackend) => api.post<StorageBackend>('/storage-backends', req).then(r => r.data)
+export const updateStorageBackend = (id: number, req: SaveStorageBackend) => api.put<StorageBackend>(`/storage-backends/${id}`, req).then(r => r.data)
+export const deleteStorageBackend = (id: number) => api.delete(`/storage-backends/${id}`)
+export const testStorageSettings = (settings: StorageSettings, backendId?: number) =>
+  api.post<StorageTestResult>('/storage-backends/test', { settings, backendId }).then(r => r.data)
+export const testStorageBackend = (id: number) => api.post<StorageTestResult>(`/storage-backends/${id}/test`).then(r => r.data)

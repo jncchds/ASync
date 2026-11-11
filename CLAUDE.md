@@ -10,6 +10,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 dotnet build ASync.slnx
 dotnet test src/ASync.Tests/ASync.Tests.csproj
+
+# Remote storage back-end tests (skipped without the ASYNC_TEST_* variables):
+docker compose -f docker-compose.test.yml -p async-test up -d
+eval "$(scripts/test-backends-env.sh)" && dotnet test src/ASync.Tests/ASync.Tests.csproj
 ```
 
 ### Frontend (run from `src/async-ui/`)
@@ -33,6 +37,7 @@ dotnet ef migrations add <MigrationName> --project src/ASync.Infrastructure --st
 docker compose up -d --build                  # full stack: server on http://localhost:5100 + PostgreSQL
 docker compose up postgres -d                 # database only
 dotnet run scripts/smoke-devices.cs -- http://localhost:5100 admin admin-password   # end-to-end device checks
+dotnet run scripts/smoke-storage.cs -- http://localhost:5100 admin admin-password   # storage checks (needs the test containers for S3)
 ```
 
 ## Architecture (short)
@@ -40,6 +45,8 @@ dotnet run scripts/smoke-devices.cs -- http://localhost:5100 admin admin-passwor
 | Project | Purpose |
 |---|---|
 | `src/ASync.Contracts` | DTOs + enums shared by server and all clients. No dependencies. |
+| `src/ASync.Engine` | Sync engine shared by server and clients (BCL only): `IStorageBackend` + `LocalBackend`, FastCDC, crypto, repository format, backup/restore, maintenance, plain layout |
+| `src/ASync.Storage` | S3, WebDAV, SFTP, SMB back-ends + `StorageBackendFactory` (create, connection test) |
 | `src/ASync.Core` | Domain models, repository interfaces, pure logic (`Security/Codes`, `Security/DeviceKeys`) |
 | `src/ASync.Infrastructure` | EF Core `AppDbContext` (PostgreSQL), repositories, migrations, Data Protection key store |
 | `src/ASync.Api` | Controllers, `Auth/` (JWT, OIDC, secrets command), `Services/DeviceProvisioningService`, hosted services |
@@ -55,6 +62,10 @@ Key patterns:
   `Codes.HashSecret` for machine secrets.
 - **Controllers** follow abook's style: constructor-injected `_fields`, errors returned as
   `{ message }`, DTOs from `ASync.Contracts`.
+- **Engine format is permanent:** FastCDC parameters/gear table, blob ids, object layout and `EngineJson`
+  shapes are what existing repositories contain. Change them only with a new `RepositoryConfig.Version` and a
+  reader for the old one.
+- **New storage back-ends** implement `IStorageBackend` and add a subclass of `BackendConformanceTests`.
 - **Program.cs** registers everything by hand, grouped under `// ── Section ──` comments.
 
 ## Mandatory workflow rules

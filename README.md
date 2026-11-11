@@ -3,8 +3,8 @@
 Self-hosted sync and backup for all your devices: Windows, macOS, Linux, iOS and Android. One server, many
 users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud, SFTP or SMB.
 
-> **Status: early development (v0.1.0).** The server, accounts and device provisioning work. Syncing,
-> storage back-ends and the apps are next. See [AGENTS.md](AGENTS.md) for the design and roadmap.
+> **Status: early development (v0.1.0).** The server, accounts, device provisioning, storage back-ends and the
+> sync engine work. Syncing between devices (the CLI agent) and the apps are next. See [AGENTS.md](AGENTS.md) for the design and roadmap.
 
 ## What works today
 
@@ -20,6 +20,16 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   - Each device has its own key pair, and the private key never leaves the device (it is hardware-backed
     where the OS supports it).
   - Removing a device in the web UI cuts it off immediately.
+- **Storage:** each user adds where their data goes: S3-compatible (AWS, Backblaze B2, Cloudflare R2, Wasabi,
+  MinIO…), WebDAV/Nextcloud, SFTP or SMB.
+  - Admins can also add directories on the server itself and shared storage. Each user gets their own area
+    on shared storage.
+  - Connections are tested before saving.
+  - Passwords and keys are stored encrypted and never shown again.
+- **Sync engine** (used by the upcoming agent and apps):
+  - **Backups:** deduplicated, compressed, always encrypted snapshots, with retention rules, pruning and
+    integrity checks.
+  - **Mirror and two-way folders:** stored as normal files, with old versions and a trash.
 
 ## Run it
 
@@ -38,6 +48,7 @@ Open http://localhost:5100 and create the admin account. Settings are environmen
 | `Oidc__Authority`, `Oidc__ClientId`, `Oidc__ClientSecret` | Turn on single sign-on. Redirect URI: `{PublicUrl}/api/auth/oidc/callback`. |
 | `Oidc__DisplayName` | Text on the sign-in button. |
 | `Oidc__AutoCreateUsers` | `true` (default): a new SSO user gets an account on first sign-in. |
+| `Storage__LocalRoots` | Where admins may create back-ends on the server's own disk (default `/data`, the `async_data` volume). Comma-separated. |
 
 To move a generated signing key into the environment:
 

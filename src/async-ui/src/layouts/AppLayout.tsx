@@ -20,6 +20,7 @@ export default function AppLayout() {
         </div>
         <nav>
           <NavLink to="/devices">Devices</NavLink>
+          <NavLink to="/storage">Storage</NavLink>
           {user?.isAdmin && <NavLink to="/admin/users">Users</NavLink>}
         </nav>
         <div className="topbar-user">

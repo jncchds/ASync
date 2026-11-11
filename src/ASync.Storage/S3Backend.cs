@@ -54,6 +54,21 @@ public sealed class S3Backend : IStorageBackend
         catch (AmazonS3Exception e) when (e.ErrorCode is "BucketAlreadyOwnedByYou" or "BucketAlreadyExists") { }
     }
 
+    /// <summary>Null when it cannot tell (no permission to ask).</summary>
+    public async Task<bool?> BucketExistsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await Amazon.S3.Util.AmazonS3Util.DoesS3BucketExistV2Async(_client, _bucket);
+        }
+        catch (AmazonS3Exception)
+        {
+            return null;
+        }
+    }
+
+    public string Bucket => _bucket;
+
     private static string Key(string path) => StoragePath.Normalize(path);
 
     private static string DirPrefix(string directory)

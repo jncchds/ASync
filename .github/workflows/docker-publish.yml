@@ -27,8 +27,14 @@ jobs:
       - name: Build (warnings are errors)
         run: dotnet build ASync.slnx --configuration Release -warnaserror
 
+      # Real S3 (SeaweedFS), SFTP, WebDAV and Samba servers for the storage back-end conformance tests.
+      - name: Start storage test servers
+        run: docker compose -f docker-compose.test.yml -p async-test up -d
+
       - name: Run tests
-        run: dotnet test src/ASync.Tests/ASync.Tests.csproj --configuration Release --no-build
+        run: |
+          eval "$(scripts/test-backends-env.sh)"
+          dotnet test src/ASync.Tests/ASync.Tests.csproj --configuration Release --no-build
 
       # The Docker image build runs `vite build` only, which does not type-check.
       - name: Setup Node
