@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/node_modules/
+src/ASync.Api/wwwroot/
+.git/
+.claude/
+.vs/
+.vscode/
+*.user
+*.log

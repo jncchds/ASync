@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- DTOs and enums shared by the server and every client. Keep it free of dependencies. -->
+</Project>

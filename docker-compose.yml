@@ -1,0 +1,51 @@
+services:
+  async-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5100:8080"
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=async;Username=async;Password=async
+      - ASPNETCORE_ENVIRONMENT=Production
+      # ── Address devices use to reach this server (put into QR codes and approval links) ──
+      # Unset = the address the browser used. Set it when the server sits behind a reverse proxy.
+      # - PublicUrl=https://sync.example.com
+      # - TrustForwardedHeaders=true            # behind a reverse proxy: trust X-Forwarded-For/-Proto
+      # ── Sign-in (JWT) ─────────────────────────────────────────────────────────
+      # Key that signs access tokens: any random string of 32+ characters, e.g. `openssl rand -base64 48`.
+      # Unset = ASync generates one and keeps it in the database (with a warning). To move that key here:
+      #   docker compose exec async-server dotnet ASync.Api.dll secrets show
+      # - Jwt__SigningKey=
+      # - Jwt__AccessTokenMinutes=15            # lifetime of a browser access token
+      # - Jwt__DeviceAccessTokenMinutes=15      # lifetime of a device access token
+      # - Jwt__RefreshTokenDays=30              # how long a browser stays signed in without using ASync
+      # ── Single sign-on (OIDC, optional) ───────────────────────────────────────
+      # Redirect URI to register at the provider: {PublicUrl}/api/auth/oidc/callback
+      # - Oidc__Authority=https://auth.example.com/application/o/async/
+      # - Oidc__ClientId=
+      # - Oidc__ClientSecret=
+      # - Oidc__DisplayName=Authentik           # button text: "Sign in with …"
+      # - Oidc__AutoCreateUsers=true            # false = only accounts an admin linked can sign in
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: async
+      POSTGRES_USER: async
+      POSTGRES_PASSWORD: async
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U async -d async"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

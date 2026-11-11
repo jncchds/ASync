@@ -1,0 +1,37 @@
+# Build results
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+*.binlog
+
+# NuGet
+*.nupkg
+*.snupkg
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Node
+node_modules/
+src/ASync.Api/wwwroot/
+
+# Local developer overrides (machine-specific or secret config)
+docker-compose.override.yml
+appsettings.Local.json
+
+# Tests
+[Tt]est[Rr]esult*/
+
+# Claude Code worktrees and local settings
+.claude/worktrees/
+.claude/settings.local.json
+
+*~
