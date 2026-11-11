@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The sync engine shared by the server and every client (desktop, mobile, CLI): storage abstraction, chunking,
+    encryption, the repository format, backup/restore, retention, prune and check. Only BCL dependencies, so it
+    runs unchanged on iOS and Android.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="ASync.Tests" />
+  </ItemGroup>
+</Project>
