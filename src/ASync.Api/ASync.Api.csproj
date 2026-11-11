@@ -4,6 +4,7 @@
     <ProjectReference Include="..\ASync.Contracts\ASync.Contracts.csproj" />
     <ProjectReference Include="..\ASync.Core\ASync.Core.csproj" />
     <ProjectReference Include="..\ASync.Infrastructure\ASync.Infrastructure.csproj" />
+    <ProjectReference Include="..\ASync.Storage\ASync.Storage.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -16,6 +16,8 @@ WORKDIR /src
 COPY ASync.slnx Directory.Build.props Directory.Packages.props VERSION ./
 COPY src/ASync.Contracts/ASync.Contracts.csproj src/ASync.Contracts/
 COPY src/ASync.Core/ASync.Core.csproj src/ASync.Core/
+COPY src/ASync.Engine/ASync.Engine.csproj src/ASync.Engine/
+COPY src/ASync.Storage/ASync.Storage.csproj src/ASync.Storage/
 COPY src/ASync.Infrastructure/ASync.Infrastructure.csproj src/ASync.Infrastructure/
 COPY src/ASync.Api/ASync.Api.csproj src/ASync.Api/
 RUN dotnet restore src/ASync.Api/ASync.Api.csproj
@@ -34,6 +36,11 @@ COPY --from=api-build /app/publish ./
 # Copy React build output into wwwroot
 COPY --from=ui-build /ui/dist ./wwwroot
 
+# Local storage back-ends live under /data (Storage__LocalRoots); mount a volume or host directory there.
+RUN mkdir -p /data && chown app:app /data
+VOLUME /data
+# Run unprivileged (the .NET image's "app" user). Host directories mounted at /data must be writable by it (uid 1654).
+USER $APP_UID
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
 ENTRYPOINT ["dotnet", "ASync.Api.dll"]

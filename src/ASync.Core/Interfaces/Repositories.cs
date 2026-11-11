@@ -52,3 +52,14 @@ public interface IDeviceRepository
     /// <summary>Removes expired codes and finished device-code requests older than <paramref name="olderThan"/>.</summary>
     Task<int> DeleteStaleAsync(DateTime olderThan);
 }
+
+public interface IStorageBackendRepository
+{
+    /// <summary>The user's own back-ends plus the shared ones.</summary>
+    Task<List<StorageBackend>> GetVisibleAsync(int userId);
+    Task<List<StorageBackend>> GetAllAsync();
+    Task<StorageBackend?> GetAsync(int id);
+    Task<StorageBackend> AddAsync(StorageBackend backend);
+    Task UpdateAsync(StorageBackend backend);
+    Task DeleteAsync(StorageBackend backend);
+}

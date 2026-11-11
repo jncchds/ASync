@@ -43,6 +43,8 @@ builder.Services.AddScoped<IDeviceRepository, DeviceRepository>();
 builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddSingleton<PublicUrl>();
 builder.Services.AddScoped<DeviceProvisioningService>();
+builder.Services.AddScoped<IStorageBackendRepository, StorageBackendRepository>();
+builder.Services.AddScoped<StorageBackendService>();
 builder.Services.AddHostedService<CleanupService>();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -132,7 +134,12 @@ if (builder.Configuration.GetValue<bool>("TrustForwardedHeaders"))
 // ── API ───────────────────────────────────────────────────────────────────────
 // Enums travel as strings, in controllers and (from M2) SignalR alike.
 builder.Services.AddControllers()
-    .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
+    .AddJsonOptions(o =>
+    {
+        o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        // Polymorphic DTOs (storage settings) carry a "type" discriminator that need not come first.
+        o.JsonSerializerOptions.AllowOutOfOrderMetadataProperties = true;
+    });
 
 // ── Health (for container orchestration / uptime checks) ──────────────────────
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");

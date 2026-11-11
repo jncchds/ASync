@@ -35,7 +35,7 @@ public abstract record StorageSettings
 /// <summary>A directory on the server (a Docker volume or mount). Only admins can create these, under the allowed roots.</summary>
 public sealed record LocalStorageSettings(string Path) : StorageSettings
 {
-    public override StorageBackendType Type => StorageBackendType.Local;
+    [JsonIgnore] public override StorageBackendType Type => StorageBackendType.Local;
     public override string[] SetSecrets() => [];
     public override StorageSettings WithoutSecrets() => this;
     public override StorageSettings WithSecretsFrom(StorageSettings stored) => this;
@@ -50,7 +50,7 @@ public sealed record S3StorageSettings(
     string? Endpoint, string Region, string Bucket, string? Prefix, string AccessKeyId, string? SecretAccessKey, bool ForcePathStyle = true)
     : StorageSettings
 {
-    public override StorageBackendType Type => StorageBackendType.S3;
+    [JsonIgnore] public override StorageBackendType Type => StorageBackendType.S3;
     public override string[] SetSecrets() => SecretAccessKey is null ? [] : [nameof(SecretAccessKey)];
     public override StorageSettings WithoutSecrets() => this with { SecretAccessKey = null };
     public override StorageSettings WithSecretsFrom(StorageSettings stored) =>
@@ -61,7 +61,7 @@ public sealed record S3StorageSettings(
 /// <summary>A WebDAV folder, e.g. Nextcloud: <c>https://cloud.example.com/remote.php/dav/files/alice/ASync/</c>.</summary>
 public sealed record WebDavStorageSettings(string Url, string? Username, string? Password) : StorageSettings
 {
-    public override StorageBackendType Type => StorageBackendType.WebDav;
+    [JsonIgnore] public override StorageBackendType Type => StorageBackendType.WebDav;
     public override string[] SetSecrets() => Password is null ? [] : [nameof(Password)];
     public override StorageSettings WithoutSecrets() => this with { Password = null };
     public override StorageSettings WithSecretsFrom(StorageSettings stored) =>
@@ -77,7 +77,7 @@ public sealed record SftpStorageSettings(
     string Host, int Port, string Username, string? Password, string? PrivateKey, string? PrivateKeyPassphrase, string? Path,
     string? HostKeyFingerprint) : StorageSettings
 {
-    public override StorageBackendType Type => StorageBackendType.Sftp;
+    [JsonIgnore] public override StorageBackendType Type => StorageBackendType.Sftp;
     public override string[] SetSecrets() =>
         [.. new[] { (nameof(Password), Password), (nameof(PrivateKey), PrivateKey), (nameof(PrivateKeyPassphrase), PrivateKeyPassphrase) }
             .Where(p => p.Item2 is not null).Select(p => p.Item1)];
@@ -93,7 +93,7 @@ public sealed record SftpStorageSettings(
 public sealed record SmbStorageSettings(string Host, string Share, string? Path, string? Domain, string Username, string? Password)
     : StorageSettings
 {
-    public override StorageBackendType Type => StorageBackendType.Smb;
+    [JsonIgnore] public override StorageBackendType Type => StorageBackendType.Smb;
     public override string[] SetSecrets() => Password is null ? [] : [nameof(Password)];
     public override StorageSettings WithoutSecrets() => this with { Password = null };
     public override StorageSettings WithSecretsFrom(StorageSettings stored) =>

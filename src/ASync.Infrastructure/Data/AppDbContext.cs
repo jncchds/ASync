@@ -16,6 +16,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<EnrollmentToken> EnrollmentTokens => Set<EnrollmentToken>();
     public DbSet<PendingDeviceCode> PendingDeviceCodes => Set<PendingDeviceCode>();
+    public DbSet<StorageBackend> StorageBackends => Set<StorageBackend>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -48,6 +49,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(t => t.CodeHash).IsUnique();
             e.Property(t => t.Label).HasMaxLength(100);
             e.HasOne(t => t.User).WithMany().HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<StorageBackend>(e =>
+        {
+            e.Property(s => s.Name).HasMaxLength(100);
+            e.Property(s => s.Type).HasConversion<string>().HasMaxLength(20);
+            e.Property(s => s.LastCheckError).HasMaxLength(1000);
+            e.HasIndex(s => s.UserId);
+            e.HasOne(s => s.User).WithMany().HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<PendingDeviceCode>(e =>
