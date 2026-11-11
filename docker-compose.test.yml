@@ -1,0 +1,32 @@
+# Test servers for the storage back-end conformance tests (src/ASync.Tests/Storage).
+#   docker compose -f docker-compose.test.yml -p async-test up -d
+#   eval "$(scripts/test-backends-env.sh)"      # exports ASYNC_TEST_* for the running containers
+#   dotnet test src/ASync.Tests/ASync.Tests.csproj
+# Without the ASYNC_TEST_* variables those tests are skipped.
+services:
+  # S3-compatible server (MinIO no longer publishes images on Docker Hub). No identities configured = no auth.
+  s3:
+    image: chrislusf/seaweedfs:latest
+    command: server -s3 -dir=/data -s3.port=8333
+    ports:
+      - "19000:8333"
+
+  sftp:
+    image: atmoz/sftp:latest
+    command: test:test:1001:1001:upload
+    ports:
+      - "12222:22"
+
+  webdav:
+    image: bytemark/webdav:latest
+    environment:
+      AUTH_TYPE: Basic
+      USERNAME: test
+      PASSWORD: test
+    ports:
+      - "18081:80"
+
+  # SMBLibrary always connects to port 445, which is often taken on the host: tests use the container's IP.
+  samba:
+    image: dperson/samba:latest
+    command: -u "test;test" -s "share;/share;yes;no;no;test" -p

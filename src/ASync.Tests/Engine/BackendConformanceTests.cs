@@ -15,6 +15,9 @@ public abstract class BackendConformanceTests : IAsyncLifetime
     /// <summary>Null = not configured here; the tests then skip.</summary>
     protected abstract Task<IStorageBackend?> CreateAsync();
 
+    /// <summary>A fresh back-end for other tests (null when not configured).</summary>
+    public Task<IStorageBackend?> CreateForRepositoryAsync() => CreateAsync();
+
     public async Task InitializeAsync() => Backend = (await CreateAsync())!;
 
     public async Task DisposeAsync()

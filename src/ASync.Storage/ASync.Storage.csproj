@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Remote storage back-ends (S3, WebDAV, SFTP, SMB) behind ASync.Engine's IStorageBackend. -->
+  <ItemGroup>
+    <ProjectReference Include="..\ASync.Contracts\ASync.Contracts.csproj" />
+    <ProjectReference Include="..\ASync.Engine\ASync.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" />
+    <PackageReference Include="SSH.NET" />
+    <PackageReference Include="SMBLibrary" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ASync.Tests" />
+  </ItemGroup>
+</Project>
