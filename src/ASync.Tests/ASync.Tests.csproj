@@ -15,6 +15,7 @@
     <ProjectReference Include="..\ASync.Api\ASync.Api.csproj" />
     <ProjectReference Include="..\ASync.Engine\ASync.Engine.csproj" />
     <ProjectReference Include="..\ASync.Storage\ASync.Storage.csproj" />
+    <ProjectReference Include="..\ASync.Client.Core\ASync.Client.Core.csproj" />
   </ItemGroup>
 
 </Project>

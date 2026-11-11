@@ -89,7 +89,7 @@ public sealed class RepositoryKeys
         return subkey;
     }
 
-    internal byte[] Serialize()
+    public byte[] Serialize()
     {
         var bytes = new byte[KeySize * 2];
         EncryptionKey.CopyTo(bytes, 0);
@@ -97,7 +97,7 @@ public sealed class RepositoryKeys
         return bytes;
     }
 
-    internal static RepositoryKeys Deserialize(byte[] bytes) =>
+    public static RepositoryKeys Deserialize(byte[] bytes) =>
         bytes.Length == KeySize * 2
             ? new RepositoryKeys(bytes[..KeySize], bytes[KeySize..])
             : throw new CryptographicException("Malformed repository keys.");

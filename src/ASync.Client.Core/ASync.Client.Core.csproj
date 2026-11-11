@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Everything a device needs to sync, shared by the CLI agent and (later) the desktop and mobile apps:
+    identity, API client, the storage gateway client, sync and backup logic, and the agent loop.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\ASync.Contracts\ASync.Contracts.csproj" />
+    <ProjectReference Include="..\ASync.Engine\ASync.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ASync.Tests" />
+  </ItemGroup>
+</Project>

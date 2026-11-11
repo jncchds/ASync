@@ -71,13 +71,25 @@ public sealed class Repository
     public static Task<Repository> OpenAsync(IStorageBackend backend, byte[] serverKey, CancellationToken ct = default) =>
         OpenAsync(backend, kf => kf.Kind == KeyKind.Server ? kf.TryOpen(serverKey) : null, ct);
 
-    private static async Task<Repository> OpenAsync(IStorageBackend backend, Func<KeyFile, RepositoryKeys?> open, CancellationToken ct)
+    /// <summary>
+    /// Opens with keys unlocked earlier (a device keeps them so backups run unattended). Wrong keys show up as a
+    /// <see cref="CryptographicException"/> on the first read.
+    /// </summary>
+    public static async Task<Repository> OpenWithKeysAsync(IStorageBackend backend, RepositoryKeys keys, CancellationToken ct = default) =>
+        new(backend, await ReadConfigAsync(backend, ct), keys);
+
+    private static async Task<RepositoryConfig> ReadConfigAsync(IStorageBackend backend, CancellationToken ct)
     {
         var configBytes = await TryReadAsync(backend, "config", ct) ?? throw new InvalidOperationException("No repository here.");
         var config = JsonSerializer.Deserialize(configBytes, EngineJson.Default.RepositoryConfig)!;
         if (config.Version > RepositoryConfig.CurrentVersion)
             throw new InvalidOperationException($"The repository uses format {config.Version}; this version of ASync reads up to {RepositoryConfig.CurrentVersion}.");
+        return config;
+    }
 
+    private static async Task<Repository> OpenAsync(IStorageBackend backend, Func<KeyFile, RepositoryKeys?> open, CancellationToken ct)
+    {
+        var config = await ReadConfigAsync(backend, ct);
         foreach (var (_, keyFile) in await ListKeyFilesAsync(backend, ct))
             if (open(keyFile) is { } keys)
                 return new Repository(backend, config, keys);

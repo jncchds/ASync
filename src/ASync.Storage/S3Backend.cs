@@ -84,7 +84,9 @@ public sealed class S3Backend : IStorageBackend
         try
         {
             var meta = await _client.GetObjectMetadataAsync(_bucket, key, ct);
-            return new StorageEntry(key, false, meta.ContentLength, Mtime(meta.Metadata[MtimeMetadata]) ?? meta.LastModified);
+            // The same LastModified a listing shows: sync uses it as a change token, so stat and list must agree.
+            // (The original file time stays in x-amz-meta-mtime.)
+            return new StorageEntry(key, false, meta.ContentLength, meta.LastModified);
         }
         catch (AmazonS3Exception e) when (e.StatusCode == HttpStatusCode.NotFound)
         {
@@ -166,8 +168,6 @@ public sealed class S3Backend : IStorageBackend
         await _client.DeleteObjectAsync(_bucket, Key(from), ct);
     }
 
-    private static DateTimeOffset? Mtime(string? value) =>
-        long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms) ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : null;
 
     public ValueTask DisposeAsync()
     {
