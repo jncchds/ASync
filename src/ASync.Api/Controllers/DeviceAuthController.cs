@@ -48,10 +48,12 @@ public class DeviceAuthController : ControllerBase
         await _provisioning.PollAsync(req.DeviceCode) is { } status ? status : NotFound();
 
     [HttpPost("challenge")]
+    [EnableRateLimiting(RateLimits.DeviceSignIn)]
     public ActionResult<DeviceChallengeDto> Challenge([FromBody] DeviceChallengeRequest req) =>
         _provisioning.CreateChallenge(req.DeviceId);
 
     [HttpPost("token")]
+    [EnableRateLimiting(RateLimits.DeviceSignIn)]
     public async Task<ActionResult<DeviceTokenDto>> Token([FromBody] DeviceTokenRequest req) =>
         await _provisioning.SignInAsync(req) is { } token
             ? token

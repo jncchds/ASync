@@ -1,4 +1,5 @@
 using ASync.Api.Auth;
+using ASync.Api.Hubs;
 using ASync.Api.Services;
 using ASync.Contracts;
 using ASync.Core.Interfaces;
@@ -46,12 +47,13 @@ public class DevicesController : ControllerBase
     /// The row stays so the device list shows what happened; enrolling again creates a new device.
     /// </summary>
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Revoke(Guid id)
+    public async Task<IActionResult> Revoke(Guid id, [FromServices] DeviceConnections connections)
     {
         var device = await _devices.GetAsync(id);
         if (device is null || device.UserId != User.UserId()) return NotFound();
         device.RevokedAt ??= DateTime.UtcNow;
         await _devices.UpdateAsync(device);
+        connections.Abort(id); // its live-updates connection outlives the token check
         return NoContent();
     }
 

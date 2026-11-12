@@ -8,3 +8,4 @@ src/ASync.Api/wwwroot/
 .vscode/
 *.user
 *.log
+.worktrees/

@@ -53,7 +53,8 @@ public static class RepositoryAccess
 }
 
 /// <summary>One backup run of a Backup folder: snapshot the local folder, then forget snapshots per the retention policy.</summary>
-public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid deviceId)
+/// <param name="deviceName">Recorded as the snapshot's host name (what `snapshots` shows); default the machine name.</param>
+public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid deviceId, string? deviceName = null)
 {
     /// <summary>One device's backups of a folder form one source (retention applies per source).</summary>
     public string Source => deviceId.ToString("N");
@@ -68,6 +69,7 @@ public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid devi
         {
             Source = Source,
             DeviceId = deviceId.ToString(),
+            Hostname = deviceName,
             Excludes = folder.Excludes,
             Parent = parent,
         }, progress, ct);

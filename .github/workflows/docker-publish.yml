@@ -1,4 +1,4 @@
-name: Build and Publish Docker Image
+name: Build and Publish Docker Images
 
 on:
   push:
@@ -8,9 +8,6 @@ on:
       - 'v*'
   pull_request:
   workflow_dispatch:
-
-env:
-  IMAGE_NAME: async-server
 
 jobs:
   test:
@@ -51,13 +48,36 @@ jobs:
           npx tsc --noEmit -p tsconfig.app.json
           npx eslint .
 
+  # The real server stack (docker compose) with two async-cli agents plus one in the async-cli image: TwoWay, Mirror,
+  # Backup (Transport and end-to-end), live updates and revocation. See scripts/e2e-sync.cs.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: End-to-end sync test
+        run: scripts/e2e-sync.sh
+
   build-and-push:
-    needs: test
+    needs: [test, e2e]
     # Pull requests only run the tests; images are published from main and version tags.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      matrix:
+        include:
+          - image: async-server
+            dockerfile: Dockerfile
+          - image: async-cli
+            dockerfile: Dockerfile.cli
 
     steps:
       - name: Checkout
@@ -83,7 +103,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=${{ steps.version.outputs.value }}
@@ -95,9 +115,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

@@ -55,3 +55,27 @@
 - feat(docker): a `/data` volume for server-disk storage; the container runs as the unprivileged `app` user.
 - feat: `scripts/smoke-devices.cs` runs an end-to-end check of sign-in and every device flow against a
   running server; `scripts/smoke-storage.cs` does the same for storage management.
+- feat(docker): **async-cli image** (`Dockerfile.cli`, amd64 and arm64, published by CI next to
+  `async-server`). It enrolls from `ASYNC_SERVER`/`ASYNC_ENROLL_CODE` on first start, then runs `run`. Its
+  identity is kept in the `/config` volume. There is a commented-out example service in `docker-compose.yml`,
+  and `ASYNC_PORT` sets the server's host port.
+- test: **end-to-end sync test** (`scripts/e2e-sync.sh`, CI job `e2e`). It runs a throw-away server stack
+  with two CLI agents and one in Docker, and checks:
+  - TwoWay with conflicts and trash;
+  - Mirror both ways;
+  - Transport and end-to-end Backup with byte-identical restores;
+  - live updates in `run` mode;
+  - revocation.
+- fix(cli): every command signed in again. A few agents behind one address then hit the 30-a-minute sign-in
+  limit (429). The access token is now kept in `token.json`, and device sign-in has its own, higher per-IP
+  limit (240 a minute).
+- fix(sync): a removed device's running agent kept its live-updates connection and retried forever. The
+  server now closes the connection on revocation, and the agent stops with an explanation.
+- fix(cli): `sync --folder N` for a folder that isn't assigned to the device, or `sync` with no folders,
+  did nothing and still succeeded. It now says why and exits with code 1.
+- fix(cli): the agent crashed when it could not chmod a mounted `/config`. Errors with the config directory
+  are now one readable line.
+- fix(backup): snapshots record the device name instead of the machine name, which in Docker is a random
+  container id.
+- fix: `async-cli --version` and the app version devices report showed 1.0.0, the .NET default. They now
+  come from the `VERSION` file.

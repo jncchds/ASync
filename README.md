@@ -69,6 +69,64 @@ docker compose exec async-server dotnet ASync.Api.dll secrets show
 Always put the server behind HTTPS (a reverse proxy such as Caddy or Traefik) before devices connect over
 the internet.
 
+## Run an agent
+
+`async-cli` is the headless agent for servers, NAS boxes and other machines without a screen. It syncs and
+backs up the folders you assign to it in the web UI.
+
+### In Docker
+
+Make a code in *Devices → Add device* (a reusable one works for many agents), then:
+
+```bash
+docker run -d --name async-agent --restart unless-stopped \
+  -e ASYNC_SERVER=https://sync.example.com \
+  -e ASYNC_ENROLL_CODE=K7QD-M2XP-9RWA \
+  -e ASYNC_DEVICE_NAME=nas \
+  -v async-agent-config:/config \
+  -v /srv/photos:/data/photos \
+  <dockerhub-user>/async-cli:latest
+```
+
+On first start the agent enrolls itself; after that the code is no longer needed. Then attach folders to the
+device in the web UI, with local paths as the container sees them (`/data/photos`). The image is built from
+[Dockerfile.cli](Dockerfile.cli) for amd64 and arm64; there is a commented-out `async-cli` service in
+[docker-compose.yml](docker-compose.yml) as well.
+
+- **Keep the `/config` volume.** It holds the device's key, unlocked end-to-end keys and the sync state.
+  Without it the agent has to be enrolled again.
+- The agent runs as uid 1654. Mounted folders must be readable by it, and writable for TwoWay folders and
+  Mirror folders that download. Or run it as your own user with `--user $(id -u):$(id -g)`.
+
+### Without Docker
+
+Build it with the .NET 10 SDK (`dotnet publish src/ASync.Cli -c Release -o ~/async-cli`) and run
+`~/async-cli/async-cli`. Its identity lives in `~/.config/async`, or in `ASYNC_CONFIG_DIR`, or in `--config <dir>`.
+
+```bash
+async-cli enroll --server https://sync.example.com --code K7QD-M2XP-9RWA   # or without --code: approve a link
+async-cli run                                                                # keep syncing (Ctrl+C stops)
+```
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `enroll` | Adds this machine to your account: with `--code`, or by showing a link and code to approve in the web UI. |
+| `status`, `folders` | This device, and the folders assigned to it. |
+| `sync [--folder N]` | Syncs (or backs up) every folder, or one, once. |
+| `run` | Keeps syncing: on schedule, when files change, and as soon as another device changes a folder. The default in Docker. |
+| `set-path`, `pause`, `resume` | Changes this device's settings for a folder. |
+| `init-encryption --folder N` | Sets up an end-to-end encrypted Backup folder (on one device) and prints its recovery key. |
+| `unlock --folder N` | Unlocks an end-to-end encrypted folder on another device, with the passphrase or the recovery key. |
+| `snapshots`, `restore` | Lists a Backup folder's snapshots, and restores one (or `--path` a part of it) into `--target`. |
+| `forget` | Removes this device's identity from the machine. |
+
+Passphrases are read from `ASYNC_PASSPHRASE`, from `--passphrase-file`, or typed in. A sync that would delete
+more than half of a folder's files stops; run it with `--allow-mass-delete` if that is what you want. Removing
+the device in the web UI cuts it off at once: a running agent stops with an explanation.
+
 ## Development
 
 See [CLAUDE.md](CLAUDE.md) for commands and rules, and [AGENTS.md](AGENTS.md) for the architecture.
+`scripts/e2e-sync.sh` runs the end-to-end sync test: a throw-away server stack on port 5190 and real agents.

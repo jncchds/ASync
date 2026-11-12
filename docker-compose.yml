@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "5100:8080"
+      - "${ASYNC_PORT:-5100}:8080"              # ASYNC_PORT: host port (the end-to-end test uses another one)
     environment:
       - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=async;Username=async;Password=async
       - ASPNETCORE_ENVIRONMENT=Production
@@ -39,6 +39,26 @@ services:
       - "host.docker.internal:host-gateway"   # reach storage servers running on the Docker host
     restart: unless-stopped
 
+  # ── A headless agent (async-cli) next to the server, e.g. to back up this host's directories ──
+  # On first start it enrolls with ASYNC_ENROLL_CODE (Devices → Add device in the web UI; a reusable code works for
+  # many agents), then keeps its folders in sync. Attach folders to it in the web UI with local paths under /data.
+  # Its identity lives in /config: keep that volume, or the agent has to be enrolled again.
+  # async-cli:
+  #   build:                                  # or the published image: <dockerhub-user>/async-cli:latest
+  #     context: .
+  #     dockerfile: Dockerfile.cli
+  #   environment:
+  #     - ASYNC_SERVER=http://async-server:8080   # or the server's public https:// address
+  #     - ASYNC_ENROLL_CODE=K7QD-M2XP-9RWA        # only needed for the first start
+  #     - ASYNC_DEVICE_NAME=nas-agent
+  #     # - ASYNC_PASSPHRASE=…                    # only for `init-encryption`/`unlock` of end-to-end folders
+  #   volumes:
+  #     - async_cli_config:/config
+  #     - /srv/photos:/data/photos              # what to sync; writable by uid 1654 for TwoWay/Mirror Download
+  #   depends_on:
+  #     - async-server
+  #   restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -57,3 +77,4 @@ services:
 volumes:
   postgres_data:
   async_data:
+  # async_cli_config:

@@ -1,0 +1,37 @@
+# async-cli: the headless ASync agent. Enrolls from ASYNC_SERVER/ASYNC_ENROLL_CODE on first start, then keeps
+# its folders in sync (`async-cli run`). Its identity, keys and sync state live in /config: keep that volume.
+
+# ── Stage 1: Build ────────────────────────────────────────────────────────────
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG TARGETARCH
+WORKDIR /src
+
+# Copy solution and project files first (layer caching)
+COPY Directory.Build.props Directory.Packages.props VERSION ./
+COPY src/ASync.Contracts/ASync.Contracts.csproj src/ASync.Contracts/
+COPY src/ASync.Engine/ASync.Engine.csproj src/ASync.Engine/
+COPY src/ASync.Client.Core/ASync.Client.Core.csproj src/ASync.Client.Core/
+COPY src/ASync.Cli/ASync.Cli.csproj src/ASync.Cli/
+RUN dotnet restore src/ASync.Cli/ASync.Cli.csproj -a $TARGETARCH
+
+COPY src/ASync.Contracts/ src/ASync.Contracts/
+COPY src/ASync.Engine/ src/ASync.Engine/
+COPY src/ASync.Client.Core/ src/ASync.Client.Core/
+COPY src/ASync.Cli/ src/ASync.Cli/
+RUN dotnet publish src/ASync.Cli/ASync.Cli.csproj -c Release -a $TARGETARCH --self-contained false -o /app/publish --no-restore
+
+# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /app/publish ./
+RUN ln -s /app/async-cli /usr/local/bin/async-cli \
+    && mkdir -p /config /data && chown app:app /config /data
+
+# Identity (device key), unlocked end-to-end keys and sync state. Folders' local paths are usually under /data.
+ENV ASYNC_CONFIG_DIR=/config
+VOLUME /config
+# Run unprivileged (the .NET image's "app" user, uid 1654). Mounted folders must be readable (and, for
+# TwoWay or Mirror Download, writable) by it.
+USER $APP_UID
+ENTRYPOINT ["async-cli"]
+CMD ["run"]

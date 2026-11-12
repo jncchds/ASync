@@ -31,15 +31,25 @@ Command Define(string name, string description, Func<CliContext, ParseResult, Ca
     foreach (var o in options) command.Options.Add(o);
     command.SetAction(async (parse, ct) =>
     {
-        using var ctx = new CliContext(parse.GetValue(configOption)!, parse.GetValue(verboseOption));
+        CliContext? ctx = null;
         try
         {
+            ctx = new CliContext(parse.GetValue(configOption)!, parse.GetValue(verboseOption));
             return await run(ctx, parse, ct);
+        }
+        catch (UnauthorizedAccessException e) when (ctx is null)
+        {
+            Console.Error.WriteLine($"error: cannot use the config directory: {e.Message} (it must be writable by this user)");
+            return 1;
         }
         catch (Exception e) when (e is CliException or ApiException or SyncRefusedException or HttpRequestException or WrongKeyException)
         {
             Console.Error.WriteLine($"error: {e.Message}");
             return 1;
+        }
+        finally
+        {
+            ctx?.Dispose();
         }
     });
     root.Subcommands.Add(command);
@@ -130,8 +140,13 @@ Define("sync", "Sync (or back up) folders once, now.", async (ctx, p, ct) =>
 {
     await using var agent = new SyncAgent(ctx.Api, ctx.Store, ctx.Loggers.CreateLogger("sync")) { AllowMassDeletion = p.GetValue(massDeleteOption) };
     var only = p.GetValue(optionalFolderOption);
+    var folders = (await ctx.Api.GetFoldersAsync(ct)).Where(f => only is null || f.FolderId == only).ToList();
+    if (folders.Count == 0)
+        throw new CliException(only is null
+            ? "No folders yet: assign some to this device in the web UI."
+            : $"Folder {only} is not assigned to this device. `async-cli folders` lists the ones that are.");
     var failed = 0;
-    foreach (var folder in (await ctx.Api.GetFoldersAsync(ct)).Where(f => only is null || f.FolderId == only))
+    foreach (var folder in folders)
     {
         Console.WriteLine($"{folder.Name}…");
         var result = await agent.RunFolderAsync(folder, ct);
