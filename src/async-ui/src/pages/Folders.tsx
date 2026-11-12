@@ -102,22 +102,27 @@ export default function Folders() {
       {folders === null ? <div className="loading">Loading…</div> : folders.length === 0 ? (
         <p className="empty">No folders yet. Add one, then attach the devices that should sync it.</p>
       ) : (
-        <div className="backend-list section">
+        <div className="card-list section">
           {folders.map(f => {
             const browsable = f.mode === 'Backup' && f.encryption === 'Transport' && f.repositoryReady
             return (
               <div key={f.id} className="card folder">
-                <div className="backend">
-                  <div className="backend-main">
-                    <div>
+                <div className="item-head">
+                  <div className="item-main">
+                    <div className="item-title">
                       <strong>{f.name}</strong>
-                      <span className="badge">{modeLabel(f.mode)}</span>
-                      {f.kind !== 'Files' && <span className="badge">{kindLabel(f.kind)}</span>}
-                      {f.encryption === 'EndToEnd' && <span className="badge shared">End-to-end encrypted</span>}
+                      <span className="pill pill-accent">{modeLabel(f.mode)}</span>
+                      {f.kind !== 'Files' && <span className="pill">{kindLabel(f.kind)}</span>}
+                      {f.mode === 'Backup' && (f.encryption === 'EndToEnd'
+                        ? <span className="pill pill-success" title="Only your devices can read these backups">🔒 End-to-end</span>
+                        : <span className="pill" title="Encrypted in transit and at rest; the server can show and restore files">Standard encryption</span>)}
                     </div>
-                    <span className="muted small-text">
-                      {f.storageBackendName} · <code>{f.rootPath}</code> · every {formatMinutes(f.intervalMinutes)} · folder #{f.id}
-                    </span>
+                    <div className="item-meta">
+                      <span>{f.storageBackendName}</span>
+                      <code>{f.rootPath}</code>
+                      <span>every {formatMinutes(f.intervalMinutes)}</span>
+                      <span>folder #{f.id}</span>
+                    </div>
                     {f.excludes.length > 0 && <span className="muted small-text">Excludes: {f.excludes.join(', ')}</span>}
                   </div>
                   <div className="row-actions">
@@ -146,29 +151,40 @@ export default function Folders() {
                   {f.devices.length === 0 ? (
                     <p className="muted small-text">No devices yet: nothing syncs until you add one.</p>
                   ) : (
-                    <table>
-                      <thead><tr><th>Device</th><th>Folder on the device</th>{f.mode === 'Mirror' && <th>Direction</th>}<th>Last sync</th><th></th></tr></thead>
-                      <tbody>
-                        {f.devices.map(d => (
-                          <tr key={d.deviceId}>
-                            <td>{d.deviceName}{d.paused && <span className="badge">Paused</span>}</td>
-                            <td><code>{d.localPath}</code></td>
-                            {f.mode === 'Mirror' && <td>{d.direction === 'Download' ? 'Download' : 'Upload'}</td>}
-                            <td className="status-cell">
-                              {d.lastSyncAt === null ? <span className="muted">Never</span> : (
-                                <span className={d.lastSyncOk ? 'success-text' : 'error-text'} title={`${formatDate(d.lastSyncAt)}${d.lastSyncMessage ? `\n${d.lastSyncMessage}` : ''}`}>
-                                  ● {relativeTime(d.lastSyncAt)}{d.lastSyncMessage && <span className="muted"> · {d.lastSyncMessage}</span>}
-                                </span>
+                    <div className="table-wrap inset">
+                      <table className="stack">
+                        <thead><tr><th>Device</th><th>Folder on the device</th>{f.mode === 'Mirror' && <th>Direction</th>}<th>Last sync</th><th></th></tr></thead>
+                        <tbody>
+                          {f.devices.map(d => (
+                            <tr key={d.deviceId}>
+                              <td className="title-cell">
+                                <span>{d.deviceName}{d.paused && <> <span className="pill pill-warning">Paused</span></>}</span>
+                              </td>
+                              <td data-label="Folder" className="wrap"><code title={d.localPath}>{d.localPath}</code></td>
+                              {f.mode === 'Mirror' && (
+                                <td data-label="Direction" className="nowrap"><span className="pill">{d.direction === 'Download' ? '⬇ Download' : '⬆ Upload'}</span></td>
                               )}
-                            </td>
-                            <td className="row-actions">
-                              <button className="secondary small" onClick={() => setDeviceEdit({ folderId: f.id, deviceId: d.deviceId })}>Edit</button>
-                              <button className="danger small" onClick={() => detach(f, d)}>Remove</button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                              <td data-label="Last sync" className="wrap">
+                                {d.lastSyncAt === null ? <span className="muted">Never</span> : (
+                                  <span title={`${formatDate(d.lastSyncAt)}${d.lastSyncMessage ? `\n${d.lastSyncMessage}` : ''}`}>
+                                    <span className={`status-line ${d.lastSyncOk ? 'success-text' : 'error-text'}`}>
+                                      <span className="dot">●</span>{relativeTime(d.lastSyncAt)}
+                                    </span>
+                                    {d.lastSyncMessage && <span className="status-msg">{d.lastSyncMessage}</span>}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="actions-cell">
+                                <div className="row-actions">
+                                  <button className="secondary small" onClick={() => setDeviceEdit({ folderId: f.id, deviceId: d.deviceId })}>Edit</button>
+                                  <button className="danger small" onClick={() => detach(f, d)}>Remove</button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                   {deviceEdit?.folderId === f.id ? (
                     <FolderDeviceForm

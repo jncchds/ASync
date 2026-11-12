@@ -41,7 +41,11 @@ export default function Login() {
   return (
     <div className="login-page">
       <div className="login-card card">
-        <h1><img src="/favicon.svg" alt="" width={32} height={32} /> ASync</h1>
+        <div className="login-brand">
+          <img src="/favicon.svg" alt="" width={36} height={36} />
+          <h1>ASync</h1>
+          <span className="version-pill">v{__APP_VERSION__}</span>
+        </div>
         <h2>{needsSetup ? 'Create the admin account' : 'Sign in'}</h2>
         {needsSetup && <p className="hint">No accounts yet. The first account becomes admin.</p>}
         <form onSubmit={handleSubmit}>

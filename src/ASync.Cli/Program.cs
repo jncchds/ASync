@@ -224,12 +224,12 @@ Define("snapshots", "List a Backup folder's snapshots.", async (ctx, p, ct) =>
     var snapshots = await repo.ListSnapshotsAsync(ct);
     if (snapshots.Count == 0) Console.WriteLine("No snapshots yet.");
     foreach (var s in snapshots)
-        Console.WriteLine($"  {s.Id[..12]}  {s.Time.ToLocalTime():yyyy-MM-dd HH:mm}  {s.Hostname,-16} {s.Stats.FilesNew + s.Stats.FilesChanged + s.Stats.FilesUnmodified} files" +
+        Console.WriteLine($"  {Repository.ShortSnapshotId(s.Id)}  {s.Time.ToLocalTime():yyyy-MM-dd HH:mm}  {s.Hostname,-16} {s.Stats.FilesNew + s.Stats.FilesChanged + s.Stats.FilesUnmodified} files" +
                           $"{(s.Source == ctx.Identity.DeviceId.ToString("N") ? "  (this device)" : "")}");
     return 0;
 }, folderOption);
 
-var snapshotOption = new Option<string>("--snapshot") { Description = "Snapshot id (or a prefix), or `latest` (this device's newest).", DefaultValueFactory = _ => "latest" };
+var snapshotOption = new Option<string>("--snapshot") { Description = "Snapshot id (its start, or its last digits as `snapshots` shows them), or `latest` (this device's newest).", DefaultValueFactory = _ => "latest" };
 var targetOption = new Option<string>("--target", "-t") { Description = "Directory to restore into.", Required = true };
 var subPathOption = new Option<string?>("--path") { Description = "Only this file or directory of the snapshot." };
 Define("restore", "Restore a snapshot (or part of it) into a directory.", async (ctx, p, ct) =>
@@ -238,10 +238,16 @@ Define("restore", "Restore a snapshot (or part of it) into a directory.", async 
     var repo = await RepositoryAccess.OpenAsync(ctx.Api, ctx.Store, folder, new RemoteStorageBackend(ctx.Api, folder.FolderId), ct);
     var snapshots = await repo.ListSnapshotsAsync(ct);
     var wanted = p.GetValue(snapshotOption)!;
-    var snapshot = wanted == "latest"
-        ? snapshots.LastOrDefault(s => s.Source == ctx.Identity.DeviceId.ToString("N")) ?? snapshots.LastOrDefault()
-        : snapshots.SingleOrDefault(s => s.Id.StartsWith(wanted, StringComparison.OrdinalIgnoreCase));
-    if (snapshot is null) throw new CliException(wanted == "latest" ? "There are no snapshots yet." : $"No single snapshot matches {wanted}.");
+    Snapshot? snapshot;
+    if (wanted == "latest")
+        snapshot = snapshots.LastOrDefault(s => s.Source == ctx.Identity.DeviceId.ToString("N")) ?? snapshots.LastOrDefault();
+    else
+    {
+        var matches = Repository.FindSnapshots(snapshots, wanted);
+        if (matches.Count > 1) throw new CliException($"{matches.Count} snapshots match {wanted}; give more digits.");
+        snapshot = matches.SingleOrDefault();
+    }
+    if (snapshot is null) throw new CliException(wanted == "latest" ? "There are no snapshots yet." : $"No snapshot matches {wanted}.");
 
     var result = await new RestoreRunner(repo).RunAsync(snapshot, p.GetValue(targetOption)!, new RestoreOptions { SubPath = p.GetValue(subPathOption) ?? "" }, ct);
     Console.WriteLine($"Restored {result.FilesRestored} files ({result.BytesRestored:N0} bytes) from {snapshot.Time.ToLocalTime():yyyy-MM-dd HH:mm}" +

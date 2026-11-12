@@ -67,7 +67,7 @@ public sealed class SyncAgent : IAsyncDisposable
                 var repo = await RepositoryAccess.OpenAsync(_api, _store, folder, backend, ct);
                 var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName).RunAsync(ct: ct);
                 var s = snapshot.Stats;
-                var message = $"Snapshot {snapshot.Id[..8]}: {s.FilesNew} new, {s.FilesChanged} changed, {s.FilesUnmodified} unchanged, " +
+                var message = $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: {s.FilesNew} new, {s.FilesChanged} changed, {s.FilesUnmodified} unchanged, " +
                               $"{Size(s.BytesAdded)} added{(forgotten > 0 ? $", {forgotten} old snapshots forgotten" : "")}" +
                               (s.Errors.Count > 0 ? $", {s.Errors.Count} unreadable: {s.Errors[0]}" : "");
                 outcome = new FolderRunResult(folder.FolderId, folder.Name, s.Errors.Count == 0, message);

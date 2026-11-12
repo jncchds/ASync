@@ -1,5 +1,19 @@
 # Release notes
 
+## v0.1.3 — 2026-11-12
+
+- feat(ui): **New look, in the family style**: a collapsible sidebar (Folders, Devices, Storage, Users) with the
+  version, your name, sign-out and a light/dark/system theme switch; flat cards, pills for mode, encryption,
+  sharing and status, and the Inter font. ASync's own palette: deep plum with a fuchsia accent at night,
+  lilac-white by day. Every colour comes from CSS tokens.
+- fix(ui): **Long paths and error messages no longer stretch the Folders page** past the window; tables stay
+  inside their cards and wrap long values.
+- fix(ui): **Every page fits a phone screen** (390 px): the sidebar becomes an icon rail with a drawer, and table
+  rows turn into small labelled cards.
+- fix: **Snapshot ids are shown by their last 8 digits** (in sync messages, `async-cli snapshots` and the
+  snapshot browser). The first digits are a timestamp, so snapshots made within a minute looked identical.
+  `async-cli restore --snapshot` accepts the start or the end of an id, and says when it matches several.
+
 ## v0.1.2 — 2026-11-12
 
 - ci: **Docker images are published only for version tags** (`v<VERSION>`; a mismatched tag fails), no longer on

@@ -45,21 +45,29 @@ export default function AdminUsers() {
 
       {users === null ? <div className="loading">Loading…</div> : (
         <div className="table-wrap">
-          <table>
+          <table className="stack">
             <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Sign-in</th><th>Created</th><th></th></tr></thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.id}>
-                  <td>{u.username}</td>
-                  <td>{u.displayName}</td>
-                  <td>{u.isAdmin ? 'Admin' : 'User'}</td>
-                  <td className="muted">{[u.hasPassword && 'Password', u.hasOidc && 'SSO'].filter(Boolean).join(' + ') || '—'}</td>
-                  <td className="muted">{formatDate(u.createdAt)}</td>
-                  <td className="row-actions">
-                    <button className="secondary small" onClick={() => resetPassword(u)}>Set password</button>
-                    {u.id !== me?.id && (
-                      <button className="secondary small" onClick={() => toggleAdmin(u)}>{u.isAdmin ? 'Make user' : 'Make admin'}</button>
-                    )}
+                  <td className="title-cell"><span>{u.username}{u.id === me?.id && <span className="muted"> (you)</span>}</span></td>
+                  <td data-label="Name"><span>{u.displayName}</span></td>
+                  <td data-label="Role"><span className={`pill${u.isAdmin ? ' pill-accent' : ''}`}>{u.isAdmin ? 'Admin' : 'User'}</span></td>
+                  <td data-label="Sign-in">
+                    <span className="pills">
+                      {u.hasPassword && <span className="pill">Password</span>}
+                      {u.hasOidc && <span className="pill">SSO</span>}
+                      {!u.hasPassword && !u.hasOidc && <span className="muted">—</span>}
+                    </span>
+                  </td>
+                  <td data-label="Created" className="muted nowrap"><span>{formatDate(u.createdAt)}</span></td>
+                  <td className="actions-cell">
+                    <div className="row-actions">
+                      <button className="secondary small" onClick={() => resetPassword(u)}>Set password</button>
+                      {u.id !== me?.id && (
+                        <button className="secondary small" onClick={() => toggleAdmin(u)}>{u.isAdmin ? 'Make user' : 'Make admin'}</button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

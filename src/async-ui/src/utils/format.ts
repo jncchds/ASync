@@ -41,3 +41,9 @@ export function formatMinutes(minutes: number): string {
   const h = Math.floor(minutes / 60), m = minutes % 60
   return m === 0 ? `${h} h` : `${h} h ${m} min`
 }
+
+/**
+ * The last 8 hex digits of a snapshot id, as the CLI and sync messages show them. Ids are Guid v7: the leading
+ * digits are a timestamp shared by snapshots made around the same time, the trailing ones are random.
+ */
+export const shortSnapshotId = (id: string) => id.replace(/-/g, '').slice(-8)

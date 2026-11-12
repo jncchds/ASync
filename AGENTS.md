@@ -350,6 +350,31 @@ parent. After each run, snapshots are forgotten per the folder's retention. Prun
 
 The apps will keep the same data in the OS keystore.
 
+## Web UI style
+
+The UI belongs to the owner's app family (abook, nopds, …): same layout and components, its own palette.
+- **Shell:** `layouts/AppLayout.tsx` + `components/Sidebar.tsx`, after abook's sidebar. Top: ☰ toggle, app name,
+  version pill (`__APP_VERSION__`). Middle: emoji `NavLink`s (Folders, Devices, Storage, Users for admins).
+  Bottom: the user's name, sign-out, and the theme switch (light → dark → system). Collapsed it is a 48 px icon
+  rail. Under 768 px it starts collapsed and the expanded sidebar is an overlay drawer with a backdrop. The
+  document never scrolls: `.app-main` does, so nothing can widen the page.
+- **Tokens** (`src/index.css`, nopds's names in plain CSS): `--bg --surface --surface-2 --border --text
+  --text-muted --input-bg --accent --accent-hover --accent-contrast --accent-faint --accent-soft --success
+  --warning --danger`, plus derived `--*-faint`/`--*-line` (`color-mix`) and `--qr-*`, `--shadow`. Light values on
+  `:root`, dark on `:root[data-theme="dark"]` (repeated under `prefers-color-scheme` for before the script runs).
+  `hooks/useTheme.ts` sets `data-theme` (`applyTheme()` runs in `main.tsx` before the first render) and keeps
+  the choice in `localStorage` (`theme`, `sidebarCollapsed`), always inside try/catch.
+- **Palette:** dark: deep plum surfaces (`#130c17` / `#1d1323`), accent fuchsia `#c026d3`, hover `#d946ef`.
+  Light: lilac-white (`#faf5fb` / `#ffffff`), accent `#a21caf`. Siblings' palettes (indigo, sky, teal, orange,
+  green, walnut, gold) are taken. Components never hard-code colours; new UI uses the tokens.
+- **Patterns:** flat `.card`s; `.pill` + `pill-accent|success|warning|danger` for badges; buttons (primary,
+  `.secondary`, `.danger`, `.small`, `.link`). Tables sit in `.table-wrap` (scrolls inside the card if still
+  too wide); long values use `td.wrap`. `table.stack` + `data-label` on cells turns rows into labelled cards
+  below 700 px. Every page must fit 390 px with no horizontal scroll.
+- **Snapshot ids** are Guid v7 (`Repository.NewSnapshotId`): the leading digits are a timestamp. People see the
+  last 8 hex digits (`Repository.ShortSnapshotId`, `shortSnapshotId` in the UI); `Repository.FindSnapshots`
+  matches a prefix or a suffix.
+
 ## Web UI: folders and snapshot browsing (M2)
 
 **Folders page** (`src/async-ui/src/pages/Folders.tsx`, the default page after sign-in):
