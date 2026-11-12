@@ -32,6 +32,15 @@
   - Connection tests that clearly explain a missing S3 bucket.
   - A Storage page in the web UI.
   - Migration `StorageBackends`.
+- feat(sync): **Syncing**:
+  - Folders (Backup, Mirror, TwoWay) on any storage back-end, with devices attached by local path.
+  - A storage gateway so devices run the engine themselves.
+  - Leases, and live SignalR events.
+  - Three-way TwoWay sync with conflict copies and deletion safety guards.
+  - Backups with retention, including end-to-end encrypted ones (passphrase and recovery key).
+  - Migration `Folders`.
+- feat(cli): **async-cli**: `enroll` (code or approval link), `status`, `folders`, `sync`, `run` (daemon),
+  `set-path`, `pause`/`resume`, `init-encryption`, `unlock`, `snapshots`, `restore`, `forget`.
 - feat(docker): a `/data` volume for server-disk storage; the container runs as the unprivileged `app` user.
 - feat: `scripts/smoke-devices.cs` runs an end-to-end check of sign-in and every device flow against a
   running server; `scripts/smoke-storage.cs` does the same for storage management.

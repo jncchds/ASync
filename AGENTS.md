@@ -58,8 +58,9 @@ src/
   ASync.Api/              Controllers/, Auth/, Services/, HostedServices/, Program.cs; wwwroot/ = built SPA
   async-ui/               React 19 + Vite 8 + TS: axios api.ts, react-router 7, one index.css
   ASync.Tests/            xUnit, hand-written fakes
-  ASync.Client.Core/      (later) client agent: local SQLite state, scanner/watcher, scheduler, API client
-  ASync.Cli/              (later) headless agent + admin CLI (System.CommandLine), Docker image async-cli
+  ASync.Client.Core/      device side: identity/store, API client, RemoteStorageBackend, FolderSyncer, BackupJob, SyncAgent
+  ASync.Cli/              async-cli (System.CommandLine): enroll, status, folders, sync, run, set-path, pause/resume,
+                          init-encryption, unlock, snapshots, restore, forget
   ASync.App/              (later) Avalonia shared UI (CommunityToolkit.Mvvm)
   ASync.App.Desktop/      (later) Win/Linux/macOS head: tray + background service host
   ASync.App.iOS/          (later) PhotoKit, Contacts, EventKit, BGTaskScheduler, APNs, background URLSession
@@ -267,25 +268,84 @@ still shows normal folders:
   version.
 - `CleanUpAsync(versionsAge, trashAge, maxVersionsPerFile)` enforces retention and removes abandoned uploads.
 
-## Sync protocol (M2)
+## Sync (M2)
 
-- REST under `/api/sync/...` carries data. The SignalR hub `/hubs/sync` only sends notifications, in abook's
-  numbered-event style: config changed, remote change, job progress.
-- **Change detection:** a FileSystemWatcher plus a periodic full scan. A (size, mtime, inode) cache in local
-  SQLite means only changed files are hashed.
-- **Upload:**
-  1. Files are cut into FastCDC chunks of about 1 MiB.
-  2. The device asks which chunks are missing: `POST /chunks/missing`.
-  3. It uploads only those, with resumable PUTs.
-  4. It commits a manifest. For Transport-encrypted folders with the plain layout, the server reassembles the
-     files onto the back-end.
-- **TwoWay sync:** each file has a version vector. Of two concurrent changes, one is kept as
-  `name (conflict <device> <date>).ext`. Deletions are tombstones kept for N days.
-- **Configuration:**
-  - The server holds the desired state; each Folder has a `Revision`.
-  - Clients pull it on connect and when `config.changed` arrives.
-  - Edits are `PATCH` requests with `If-Match: <revision>`. On a 409 the client shows the server's version.
-  - Device-specific settings live in FolderDevice, and only that device may change them.
+**The server is a storage gateway.** Devices run the sync engine themselves, against `RemoteStorageBackend`
+(`src/ASync.Client.Core`). That class speaks `IStorageBackend` over `/api/sync/folders/{id}/storage`
+(`FolderStorageController`). The server checks that the device belongs to the folder and forwards each call to
+the folder's root on its back-end, inside the owner's area when the back-end is shared. As a result:
+- the engine is identical everywhere;
+- end-to-end encryption happens on the device;
+- storage credentials never leave the server.
+
+**Gateway details:**
+- **Endpoints:** stat, list, ranged GET, PUT (`mtime` query parameter), DELETE and move.
+- **Errors:** a 404 with `X-Storage-Error: not-found` maps back to `StorageNotFoundException`, a 400 to
+  `ArgumentException`, and a 502 to `IOException`.
+- **Uploads** are buffered (in memory up to 32 MB, otherwise in a temp file), because S3 needs the length up
+  front.
+- **Connections** are reused per folder (`FolderBackendCache`, closed after 3 idle minutes) and replaced when
+  the back-end changes.
+
+**Server model** (`FolderService`, `/api/folders` for people, `/api/sync/folders` for devices):
+- **Folder:** Mode, Encryption, Kind, back-end and RootPath are fixed after creation. Interval, excludes,
+  retention and versions/trash days can be edited. A `Revision` grows with every change.
+- **FolderDevice:** LocalPath, Direction (Mirror only), Paused and the last result. A device edits its own row
+  with `PATCH /api/sync/folders/{id}`, and both kinds of edit may send `ExpectedRevision`; a mismatch gives a
+  409.
+- **Rules:**
+  - Folder roots never overlap on one back-end.
+  - End-to-end encryption, and the Photos, Contacts and Calendars kinds, are Backup-only for now.
+  - A back-end that holds folders cannot be deleted.
+- **Transport Backup repositories** are created at folder creation with a random server key, kept protected
+  in `Folder.ProtectedRepositoryKey`. Devices fetch it from `GET .../repository-key`.
+- **End-to-end Backup repositories** are created by the first device with `async-cli init-encryption`, using
+  a passphrase plus a printed recovery key. The device then calls `POST .../repository-ready`. Other devices
+  run `unlock`. Unlocked keys are kept on each device so backups run unattended.
+- **Leases** (`FolderLeaseService`, in memory, 2 minutes, renewed every 45 seconds) give one device at a time
+  the right to reconcile a Mirror or TwoWay folder.
+- **Live events:** SignalR `/hubs/sync` sends `SyncEvent {seq, name, args}` on the method `event`, only
+  through `ISyncNotifier`. Devices join `device:<id>` and people join `user:<id>`. The events are
+  `config.changed`, `folder.changed` (folderId, originDeviceId) and `folder.status`.
+
+**Mirror and TwoWay** (`FolderSyncer`):
+- It compares, file by file, the local file, the remote listing, and both as they were after the last sync
+  (`SyncState`, `sync-state.json` in the device's state directory). The remote size and LastModified are only
+  change tokens. That is why the S3 `Stat` and listing report the same LastModified.
+- **TwoWay:**
+  - A change on one side is copied to the other.
+  - Changes to the same file on both sides keep the remote version under the original name, and the local
+    version as `name (conflict <device> <date>).ext`.
+  - An edit wins over a deletion.
+  - A file that already exists on both sides with the same size and content is adopted without a transfer.
+- **Mirror Upload and Download:** one side is made equal to the other.
+- **Safety:**
+  - Nothing runs when the local folder is missing (an unmounted disk).
+  - More than half of the known files (and over 10) deleted in one run → `SyncRefusedException`, unless
+    `--allow-mass-delete`.
+  - Local deletions go to `<folder>/.async/trash`; remote ones to the plain layout's trash and versions.
+  - Clean-up runs once a day.
+- Only files are synced. Empty directories and symlinks are not.
+
+**Backup** (`BackupJob`): one snapshot per run, with Source = the device id and the device's newest snapshot as
+parent. After each run, snapshots are forgotten per the folder's retention. Prune is not run automatically yet.
+
+**Agent** (`SyncAgent`, used by `async-cli run` and later by the desktop service):
+- One worker per folder, triggered by:
+  - its interval;
+  - local file changes (FileSystemWatcher, 5-second debounce; TwoWay and Mirror Upload);
+  - `folder.changed` (TwoWay and Mirror Download);
+  - `config.changed`, which reloads the folder list.
+- A folder busy on another device is retried after 30 seconds.
+- Results go to `POST .../report`. Runs that changed the storage call `POST .../changed`.
+
+**Device identity on the CLI** (`FileClientStore`): stored in `ASYNC_CONFIG_DIR`, or by default
+`~/.config/async`, as files only the user can read:
+- `identity.json`: the server, device id and P-256 private key;
+- `keys/<folder>.key`: unlocked end-to-end keys;
+- `state/<folder>/`: sync state.
+
+The apps will keep the same data in the OS keystore.
 
 ## Background work and wake-ups (M3–M4)
 
@@ -384,7 +444,8 @@ wake-ups are missed.
 2. **M1 — engine and storage (done, v0.1.0).** `ASync.Engine` (repository and plain layouts, backup and
    restore, retention, prune, check), the five storage back-ends with a conformance suite against real
    servers, and back-end management (API and UI).
-3. **M2 — sync over the CLI:** the sync protocol and `async-cli` (enroll, Backup, Mirror, TwoWay). Folders,
+3. **M2 — sync over the CLI (core done: server, client core and CLI; remaining: CLI Docker image, end-to-end
+   test, web UI for folders and snapshots):** the sync protocol and `async-cli` (enroll, Backup, Mirror, TwoWay). Folders,
    snapshot browsing and restore in the UI.
 4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, overdue
