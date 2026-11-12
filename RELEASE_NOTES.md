@@ -1,5 +1,13 @@
 # Release notes
 
+## v0.1.4 — 2026-11-12
+
+- docs: **The documentation matches the code again.** The README no longer says the CLI agent is still to come,
+  and it gains a "Known limits" section. Most important: backups with standard (Transport) encryption can only
+  be opened with a key kept in the server's database, so keep a database backup. The design document
+  (`AGENTS.md`) marks milestone M2 as done, describes the folder tables as they are, lists the gaps to close
+  before the desktop app, and describes how devices keep backing up without push notifications.
+
 ## v0.1.3 — 2026-11-12
 
 - feat(ui): **New look, in the family style**: a collapsible sidebar (Folders, Devices, Storage, Users) with the

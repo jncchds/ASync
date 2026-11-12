@@ -3,8 +3,10 @@
 Self-hosted sync and backup for all your devices: Windows, macOS, Linux, iOS and Android. One server, many
 users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud, SFTP or SMB.
 
-> **Status: early development (v0.1.0).** The server, accounts, device provisioning, storage back-ends and the
-> sync engine work. Syncing between devices (the CLI agent) and the apps are next. See [AGENTS.md](AGENTS.md) for the design and roadmap.
+> **Status: early development.** The server, the web UI (folders, devices, storage, snapshot browsing) and the
+> headless CLI agent work: devices sync and back up folders through the server today. The desktop and mobile
+> apps are next. The current version is in [VERSION](VERSION), changes are in
+> [RELEASE_NOTES.md](RELEASE_NOTES.md), and the design, roadmap and known gaps are in [AGENTS.md](AGENTS.md).
 
 <p>
   <img src="docs/screenshots/dark-02-folders.png" alt="Folders page, dark theme" width="64%">
@@ -45,10 +47,24 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   [More screenshots](docs/screenshots/): [snapshot browser](docs/screenshots/light-03-snapshots.png),
   [devices](docs/screenshots/light-06-add-device-qr.png), [storage](docs/screenshots/dark-08-storage.png),
   [phone menu](docs/screenshots/phone-02b-sidebar-open.png).
-- **Sync engine** (used by the upcoming agent and apps):
-  - **Backups:** deduplicated, compressed, always encrypted snapshots, with retention rules, pruning and
-    integrity checks.
+- **Sync engine** (used by the CLI agent today, and by the apps to come):
+  - **Backups:** deduplicated, compressed, always encrypted snapshots, with retention rules. Old snapshots
+    are dropped after each backup; reclaiming their space (pruning) and integrity checks exist in the engine
+    but are not run by anything yet.
   - **Mirror and two-way folders:** stored as normal files, with old versions and a trash.
+
+## Known limits
+
+- **Keep a database backup.** Backups with standard (Transport) encryption can only be opened with a key the
+  server keeps in its PostgreSQL database. If the database is lost, so are those backups. End-to-end
+  encrypted backups do not depend on the server: the passphrase or the recovery key opens them.
+- Space used by dropped snapshots is not reclaimed yet, and nothing checks stored backups for damage.
+- Nobody is told when a device stops backing up.
+- Mirror and two-way folders have no file, version or trash browser in the web UI yet.
+- Very large files in Mirror and two-way folders are uploaded in one piece, with no resume; on S3 storage
+  files over 5 GB fail.
+
+The planned fixes are listed in [AGENTS.md](AGENTS.md) under "Before M3: gaps to close".
 
 ## Run it
 
