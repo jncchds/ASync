@@ -1,5 +1,10 @@
 # Release notes
 
+## v0.1.2 — 2026-11-12
+
+- ci: **Docker images are published only for version tags** (`v<VERSION>`; a mismatched tag fails), no longer on
+  every push to `main`. `latest` now points to the newest release. Pull requests still run all tests.
+
 ## v0.1.1 — 2026-11-12
 
 - fix: **Creating a Backup folder on failing storage** now gives a readable error instead of a 500 error (SDK

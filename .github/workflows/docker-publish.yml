@@ -1,9 +1,9 @@
 name: Build and Publish Docker Images
 
+# Images are published when a version tag is pushed (git tag v0.1.1 && git push origin v0.1.1).
+# Pull requests only run the tests; a manual run (workflow_dispatch) builds and publishes the chosen ref.
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
   pull_request:
@@ -66,7 +66,7 @@ jobs:
 
   build-and-push:
     needs: [test, e2e]
-    # Pull requests only run the tests; images are published from main and version tags.
+    # Pull requests only run the tests; images are published from version tags (and manual runs).
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -97,7 +97,14 @@ jobs:
 
       - name: Read app version
         id: version
-        run: echo "value=$(cat VERSION)" >> $GITHUB_OUTPUT
+        run: |
+          version=$(cat VERSION)
+          echo "value=$version" >> $GITHUB_OUTPUT
+          # A release tag must match VERSION, so the image tags and the version the app reports agree.
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION ($version). Tag v$version instead."
+            exit 1
+          fi
 
       - name: Extract metadata
         id: meta
@@ -105,7 +112,7 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=raw,value=${{ steps.version.outputs.value }}
             type=sha,prefix=sha-
           labels: |

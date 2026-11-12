@@ -41,6 +41,11 @@ dotnet run scripts/smoke-storage.cs -- http://localhost:5100 admin admin-passwor
 dotnet run scripts/smoke-snapshots.cs -- http://localhost:5100 admin admin-password # folders, a device backup, snapshot browsing/downloads
 ```
 
+### Releasing
+
+Docker images are published only for version tags. After `VERSION` and `RELEASE_NOTES.md` are on `main`:
+`git tag v$(cat VERSION) && git push origin v$(cat VERSION)`.
+
 ## Architecture (short)
 
 | Project | Purpose |

@@ -535,9 +535,13 @@ wake-ups are missed.
 
 ## Packaging and CI
 
-- **Docker** `async-server` and `async-cli` (`Dockerfile.cli`): built for linux/amd64 and arm64. Tags are `latest` (main
-  only), the `VERSION` value, and `sha-…`. See `.github/workflows/docker-publish.yml`; pull requests only run
-  the tests.
+- **Docker** `async-server` and `async-cli` (`Dockerfile.cli`): built for linux/amd64 and arm64
+  (`.github/workflows/docker-publish.yml`).
+  - **Publishing is triggered by pushing a version tag:** `git tag v<VERSION> && git push origin v<VERSION>`.
+    The tag must equal `v` + the `VERSION` file, or the build fails.
+  - Image tags are `latest`, the `VERSION` value and `sha-…`.
+  - Pushes to branches publish nothing. Pull requests run the tests and the end-to-end test, and a manual run
+    (`workflow_dispatch`) builds the chosen ref.
 - **Windows x64/ARM64:** MSIX, or Velopack with auto-update, plus winget.
 - **macOS ARM64:** a signed and notarized dmg, with Velopack updates.
 - **Linux x64/ARM64:** AppImage, deb and rpm, with a systemd unit for the agent.
