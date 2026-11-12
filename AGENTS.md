@@ -28,7 +28,7 @@ published apps, so mobile push goes through a relay that we host.
 | App identifiers | `ua.pp.chds.async`: the Android application id and the iOS bundle id |
 | Packages | Central versions in `Directory.Packages.props` with transitive pinning |
 | Engine crypto | BCL only, so it runs unchanged on iOS/Android: AES-256-GCM with per-object HKDF subkeys, HMAC-SHA256 blob ids, PBKDF2-SHA256 (600k) for passphrases. Not BLAKE3/XChaCha20 (not in the BCL) |
-| Repository encryption | Always on. Transport folders' repository key is wrapped by a server-held key (the storage provider sees ciphertext; the server can still browse); E2E folders' only by the user's passphrase and recovery key |
+| Repository encryption | Always on. Transport folders' repository key is wrapped by a server-held key (the storage provider sees ciphertext; the server can still browse) that exists only in the server's database — see the known gap under "Repository layout"; E2E folders' only by the user's passphrase and recovery key |
 
 ## Architecture overview
 
@@ -71,6 +71,7 @@ relay/cloudflare-worker/  (later) the same relay in TypeScript for free Cloudfla
 scripts/
   smoke-devices.cs        end-to-end check of sign-in and device provisioning against a running server
   smoke-storage.cs        end-to-end check of storage back-end management (Local + S3)
+  smoke-snapshots.cs      end-to-end check of folders, a device backup, snapshot browsing and downloads
   e2e-sync.sh / .cs       end-to-end sync test: throw-away server stack + real async-cli agents (local and Docker)
   test-backends-env.sh    ASYNC_TEST_* variables for the containers of docker-compose.test.yml
 ```
@@ -93,13 +94,26 @@ Implemented (M1):
 - **StorageBackend**: UserId (null = shared), Name, Type, ProtectedSettings (Data Protection, purpose
   `ASync.StorageBackend.Settings.v1`), CreatedAt, UpdatedAt, LastCheckedAt, LastCheckOk, LastCheckError.
 
-Planned:
+Implemented (M2), both in `src/ASync.Core/Models/Folder.cs`:
 
-- **StorageBackend.Quota**, periodic health checks.
-- **Folder**: Mode, Encryption, Kind (`Files`/`Photos`/`Contacts`/`Calendars`), StorageBackendId, RootPath,
-  Schedule, Retention, Filters, Revision.
-- **FolderDevice**: device ↔ folder: local path, direction override, paused, metered/battery rules, last sync point.
-- **Snapshot** (Backup), **FileVersion** / version vectors (TwoWay), **Job** (prune, verify, health).
+- **Folder**: Id, UserId (the owner), Name, Mode (`Backup`/`Mirror`/`TwoWay`), Encryption
+  (`Transport`/`EndToEnd`), Kind (`Files`/`Photos`/`Contacts`/`Calendars`), StorageBackendId, RootPath,
+  IntervalMinutes, Excludes (gitignore-style patterns), RetentionJson (a `RetentionDto`), VersionsKeepDays,
+  TrashKeepDays, Revision (grows with every change to the folder or its device settings), RepositoryReady
+  (false until a device has initialised an end-to-end repository), ProtectedRepositoryKey (Transport Backup
+  folders only: the server key, Data Protection purpose `ASync.Folder.RepositoryKey.v1`), CreatedAt, UpdatedAt.
+- **FolderDevice**: a device's membership in a folder: Id, FolderId, DeviceId, LocalPath, Direction (Mirror
+  only, otherwise null), Paused, LastSyncAt, LastSyncOk, LastSyncMessage.
+
+The server keeps no index of file contents: snapshots live in the repository on the back-end, and Mirror/TwoWay
+state lives in each device's `sync-state.json`.
+
+Planned (none of this exists yet):
+
+- **StorageBackend.Quota** and stored usage; periodic health checks (today `LastChecked*` is only set by a
+  manual connection test).
+- **FolderDevice**: metered-network and battery rules; an expected-by time for overdue detection.
+- **Job** (prune, check, health) and alert settings per user.
 - **Device.PushTarget**: relay token / APNs / FCM / UnifiedPush endpoint.
 
 ## Auth
@@ -207,8 +221,17 @@ Stat, List (flat or recursive), OpenRead (with a byte range), Write, Delete and 
 
 ## Repository layout (M1, Backup and E2E folders)
 
-A self-contained, encrypted, deduplicated store (`src/ASync.Engine/Repository`). Everything needed to
-restore is on the back-end, so a repository survives losing the server and its database.
+A self-contained, encrypted, deduplicated store (`src/ASync.Engine/Repository`). All the data and the wrapped
+repository keys are on the back-end. Whether that is enough to restore without the server depends on the
+folder's encryption:
+
+- **End-to-end folders survive losing the server and its database.** Their key files are wrapped by the
+  passphrase and the recovery key, which the person holds.
+- **Known gap: Transport folders do not.** Their only key file is wrapped by a random server key
+  (`KeyFile.ForServerKey`) that exists in one place: `Folder.ProtectedRepositoryKey`, encrypted with Data
+  Protection, whose key ring is itself in PostgreSQL (`DataProtectionKeys`). Lose the database and every
+  Transport repository is unreadable ciphertext, even though the storage is intact. Until key recovery exists
+  (see "Before M3: gaps to close"), a database backup is part of the backup.
 
 ```
 config               plaintext JSON: format version, id, chunker parameters
@@ -250,6 +273,8 @@ locks/<id>           encrypted lock files: shared (backup, restore) or exclusive
   - `PruneAsync` takes an exclusive lock. It deletes unused packs and repacks those more than 30% unused.
     The order is crash-safe: new packs, new index, then delete old indexes, then delete old packs.
   - `CheckAsync(readDataFraction)` verifies the structure and, for a sample of packs, every blob.
+  - Only `ForgetAsync` is used in production (by `BackupJob`). `PruneAsync` and `CheckAsync` are called only
+    from tests: see "Before M3: gaps to close".
 - **Key files:** they can be added and removed, but never the last one. Changing a passphrase writes a new
   key file and re-encrypts nothing.
 
@@ -329,7 +354,8 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
 - Only files are synced. Empty directories and symlinks are not.
 
 **Backup** (`BackupJob`): one snapshot per run, with Source = the device id and the device's newest snapshot as
-parent. After each run, snapshots are forgotten per the folder's retention. Prune is not run automatically yet.
+parent. After each run, snapshots are forgotten per the folder's retention. Prune and check are never run:
+forgotten snapshots free no space yet (see "Before M3: gaps to close").
 
 **Agent** (`SyncAgent`, used by `async-cli run` and later by the desktop service):
 - One worker per folder, triggered by:
@@ -482,6 +508,8 @@ a random id in a container.
 
 ## Background work and wake-ups (M3–M4)
 
+Planned; nothing in this section or in "Push" is implemented yet.
+
 - **Desktop:** the agent runs as a Windows Service, a systemd unit or a launchd agent. The tray UI talks to it
   over a named pipe or Unix socket. The CLI container runs the same agent.
 - **iOS** (silent push alone is not reliable, so several mechanisms are layered):
@@ -497,6 +525,29 @@ a random id in a container.
   data messages, and UnifiedPush for de-Googled devices and F-Droid builds.
 - **Server scheduler:** knows each device's expected schedule. It wakes overdue devices through the relay and
   alerts the user after a grace period.
+
+### Working without push
+
+Push is an optimisation, never a requirement. Every platform must back up on its own schedule with
+`Push__Mode=None`, with no relay, and with the relay down; a push only makes a due run start sooner.
+
+- **iOS:**
+  - Background `URLSession` for transfers, so they continue while the app is suspended.
+  - `BGProcessingTask` (can require power and Wi-Fi) and `BGAppRefreshTask` for scheduled scans.
+  - A local "no backup in N days" notification, rescheduled after each successful backup. It fires only when
+    backups have stopped, and needs neither the server nor a push.
+  - An App Intent ("Back up now"), so people can run backups from Shortcuts automations (when charging, on
+    arriving home, at a time of day).
+  - Small, resumable work units: each background slot uploads a few chunks, records progress and can be cut
+    off at any point without losing work.
+- **Android:**
+  - WorkManager periodic work with network and charging constraints.
+  - MediaStore content-trigger jobs, so new photos start a run without polling.
+  - A foreground service for large transfers.
+  - A prompt asking for the battery-optimisation exemption, since some vendors otherwise stop periodic work.
+  - UnifiedPush where a distributor is installed. It needs neither our relay nor Google.
+- **Server:** overdue detection alerts the person (webhook, ntfy or e-mail), not the device. It works from
+  what devices already report (`FolderDevice.LastSyncAt`), so it needs no push channel at all.
 
 ## Push (M4)
 
@@ -539,6 +590,7 @@ device ──push token──► its ASync server ──POST /v1/wake──► r
 | `Relay` (default) | Self-hosters using our published apps | Nothing. `Push__RelayUrl` defaults to our relay |
 | `Direct` | Self-hosters who build the apps under their own bundle id | Their APNs `.p8` key, Key ID, Team ID and bundle id; FCM service-account JSON |
 | `Relay` + custom `Push__RelayUrl` | Self-hosters with their own builds and several servers | Their own relay: deploy the Worker (free Cloudflare) or the `async-push-relay` container |
+| `None` | Anyone who wants no outside service involved | Nothing. The server sends no wake-ups; devices rely on their own scheduling and the person gets overdue alerts (see "Working without push") |
 
 **UnifiedPush** (F-Droid and de-Googled Android) never uses a relay: the server posts straight to the
 device's distributor endpoint (for example ntfy).
@@ -549,7 +601,7 @@ device's distributor endpoint (for example ntfy).
 - A Cloudflare account (free) and a DNS name.
 
 If the relay is down, devices still run their own scheduled background tasks; only server-triggered
-wake-ups are missed.
+wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without push" above.
 
 ## Extra data sources (M4)
 
@@ -581,14 +633,53 @@ wake-ups are missed.
 2. **M1 — engine and storage (done, v0.1.0).** `ASync.Engine` (repository and plain layouts, backup and
    restore, retention, prune, check), the five storage back-ends with a conformance suite against real
    servers, and back-end management (API and UI).
-3. **M2 — sync over the CLI (core done: server, client core and CLI; remaining: CLI Docker image, end-to-end
-   test, web UI for folders and snapshots):** the sync protocol and `async-cli` (enroll, Backup, Mirror, TwoWay). Folders,
-   snapshot browsing and restore in the UI.
+3. **M2 — sync over the CLI (done).** The sync protocol (storage gateway, leases, live events) and `async-cli`
+   (enroll, Backup, Mirror, TwoWay, end-to-end encryption, restore), the `async-cli` Docker image, the
+   end-to-end test in CI, and the web UI for folders and for browsing and downloading snapshots.
+   **← current stage; next is "Before M3: gaps to close".**
 4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
-5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, overdue
-   scheduler.
-6. **M5 — hardening:** E2E recovery, quotas, verify and prune jobs, alerts, OpenTelemetry. Later: Google
-   Drive, OneDrive and Dropbox adapters.
+5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
+   overdue devices.
+6. **M5 — hardening:** OpenTelemetry, and whatever is left of the gap list below. Later: Google Drive,
+   OneDrive and Dropbox adapters.
+
+### Before M3: gaps to close
+
+Found by comparing this document with the code. They are listed in the order they will be done; the desktop
+app starts after them, because it would otherwise be built on the same holes.
+
+1. **Prune and check never run.** Nothing outside the tests calls `RepositoryMaintenance.PruneAsync` or
+   `CheckAsync`, and `async-cli` has no command for either. `BackupJob` forgets snapshots, so repositories
+   only grow, and damage is noticed only at restore time. Needed: CLI commands, and a schedule.
+2. **Transport repository key recovery.** A Transport folder's key exists only in
+   `Folder.ProtectedRepositoryKey` (see the known gap under "Repository layout"). Needed: a way to get the
+   key out of the database and back in, such as a recovery key shown at folder creation or an export.
+3. **Server-side overdue detection and alerts.** The server stores `FolderDevice.LastSyncAt` and
+   `LastSyncOk` but nothing looks at them: no scheduler, no notification of any kind. Needed: a hosted
+   service that finds overdue and failing devices and tells the person by webhook, ntfy or e-mail. It must
+   not depend on push, so that `Push__Mode=None` is a complete setup (see "Working without push").
+4. **Account and folder housekeeping.**
+   - *Own-password change:* `PATCH /api/auth/profile` changes only the display name. Passwords can only be
+     set by an admin (`PUT /api/users/{id}/password`).
+   - *User deletion:* there is no endpoint. `UsersController` lists, creates, sets passwords and roles.
+   - *Folder deletion with optional purge:* `DELETE /api/folders/{id}` removes the database row only. The
+     stored data stays on the back-end with no way to remove it from ASync, and for a Transport Backup
+     folder the row held the only copy of the key, so what stays is unreadable.
+5. **Web UI for Mirror/TwoWay files, versions and trash.** `PlainStore` keeps versions and a trash and can
+   restore both, but only the engine and its tests use that. The snapshot endpoints answer 400 for these
+   folders, and there are no others.
+6. **Large files in plain folders.**
+   - An upload is one PUT: the device sends the whole file, the gateway buffers all of it (in memory up to
+     32 MB, otherwise in a temp file on the server) and then writes it to the back-end.
+   - There is no resume: an interrupted upload starts again from zero.
+   - On S3, `PlainStore` moves files (incoming → place, place → versions) and `S3Backend.MoveAsync` uses
+     `CopyObject`, which is limited to 5 GB.
+   - Repositories are not affected: packs are 16 MB.
+7. **Quotas, usage, health and role tests.**
+   - No quotas and no storage-usage figures, per user, folder or back-end.
+   - No periodic back-end health checks: `LastCheckedAt`/`LastCheckOk` change only on a manual test.
+   - No API-level tests of role separation. The rule that a device token never reaches people's endpoints
+     is checked by the smoke scripts against a running server, not by `ASync.Tests` (which has no HTTP-level tests).
 
 Open questions:
 - Should there be a SQLite option for small installs?
@@ -604,8 +695,8 @@ Open questions:
   `Codes.HashSecret` is exact and is for refresh tokens and device codes. Do not mix them.
 - **Tests:** `JwtKeyService.InitializeAsync` with `Jwt:SigningKey` configured never touches the database, so
   tests pass `null!` for the context.
-- **Enums** serialize as strings in controllers (`JsonStringEnumConverter`); SignalR must match when it is
-  added.
+- **Enums** serialize as strings in controllers and in SignalR (`JsonStringEnumConverter` is registered for
+  both in `Program.cs`); keep the two in step.
 - **Storage settings JSON:** each derived record's `Type` override needs its own `[JsonIgnore]`, or it
   clashes with the `type` discriminator. Controllers set `AllowOutOfOrderMetadataProperties`.
 - **Engine JSON** goes through the source-generated `EngineJson` context, so it works with trimming and AOT
