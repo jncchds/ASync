@@ -17,6 +17,7 @@
     <!-- Clients -->
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
     <PackageVersion Include="System.CommandLine" Version="2.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.14" />
     <!-- Storage back-ends -->
     <PackageVersion Include="AWSSDK.S3" Version="4.0.104.12" />
     <PackageVersion Include="SSH.NET" Version="2026.0.0" />

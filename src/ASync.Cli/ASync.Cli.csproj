@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- async-cli: the headless agent (enroll, sync, run as a daemon, back up, restore). Docker image async-cli. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>async-cli</AssemblyName>
+    <RootNamespace>ASync.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ASync.Client.Core\ASync.Client.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+</Project>
