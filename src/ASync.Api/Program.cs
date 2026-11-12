@@ -51,6 +51,7 @@ builder.Services.AddScoped<FolderService>();
 builder.Services.AddSingleton<FolderLeaseService>();
 builder.Services.AddSingleton<FolderBackendCache>();
 builder.Services.AddHostedService<FolderBackendSweeper>();
+builder.Services.AddSingleton<SnapshotService>();
 builder.Services.AddHostedService<CleanupService>();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────

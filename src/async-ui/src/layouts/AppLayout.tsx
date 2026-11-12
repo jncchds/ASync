@@ -19,6 +19,7 @@ export default function AppLayout() {
           <span>ASync</span>
         </div>
         <nav>
+          <NavLink to="/folders">Folders</NavLink>
           <NavLink to="/devices">Devices</NavLink>
           <NavLink to="/storage">Storage</NavLink>
           {user?.isAdmin && <NavLink to="/admin/users">Users</NavLink>}
