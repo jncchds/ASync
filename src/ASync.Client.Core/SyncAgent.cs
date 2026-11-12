@@ -23,7 +23,20 @@ public sealed class SyncAgent : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<int, FolderWorker> _workers = new();
     private readonly SemaphoreSlim _reloadGate = new(1, 1);
+    private readonly CancellationTokenSource _stop = new();
+    private DeviceRevokedException? _revoked;
     private HubConnection? _hub;
+    private volatile bool _hubReconnecting;
+
+    /// <summary>Set once the server refused this device's sign-in; <see cref="RunAsync"/> then stops with it.</summary>
+    public DeviceRevokedException? Revoked => _revoked;
+
+    private void Observe(Exception e)
+    {
+        if (e is not DeviceRevokedException revoked || Interlocked.CompareExchange(ref _revoked, revoked, null) is not null) return;
+        _logger.LogError("{Message}", revoked.Message);
+        try { _stop.Cancel(); } catch (ObjectDisposedException) { }
+    }
 
     public SyncAgent(AsyncApiClient api, IClientStore store, ILogger logger)
     {
@@ -52,7 +65,7 @@ public sealed class SyncAgent : IAsyncDisposable
             if (folder.Mode == SyncMode.Backup)
             {
                 var repo = await RepositoryAccess.OpenAsync(_api, _store, folder, backend, ct);
-                var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId).RunAsync(ct: ct);
+                var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName).RunAsync(ct: ct);
                 var s = snapshot.Stats;
                 var message = $"Snapshot {snapshot.Id[..8]}: {s.FilesNew} new, {s.FilesChanged} changed, {s.FilesUnmodified} unchanged, " +
                               $"{Size(s.BytesAdded)} added{(forgotten > 0 ? $", {forgotten} old snapshots forgotten" : "")}" +
@@ -95,12 +108,13 @@ public sealed class SyncAgent : IAsyncDisposable
         catch (Exception e) when (e is SyncRefusedException or IOException or UnauthorizedAccessException or ApiException
                                      or HttpRequestException or InvalidOperationException or System.Security.Cryptography.CryptographicException)
         {
+            Observe(e);
             outcome = new FolderRunResult(folder.FolderId, folder.Name, false, e.Message);
             report = new SyncReportRequest(false, e.Message);
         }
 
         try { await _api.ReportAsync(folder.FolderId, report, CancellationToken.None); }
-        catch (Exception e) when (e is ApiException or HttpRequestException) { _logger.LogDebug(e, "Could not report the result."); }
+        catch (Exception e) when (e is ApiException or HttpRequestException) { _logger.LogDebug("Could not report the result: {Message}", e.Message); }
         FolderRan?.Invoke(outcome);
         return outcome;
     }
@@ -121,34 +135,62 @@ public sealed class SyncAgent : IAsyncDisposable
 
     // ── Continuous mode ───────────────────────────────────────────────────────
 
-    /// <summary>Runs until cancelled: initial sync of everything, then as scheduled, on change and on notification.</summary>
-    public async Task RunAsync(CancellationToken ct)
+    /// <summary>
+    /// Runs until cancelled: initial sync of everything, then as scheduled, on change and on notification. Throws
+    /// <see cref="DeviceRevokedException"/> (after stopping every folder) once the device was removed from the account.
+    /// </summary>
+    public async Task RunAsync(CancellationToken cancel)
     {
-        await ConnectHubAsync(ct);
-        await ReloadAsync(ct);
-        using var refresh = new PeriodicTimer(TimeSpan.FromMinutes(10)); // in case an event was missed
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancel, _stop.Token);
+        var ct = linked.Token;
         try
         {
+            await ConnectHubAsync(ct);
+            await ReloadAsync(ct);
+            using var refresh = new PeriodicTimer(TimeSpan.FromMinutes(10)); // in case an event was missed
             while (await refresh.WaitForNextTickAsync(ct)) await ReloadAsync(ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+
+        if (_revoked is not null)
+        {
+            foreach (var worker in _workers.Values) await worker.DisposeAsync();
+            _workers.Clear();
+            throw _revoked;
+        }
     }
 
     private async Task ConnectHubAsync(CancellationToken ct)
     {
         _hub = new HubConnectionBuilder()
-            .WithUrl(new Uri(_api.Server, "hubs/sync"), o => o.AccessTokenProvider = async () => await _api.GetTokenAsync(CancellationToken.None))
+            .WithUrl(new Uri(_api.Server, "hubs/sync"), o => o.AccessTokenProvider = async () =>
+            {
+                // Reconnecting signs in afresh: the server closes a revoked device's connection while its token still
+                // looks valid, and only a sign-in tells the agent why.
+                try { return await _api.GetTokenAsync(CancellationToken.None, forceRefresh: _hubReconnecting); }
+                catch (DeviceRevokedException e) { Observe(e); throw; }
+            })
             .WithAutomaticReconnect(new ForeverRetry())
             .Build();
         _hub.On<SyncEvent>("event", e => _ = OnEventAsync(e, ct));
-        _hub.Reconnected += _ => ReloadAsync(ct); // events may have been missed while offline
+        _hub.Reconnecting += _ =>
+        {
+            _hubReconnecting = true;
+            return Task.CompletedTask;
+        };
+        _hub.Reconnected += _ =>
+        {
+            _hubReconnecting = false;
+            return ReloadAsync(ct); // events may have been missed while offline
+        };
         try
         {
             await _hub.StartAsync(ct);
         }
         catch (Exception e) when (e is HttpRequestException or ApiException)
         {
-            _logger.LogWarning("Live updates are unavailable ({Message}); folders sync on their schedule.", e.Message);
+            Observe(e);
+            if (_revoked is null) _logger.LogWarning("Live updates are unavailable ({Message}); folders sync on their schedule.", e.Message);
         }
     }
 
@@ -170,6 +212,7 @@ public sealed class SyncAgent : IAsyncDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Observe(ex);
             _logger.LogWarning("Handling {Event} failed: {Message}", e.Name, ex.Message);
         }
     }
@@ -184,7 +227,8 @@ public sealed class SyncAgent : IAsyncDisposable
             try { folders = await _api.GetFoldersAsync(ct); }
             catch (Exception e) when (e is ApiException or HttpRequestException)
             {
-                _logger.LogWarning("Could not fetch folders: {Message}", e.Message);
+                Observe(e);
+                if (_revoked is null) _logger.LogWarning("Could not fetch folders: {Message}", e.Message);
                 return;
             }
 
@@ -221,6 +265,7 @@ public sealed class SyncAgent : IAsyncDisposable
         _workers.Clear();
         if (_hub is not null) await _hub.DisposeAsync();
         _reloadGate.Dispose();
+        _stop.Dispose();
     }
 
     private static string Size(long bytes) => bytes switch

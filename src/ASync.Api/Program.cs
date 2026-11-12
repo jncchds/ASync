@@ -124,6 +124,9 @@ builder.Services.AddRateLimiter(o =>
     o.AddPolicy(RateLimits.Auth, http => RateLimitPartition.GetFixedWindowLimiter(
         http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = RateLimits.AuthPermitsPerMinute, Window = TimeSpan.FromMinutes(1) }));
+    o.AddPolicy(RateLimits.DeviceSignIn, http => RateLimitPartition.GetFixedWindowLimiter(
+        http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = RateLimits.DeviceSignInPermitsPerMinute, Window = TimeSpan.FromMinutes(1) }));
 });
 
 // Behind a reverse proxy (TLS terminated there): trust X-Forwarded-For/Proto so client IPs and https links are right.
@@ -141,6 +144,7 @@ if (builder.Configuration.GetValue<bool>("TrustForwardedHeaders"))
 builder.Services.AddSignalR()
     .AddJsonProtocol(o => o.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddSingleton<ISyncNotifier, SyncNotifier>();
+builder.Services.AddSingleton<DeviceConnections>();
 
 // ── API ───────────────────────────────────────────────────────────────────────
 // Enums travel as strings, in controllers and (from M2) SignalR alike.

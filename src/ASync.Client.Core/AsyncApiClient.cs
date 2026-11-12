@@ -13,6 +13,9 @@ public class ApiException(HttpStatusCode status, string message) : Exception(mes
     public HttpStatusCode Status { get; } = status;
 }
 
+/// <summary>The server refused this device's signed sign-in: it was removed from the account (or never existed there).</summary>
+public sealed class DeviceRevokedException(string message) : ApiException(HttpStatusCode.Unauthorized, message);
+
 /// <summary>
 /// The device side of the ASync API. Signs in by signing a server challenge with the device key and keeps the
 /// resulting 15-minute access token, renewing it a minute before it expires (or after a 401).
@@ -33,6 +36,9 @@ public sealed class AsyncApiClient : IDisposable
     public DeviceIdentity? Identity { get; private set; }
     public Uri Server { get; }
     public string? AppVersion { get; init; }
+
+    /// <summary>Optional: where the access token is kept between processes (the CLI's config directory).</summary>
+    public ITokenCache? TokenCache { get; init; }
 
     public AsyncApiClient(string serverUrl, DeviceIdentity? identity = null, HttpMessageHandler? handler = null)
     {
@@ -96,12 +102,30 @@ public sealed class AsyncApiClient : IDisposable
         {
             if (!forceRefresh && _token is not null && _tokenExpires - DateTime.UtcNow > TimeSpan.FromMinutes(1)) return _token;
             var identity = Identity ?? throw new InvalidOperationException("This device is not enrolled.");
+            if (!forceRefresh && TokenCache?.LoadToken() is { } cached && cached.DeviceId == identity.DeviceId
+                && cached.ExpiresAt.ToUniversalTime() - DateTime.UtcNow > TimeSpan.FromMinutes(1))
+            {
+                _token = cached.AccessToken;
+                _tokenExpires = cached.ExpiresAt.ToUniversalTime();
+                return _token;
+            }
             var challenge = await SendAsync<DeviceChallengeDto>(HttpMethod.Post, "api/device-auth/challenge",
                 new DeviceChallengeRequest(identity.DeviceId), auth: false, ct);
-            var token = await SendAsync<DeviceTokenDto>(HttpMethod.Post, "api/device-auth/token",
-                new DeviceTokenRequest(identity.DeviceId, challenge.Nonce, identity.Sign(challenge.Nonce), AppVersion), auth: false, ct);
+            DeviceTokenDto token;
+            try
+            {
+                token = await SendAsync<DeviceTokenDto>(HttpMethod.Post, "api/device-auth/token",
+                    new DeviceTokenRequest(identity.DeviceId, challenge.Nonce, identity.Sign(challenge.Nonce), AppVersion), auth: false, ct);
+            }
+            catch (ApiException e) when (e.Status == HttpStatusCode.Unauthorized)
+            {
+                throw new DeviceRevokedException(
+                    $"This device ({identity.DeviceName}) was removed from {identity.Username}'s account on {Server.Host}, or the server does not know it. " +
+                    "Enroll it again (`async-cli forget`, then `async-cli enroll`) to keep syncing.");
+            }
             _token = token.AccessToken;
             _tokenExpires = token.ExpiresAt.ToUniversalTime();
+            TokenCache?.SaveToken(new CachedToken(identity.DeviceId, _token, _tokenExpires));
             return _token;
         }
         finally

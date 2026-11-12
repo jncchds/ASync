@@ -32,6 +32,16 @@ public sealed record DeviceIdentity(string ServerUrl, Guid DeviceId, int UserId,
     }
 }
 
+/// <summary>A device access token kept between runs, so short-lived processes (one CLI command each) don't sign in every time.</summary>
+public sealed record CachedToken(Guid DeviceId, string AccessToken, DateTime ExpiresAt);
+
+/// <summary>Keeps the current access token of a device (see <see cref="AsyncApiClient.TokenCache"/>).</summary>
+public interface ITokenCache
+{
+    CachedToken? LoadToken();
+    void SaveToken(CachedToken token);
+}
+
 /// <summary>Where a client keeps its secrets and per-folder state.</summary>
 public interface IClientStore
 {
@@ -49,9 +59,10 @@ public interface IClientStore
 
 /// <summary>
 /// The CLI's store: a directory (default <c>~/.config/async</c>, or <c>ASYNC_CONFIG_DIR</c>) with files only the
-/// current user can read: <c>identity.json</c>, <c>keys/&lt;folder&gt;.key</c>, <c>state/&lt;folder&gt;/</c>.
+/// current user can read: <c>identity.json</c>, <c>token.json</c> (the current access token), <c>keys/&lt;folder&gt;.key</c>,
+/// <c>state/&lt;folder&gt;/</c>.
 /// </summary>
-public sealed class FileClientStore : IClientStore
+public sealed class FileClientStore : IClientStore, ITokenCache
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -61,7 +72,10 @@ public sealed class FileClientStore : IClientStore
     {
         Root = Path.GetFullPath(root);
         Directory.CreateDirectory(Root);
-        Restrict(Root, directory: true);
+        // A mount point (Docker's /config) may belong to someone else while being writable for us: then it keeps its
+        // mode, and the files in it are still private.
+        try { Restrict(Root, directory: true); }
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException) { }
     }
 
     public static string DefaultRoot() =>
@@ -79,6 +93,27 @@ public sealed class FileClientStore : IClientStore
     public void DeleteIdentity()
     {
         if (File.Exists(IdentityPath)) File.Delete(IdentityPath);
+        if (File.Exists(TokenPath)) File.Delete(TokenPath);
+    }
+
+    private string TokenPath => Path.Combine(Root, "token.json");
+
+    public CachedToken? LoadToken()
+    {
+        try
+        {
+            return File.Exists(TokenPath) ? JsonSerializer.Deserialize<CachedToken>(File.ReadAllText(TokenPath), Json) : null;
+        }
+        catch (Exception e) when (e is JsonException or IOException)
+        {
+            return null; // a damaged cache only costs a sign-in
+        }
+    }
+
+    public void SaveToken(CachedToken token)
+    {
+        try { WriteSecret(TokenPath, JsonSerializer.SerializeToUtf8Bytes(token, Json), unique: true); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* the token stays in memory */ }
     }
 
     private string KeyPath(int folderId) => Path.Combine(Root, "keys", $"{folderId}.key");
@@ -99,9 +134,10 @@ public sealed class FileClientStore : IClientStore
         return dir;
     }
 
-    private static void WriteSecret(string path, byte[] content)
+    private static void WriteSecret(string path, byte[] content, bool unique = false)
     {
-        var temp = path + ".tmp";
+        // unique: several processes (`run` and a `sync`) may write the same file at once.
+        var temp = unique ? $"{path}.{Guid.NewGuid():N}.tmp" : path + ".tmp";
         File.WriteAllBytes(temp, content);
         Restrict(temp, directory: false);
         File.Move(temp, path, overwrite: true);

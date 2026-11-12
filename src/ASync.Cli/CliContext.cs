@@ -25,7 +25,7 @@ internal sealed class CliContext(string configDir, bool verbose) : IDisposable
     public DeviceIdentity Identity => Store.LoadIdentity()
         ?? throw new CliException("This device is not enrolled. Run `async-cli enroll --server <url>` first.");
 
-    public AsyncApiClient Api => _api ??= new AsyncApiClient(Identity.ServerUrl, Identity) { AppVersion = Version };
+    public AsyncApiClient Api => _api ??= new AsyncApiClient(Identity.ServerUrl, Identity) { AppVersion = Version, TokenCache = Store };
 
     public static DevicePlatform Platform =>
         Environment.GetEnvironmentVariable("ASYNC_PLATFORM") is { } p && Enum.TryParse<DevicePlatform>(p, true, out var parsed) ? parsed

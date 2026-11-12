@@ -71,6 +71,7 @@ relay/cloudflare-worker/  (later) the same relay in TypeScript for free Cloudfla
 scripts/
   smoke-devices.cs        end-to-end check of sign-in and device provisioning against a running server
   smoke-storage.cs        end-to-end check of storage back-end management (Local + S3)
+  e2e-sync.sh / .cs       end-to-end sync test: throw-away server stack + real async-cli agents (local and Docker)
   test-backends-env.sh    ASYNC_TEST_* variables for the containers of docker-compose.test.yml
 ```
 
@@ -342,10 +343,64 @@ parent. After each run, snapshots are forgotten per the folder's retention. Prun
 **Device identity on the CLI** (`FileClientStore`): stored in `ASYNC_CONFIG_DIR`, or by default
 `~/.config/async`, as files only the user can read:
 - `identity.json`: the server, device id and P-256 private key;
+- `token.json`: the current 15-minute access token (`ITokenCache`), so one-command processes don't sign in
+  every time;
 - `keys/<folder>.key`: unlocked end-to-end keys;
 - `state/<folder>/`: sync state.
 
 The apps will keep the same data in the OS keystore.
+
+## CLI agent: Docker image and end-to-end test (M2)
+
+**Image** `async-cli` (`Dockerfile.cli`):
+- A framework-dependent publish on `dotnet/runtime:10.0`, cross-built with `--platform=$BUILDPLATFORM` and
+  `-a $TARGETARCH`. It runs as the image's `app` user (uid 1654).
+- `ASYNC_CONFIG_DIR=/config` (a volume), `ENTRYPOINT async-cli`, `CMD run`. `run` enrolls first from
+  `ASYNC_SERVER`, `ASYNC_ENROLL_CODE` and `ASYNC_DEVICE_NAME` when there is no identity yet.
+- `FileClientStore` doesn't fail when it can't chmod the root of `/config` (a mount owned by someone else);
+  the files in it are still 0600.
+- CI builds it next to `async-server`, as a matrix in `docker-publish.yml`.
+- `Directory.Build.props` reads `VERSION` into `<Version>`, which is what `async-cli --version` and the
+  `AppVersion` that devices report show. Before this they showed 1.0.0.
+
+**Sign-in load:**
+- Every CLI command is a new process, so `AsyncApiClient.TokenCache` reuses the token in `token.json`. A
+  401 still forces a fresh sign-in.
+- The server limits `challenge` and `token` with their own per-IP policy, `RateLimits.DeviceSignIn` (240 a
+  minute), not the 30 a minute of `Auth`. Many agents can share one address (containers on one host, devices
+  behind one router), and sign-in needs the device's private key anyway.
+
+**Revocation of a running agent:**
+- The server keeps the open hub connections of devices in `DeviceConnections`. `DELETE /api/devices/{id}`
+  aborts them, because the hub checks tokens only when a connection opens.
+- The agent's reconnect signs in afresh. A 401 from `api/device-auth/token` becomes a
+  `DeviceRevokedException`, and `SyncAgent.RunAsync` stops every folder and throws it.
+- `async-cli run` therefore exits with code 1 and an explanation, instead of retrying forever.
+
+**Snapshots** record the device's name as the host name (`BackupOptions.Hostname`). The machine name would be
+a random id in a container.
+
+**End-to-end test** (`scripts/e2e-sync.sh` → `scripts/e2e-sync.cs`, CI job `e2e`):
+- **Setup:**
+  - It builds the CLI and the image.
+  - It starts the compose stack as project `async-e2e` on `ASYNC_PORT` (default 5190), next to any dev stack
+    on 5100.
+  - It removes the stack afterwards (`KEEP=1` keeps it).
+- **Two agents** run as local `dotnet async-cli.dll` processes with their own config directories. The person's
+  side goes through the REST API: the admin account, a Local back-end under `/data/e2e-<time>`, folders,
+  codes, attaching devices and revoking.
+- **Checks:**
+  - TwoWay both ways (including a 3 MB file), conflict copies, and deletions into the local and remote trash
+    and versions.
+  - Pause and resume, set-path, the mass-deletion guard and a missing local folder.
+  - Mirror Upload and Download.
+  - Transport Backup with a byte-identical full and partial restore.
+  - End-to-end Backup: init-encryption, no plaintext on storage, unlock with the recovery key on the second
+    device, restore, and a backup from that device.
+  - `run` reacting to `folder.changed`, to its file watcher and to `config.changed`.
+  - A third agent from the image, enrolled from `ASYNC_ENROLL_CODE`, syncing into its `/data` mount.
+  - Revocation: commands fail, the running agent exits, and the server closed its hub connection.
+- With `--server-container` it inspects the storage with `docker exec`.
 
 ## Background work and wake-ups (M3–M4)
 
@@ -427,7 +482,7 @@ wake-ups are missed.
 
 ## Packaging and CI
 
-- **Docker** `async-server` (and later `async-cli`): built for linux/amd64 and arm64. Tags are `latest` (main
+- **Docker** `async-server` and `async-cli` (`Dockerfile.cli`): built for linux/amd64 and arm64. Tags are `latest` (main
   only), the `VERSION` value, and `sha-…`. See `.github/workflows/docker-publish.yml`; pull requests only run
   the tests.
 - **Windows x64/ARM64:** MSIX, or Velopack with auto-update, plus winget.

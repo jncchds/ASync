@@ -7,6 +7,8 @@ public sealed record BackupOptions
     /// <summary>Label of what is backed up; retention applies per source. Defaults to the directory name.</summary>
     public string? Source { get; init; }
     public string? DeviceId { get; init; }
+    /// <summary>The name recorded in the snapshot. Default: the machine name (a random id inside a container).</summary>
+    public string? Hostname { get; init; }
     public IReadOnlyList<string> Excludes { get; init; } = [];
     public IReadOnlyList<string> Tags { get; init; } = [];
     /// <summary>
@@ -142,7 +144,7 @@ public sealed class BackupRunner(Repository.Repository repository)
             Tree = treeId,
             Source = options.Source ?? root.Name,
             DeviceId = options.DeviceId,
-            Hostname = Environment.MachineName,
+            Hostname = options.Hostname ?? Environment.MachineName,
             Parent = options.Parent?.Id,
             Tags = [.. options.Tags],
             Stats = stats,

@@ -11,15 +11,51 @@ namespace ASync.Api.Hubs;
 /// <see cref="ISyncNotifier"/>, never <c>IHubContext</c> directly, or the sequence numbers break.
 /// </summary>
 [Authorize]
-public class SyncHub : Hub
+public class SyncHub(DeviceConnections connections) : Hub
 {
     public override async Task OnConnectedAsync()
     {
         if (Context.User?.DeviceId() is Guid deviceId)
+        {
+            connections.Add(deviceId, Context);
             await Groups.AddToGroupAsync(Context.ConnectionId, SyncNotifier.DeviceGroup(deviceId));
+        }
         else if (Context.User is { } user)
             await Groups.AddToGroupAsync(Context.ConnectionId, SyncNotifier.UserGroup(user.UserId()));
         await base.OnConnectedAsync();
+    }
+
+    public override Task OnDisconnectedAsync(Exception? exception)
+    {
+        connections.Remove(Context.ConnectionId);
+        return base.OnDisconnectedAsync(exception);
+    }
+}
+
+/// <summary>
+/// Open hub connections of devices. Tokens are only checked when a connection opens, so revoking a device closes
+/// its connections here: it stops hearing about folders, and its reconnect then fails at sign-in.
+/// </summary>
+public class DeviceConnections(ILogger<DeviceConnections> logger)
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (Guid DeviceId, HubCallerContext Context)> _open = new();
+
+    public void Add(Guid deviceId, HubCallerContext context) => _open[context.ConnectionId] = (deviceId, context);
+
+    public void Remove(string connectionId) => _open.TryRemove(connectionId, out _);
+
+    /// <summary>Closes every connection of the device; returns how many there were.</summary>
+    public int Abort(Guid deviceId)
+    {
+        var count = 0;
+        foreach (var (id, entry) in _open)
+            if (entry.DeviceId == deviceId && _open.TryRemove(id, out _))
+            {
+                entry.Context.Abort();
+                count++;
+            }
+        if (count > 0) logger.LogInformation("Closed {Count} live connection(s) of revoked device {DeviceId}.", count, deviceId);
+        return count;
     }
 }
 
