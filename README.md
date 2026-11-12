@@ -26,6 +26,16 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
     on shared storage.
   - Connections are tested before saving.
   - Passwords and keys are stored encrypted and never shown again.
+- **Folders in the web UI:** *Folders* lists what is synced or backed up, where it is stored, and how each
+  device's last sync went. The list updates live as devices report.
+  - Add and edit folders (Backup, Mirror or two-way), then attach devices with their local folder. Mirror
+    folders also get a direction for each device. Devices can be paused.
+  - If someone else changed a folder while you were editing it, you are asked to reload instead of
+    overwriting their change.
+  - End-to-end encrypted folders show the command that sets them up on a device.
+- **Restoring from the browser:** for Backup folders with standard encryption, *Snapshots* lists every
+  backup. Walk through its folders and download single files or whole folders as a ZIP. End-to-end encrypted
+  backups can only be read on your devices: restore them with `async-cli restore`.
 - **Sync engine** (used by the upcoming agent and apps):
   - **Backups:** deduplicated, compressed, always encrypted snapshots, with retention rules, pruning and
     integrity checks.

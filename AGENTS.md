@@ -347,6 +347,59 @@ parent. After each run, snapshots are forgotten per the folder's retention. Prun
 
 The apps will keep the same data in the OS keystore.
 
+## Web UI: folders and snapshot browsing (M2)
+
+**Folders page** (`src/async-ui/src/pages/Folders.tsx`, the default page after sign-in):
+- Lists folders with mode, encryption, kind, storage and root, and per device its local path, direction, paused
+  flag and last sync result.
+- Create and edit with `FolderForm`. Fixed fields (mode, encryption, kind, storage, root) are read-only when
+  editing. Edits send `ExpectedRevision`, and a 409 shows "changed meanwhile" with a Reload button that rebuilds
+  the form from the latest folder.
+- Devices are attached, edited and detached with `FolderDeviceForm`, which uses the same revision check.
+- End-to-end folders whose repository is not ready show the `async-cli init-encryption --folder N` hint.
+- **Live updates:** `useSyncEvents` connects to `/hubs/sync` (`@microsoft/signalr`). The token comes from
+  `getAccessToken`, sent as `access_token` in the query. On `config.changed`, `folder.status` and after every
+  (re)connect, the page reloads its data. Events sent while offline are lost, so a reconnect counts as "reload".
+  Open forms keep their edits, because they are keyed by folder id and conflict generation, not by revision.
+
+**Snapshot browsing** (`SnapshotsController`, `SnapshotService` + `SnapshotBrowser` in
+`src/ASync.Api/Services/SnapshotService.cs`):
+- **Which folders:** only Transport-encrypted Backup folders, which the server opens with
+  `FolderService.ServerKey`.
+  - End-to-end folders answer 409 with a message pointing to `async-cli snapshots` and `async-cli restore`.
+  - Mirror and TwoWay folders answer 400.
+  - Owner only: anyone else gets 404, and a device token gets 403 (`Roles.Users`).
+- **Endpoints** under `/api/folders/{id}/snapshots`:
+  - `GET` lists snapshots, newest first, with the device's name.
+  - `GET {sid}/tree?path=` returns one directory: directories first, then files, sorted by name.
+  - `GET {sid}/file?path=` streams a file with `Content-Length`.
+  - `GET {sid}/zip?path=` streams a directory as a ZIP. Empty directories become entries and symlinks are left
+    out.
+  - `POST {sid}/download-link` returns `/api/snapshot-downloads?t=<ticket>`.
+- **Download links:**
+  - The ticket is a Data Protection time-limited payload (purpose `ASync.SnapshotDownload.v1`, 5 minutes)
+    naming the user, folder, snapshot, path and kind.
+  - The UI downloads through these links, so the browser streams to disk instead of buffering a blob. The
+    download endpoint is anonymous: the ticket is the authorization, and the folder's owner is checked again.
+- **Repository cache:** opened repositories are kept per folder (10 idle minutes) together with the set of
+  snapshot ids listed *before* the index was loaded.
+  - Snapshots are written after their data and index, so that set is exactly what the cached index covers.
+  - A request for any other snapshot reloads the index first.
+  - A read that hits a missing blob or pack (a prune meanwhile) reloads once and retries.
+  - The cache drops an entry when `FolderBackendCache` hands out a new back-end instance.
+- **Downloads take a shared repository lock**, so a prune cannot delete packs mid-download. ZIPs refresh the
+  lock every 5 minutes. A failure after the response has started aborts the connection, so the browser shows a
+  failed download rather than a truncated file.
+- **Gotchas:**
+  - Snapshot ids are validated as 32 lowercase hex characters before they become a repository path.
+  - Paths go through `StoragePath.Normalize`, so `..` gives a 400.
+  - `ZipArchive` still writes synchronously when an entry or the archive is disposed, even with the .NET 10
+    async API, and Kestrel refuses synchronous writes. `SnapshotBrowser` therefore writes through
+    `SyncWriteBuffer`, which holds synchronous writes and drains them asynchronously after each entry.
+- **Checks:** `SnapshotServiceTests` (unit tests on local repositories) and `scripts/smoke-snapshots.cs`, which
+  runs end to end against a running server. That script enrolls a device, backs up through the gateway, then
+  browses and downloads, and checks every refusal.
+
 ## Background work and wake-ups (M3–M4)
 
 - **Desktop:** the agent runs as a Windows Service, a systemd unit or a launchd agent. The tray UI talks to it

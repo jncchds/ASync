@@ -1,6 +1,6 @@
 # Release notes
 
-## v0.1.0 — 2026-11-11
+## v0.1.0 — 2026-11-12
 
 - feat: **Project scaffold**: .NET 10 solution with central package versions (Contracts, Core, Infrastructure,
   Api, Tests), a React 19 + Vite UI served by the server, a Docker image and compose file, and a CI workflow
@@ -41,6 +41,17 @@
   - Migration `Folders`.
 - feat(cli): **async-cli**: `enroll` (code or approval link), `status`, `folders`, `sync`, `run` (daemon),
   `set-path`, `pause`/`resume`, `init-encryption`, `unlock`, `snapshots`, `restore`, `forget`.
+- feat(ui): **Folders page**:
+  - Lists folders with each device's last sync, and updates live over SignalR `/hubs/sync`.
+  - Create and edit folders; fixed fields are read-only, and a conflicting edit asks you to reload.
+  - Delete folders, and attach, edit, pause or detach devices.
+  - Shows the `async-cli init-encryption` hint for end-to-end folders that are not set up yet.
+- feat(snapshots): **Snapshot browsing and downloads** for Backup folders with standard (Transport)
+  encryption:
+  - List snapshots, walk directories, download files, or download a directory as a ZIP.
+  - Downloads stream from the repository under a shared lock, through short-lived download links.
+  - End-to-end folders answer 409 and point to `async-cli restore`.
+  - `scripts/smoke-snapshots.cs` checks it all end to end.
 - feat(docker): a `/data` volume for server-disk storage; the container runs as the unprivileged `app` user.
 - feat: `scripts/smoke-devices.cs` runs an end-to-end check of sign-in and every device flow against a
   running server; `scripts/smoke-storage.cs` does the same for storage management.

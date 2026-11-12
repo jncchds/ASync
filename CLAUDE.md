@@ -38,6 +38,7 @@ docker compose up -d --build                  # full stack: server on http://loc
 docker compose up postgres -d                 # database only
 dotnet run scripts/smoke-devices.cs -- http://localhost:5100 admin admin-password   # end-to-end device checks
 dotnet run scripts/smoke-storage.cs -- http://localhost:5100 admin admin-password   # storage checks (needs the test containers for S3)
+dotnet run scripts/smoke-snapshots.cs -- http://localhost:5100 admin admin-password # folders, a device backup, snapshot browsing/downloads
 ```
 
 ## Architecture (short)

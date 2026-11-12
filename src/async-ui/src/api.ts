@@ -218,3 +218,137 @@ export const deleteStorageBackend = (id: number) => api.delete(`/storage-backend
 export const testStorageSettings = (settings: StorageSettings, backendId?: number) =>
   api.post<StorageTestResult>('/storage-backends/test', { settings, backendId }).then(r => r.data)
 export const testStorageBackend = (id: number) => api.post<StorageTestResult>(`/storage-backends/${id}/test`).then(r => r.data)
+
+// ── Folders ───────────────────────────────────────────────────────────────────
+
+export type SyncMode = 'Backup' | 'Mirror' | 'TwoWay'
+export type FolderEncryption = 'Transport' | 'EndToEnd'
+export type FolderKind = 'Files' | 'Photos' | 'Contacts' | 'Calendars'
+export type MirrorDirection = 'Upload' | 'Download'
+
+/** Which snapshots a Backup folder keeps. All zero/null = keep everything. */
+export interface Retention {
+  last: number
+  hourly: number
+  daily: number
+  weekly: number
+  monthly: number
+  yearly: number
+  withinHours: number | null
+}
+
+export interface FolderDevice {
+  deviceId: string
+  deviceName: string
+  platform: DevicePlatform
+  localPath: string
+  direction: MirrorDirection | null
+  paused: boolean
+  lastSyncAt: string | null
+  lastSyncOk: boolean | null
+  lastSyncMessage: string | null
+}
+
+export interface Folder {
+  id: number
+  name: string
+  mode: SyncMode
+  encryption: FolderEncryption
+  kind: FolderKind
+  storageBackendId: number
+  storageBackendName: string
+  rootPath: string
+  intervalMinutes: number
+  excludes: string[]
+  retention: Retention
+  versionsKeepDays: number
+  trashKeepDays: number
+  /** Grows with every change; edits send it back so concurrent edits are detected (409). */
+  revision: number
+  /** False for an end-to-end folder until a device has set up its repository. */
+  repositoryReady: boolean
+  devices: FolderDevice[]
+  createdAt: string
+}
+
+export interface SaveFolder {
+  name: string
+  mode: SyncMode
+  encryption: FolderEncryption
+  kind: FolderKind
+  storageBackendId: number
+  rootPath: string
+  intervalMinutes: number
+  excludes: string[]
+  retention: Retention
+  versionsKeepDays: number
+  trashKeepDays: number
+  expectedRevision?: number
+}
+
+export interface AttachDevice {
+  deviceId: string
+  localPath: string
+  direction: MirrorDirection | null
+  paused: boolean
+  expectedRevision?: number
+}
+
+export const getFolders = () => api.get<Folder[]>('/folders').then(r => r.data)
+export const createFolder = (req: SaveFolder) => api.post<Folder>('/folders', req).then(r => r.data)
+export const updateFolder = (id: number, req: SaveFolder) => api.put<Folder>(`/folders/${id}`, req).then(r => r.data)
+export const deleteFolder = (id: number) => api.delete(`/folders/${id}`)
+export const attachFolderDevice = (id: number, req: AttachDevice) => api.put<Folder>(`/folders/${id}/devices`, req).then(r => r.data)
+export const detachFolderDevice = (id: number, deviceId: string) => api.delete<Folder>(`/folders/${id}/devices/${deviceId}`).then(r => r.data)
+
+/** True for a 409: someone changed the folder since it was loaded. */
+export const isConflict = (err: unknown) => axios.isAxiosError(err) && err.response?.status === 409
+
+// ── Snapshots (Transport-encrypted Backup folders) ────────────────────────────
+
+export interface Snapshot {
+  id: string
+  time: string
+  source: string
+  deviceId: string | null
+  deviceName: string
+  hostname: string | null
+  tags: string[]
+  filesNew: number
+  filesChanged: number
+  filesUnmodified: number
+  bytesProcessed: number
+  bytesAdded: number
+  errors: number
+}
+
+export type SnapshotNodeType = 'File' | 'Directory' | 'Symlink'
+
+export interface SnapshotNode {
+  name: string
+  path: string
+  type: SnapshotNodeType
+  size: number
+  modified: string
+  linkTarget: string | null
+}
+
+export interface SnapshotTree { snapshotId: string; path: string; nodes: SnapshotNode[] }
+
+export const getSnapshots = (folderId: number) => api.get<Snapshot[]>(`/folders/${folderId}/snapshots`).then(r => r.data)
+export const getSnapshotTree = (folderId: number, snapshotId: string, path: string) =>
+  api.get<SnapshotTree>(`/folders/${folderId}/snapshots/${snapshotId}/tree`, { params: { path } }).then(r => r.data)
+
+/**
+ * Starts a browser download of a file (or a directory as a ZIP). The server hands out a link valid for a few
+ * minutes, so the browser streams the download to disk instead of it being buffered here.
+ */
+export async function downloadFromSnapshot(folderId: number, snapshotId: string, path: string, zip: boolean) {
+  const { data } = await api.post<{ url: string; expiresAt: string }>(`/folders/${folderId}/snapshots/${snapshotId}/download-link`, { path, zip })
+  const a = document.createElement('a')
+  a.href = data.url
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
