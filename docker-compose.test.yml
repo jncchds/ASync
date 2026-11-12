@@ -7,7 +7,8 @@ services:
   # S3-compatible server (MinIO no longer publishes images on Docker Hub). No identities configured = no auth.
   s3:
     image: chrislusf/seaweedfs:latest
-    command: server -s3 -dir=/data -s3.port=8333
+    # -volume.max: each bucket takes several volumes; the low default runs out after a few test buckets.
+    command: server -s3 -dir=/data -s3.port=8333 -volume.max=100
     ports:
       - "19000:8333"
 

@@ -1,5 +1,12 @@
 # Release notes
 
+## v0.1.1 — 2026-11-12
+
+- fix: **Creating a Backup folder on failing storage** now gives a readable error instead of a 500 error (SDK
+  exceptions such as `AmazonS3Exception` were not caught).
+- fix(test): the SeaweedFS S3 test server gets `-volume.max=100`; the default ran out of volumes after a few
+  test buckets, and every write then failed with "internal error".
+
 ## v0.1.0 — 2026-11-12
 
 - feat: **Project scaffold**: .NET 10 solution with central package versions (Contracts, Core, Infrastructure,

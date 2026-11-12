@@ -99,7 +99,8 @@ public class FolderService(
         if (folder.Mode == SyncMode.Backup && folder.Encryption == FolderEncryption.Transport)
         {
             try { folder.ProtectedRepositoryKey = await CreateRepositoryAsync(folder, ct); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or HttpRequestException)
+            // Any storage failure (SDK exceptions such as AmazonS3Exception included) is a message for the user, not a 500.
+            catch (Exception e) when (e is not OperationCanceledException)
             {
                 return ServiceResult<Folder>.Fail($"Could not create the backup repository on the storage: {e.Message}");
             }
