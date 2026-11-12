@@ -52,21 +52,23 @@ export default function Storage() {
       {backends === null ? <div className="loading">Loading…</div> : backends.length === 0 ? (
         <p className="empty">No storage yet. Add an S3 bucket, a Nextcloud, an SFTP server or a network share.</p>
       ) : (
-        <div className="backend-list">
+        <div className="card-list">
           {backends.map(b => (
-            <div key={b.id} className="card backend">
-              <div className="backend-main">
-                <div>
-                  <strong>{b.name}</strong> <span className="badge">{typeLabel(b.type)}</span>
-                  {b.shared && <span className="badge shared">Shared</span>}
+            <div key={b.id} className="card item-head">
+              <div className="item-main">
+                <div className="item-title">
+                  <strong>{b.name}</strong>
+                  <span className="pill pill-accent">{typeLabel(b.type)}</span>
+                  {b.shared && <span className="pill">Shared</span>}
+                  {b.lastCheckedAt === null ? <span className="pill">Not tested</span>
+                    : b.lastCheckOk
+                      ? <span className="pill pill-success" title={formatDate(b.lastCheckedAt)}>Working</span>
+                      : <span className="pill pill-danger" title={formatDate(b.lastCheckedAt)}>Failing</span>}
                 </div>
                 <code className="muted">{b.description}</code>
-                <div className="backend-status">
-                  {b.lastCheckedAt === null ? <span className="muted">Not tested yet</span>
-                    : b.lastCheckOk
-                      ? <span className="success-msg" title={formatDate(b.lastCheckedAt)}>● Working · checked {relativeTime(b.lastCheckedAt)}</span>
-                      : <span className="error-msg" title={formatDate(b.lastCheckedAt)}>● {b.lastCheckError}</span>}
-                </div>
+                {b.lastCheckedAt !== null && (b.lastCheckOk
+                  ? <span className="muted small-text" title={formatDate(b.lastCheckedAt)}>Checked {relativeTime(b.lastCheckedAt)}</span>
+                  : <span className="error-text small-text" title={formatDate(b.lastCheckedAt)}>{b.lastCheckError}</span>)}
               </div>
               {b.canEdit && (
                 <div className="row-actions">

@@ -1,5 +1,6 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, useNavigate } from 'react-router-dom'
 import { authLogout } from '../api'
+import Sidebar, { SidebarBtn, SidebarDivider, SidebarLink } from '../components/Sidebar'
 import { useAuth } from '../hooks/useAuth'
 
 export default function AppLayout() {
@@ -12,28 +13,32 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <img src="/favicon.svg" alt="" width={24} height={24} />
-          <span>ASync</span>
+    <div className="app-layout">
+      <Sidebar bottomChildren={
+        <>
+          <div className="sidebar-user hide-when-collapsed" title={user?.username}>
+            <span className="s-user-name">{user?.displayName}</span>
+            {user?.isAdmin && <span className="pill pill-accent">admin</span>}
+          </div>
+          <SidebarBtn icon="🚪" label="Sign out" title={`Sign out (${user?.username ?? '…'})`} onClick={signOut} />
+        </>
+      }>
+        <SidebarLink to="/folders" icon="📁" label="Folders" />
+        <SidebarLink to="/devices" icon="💻" label="Devices" />
+        <SidebarLink to="/storage" icon="🗄️" label="Storage" />
+        {user?.isAdmin && (
+          <>
+            <SidebarDivider />
+            <SidebarLink to="/admin/users" icon="👥" label="Users" />
+          </>
+        )}
+      </Sidebar>
+      <main className="app-main">
+        {serverWarnings.map(w => <div key={w} className="banner warning">{w}</div>)}
+        <div className="page">
+          <Outlet />
         </div>
-        <nav>
-          <NavLink to="/folders">Folders</NavLink>
-          <NavLink to="/devices">Devices</NavLink>
-          <NavLink to="/storage">Storage</NavLink>
-          {user?.isAdmin && <NavLink to="/admin/users">Users</NavLink>}
-        </nav>
-        <div className="topbar-user">
-          <span className="muted">{user?.displayName}</span>
-          <button className="secondary" onClick={signOut}>Sign out</button>
-        </div>
-      </header>
-      {serverWarnings.map(w => <div key={w} className="banner warning">{w}</div>)}
-      <main className="container">
-        <Outlet />
       </main>
-      <footer className="footer muted">ASync {__APP_VERSION__}</footer>
     </div>
   )
 }

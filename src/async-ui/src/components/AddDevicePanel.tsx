@@ -97,7 +97,7 @@ export default function AddDevicePanel({ knownDeviceIds, onDeviceAdded, onClose 
       ) : (
         <div className="pairing">
           <div className="qr">
-            <QRCodeSVG value={created.pairUri} size={200} marginSize={2} />
+            <QRCodeSVG value={created.pairUri} size={200} marginSize={2} bgColor="transparent" fgColor="currentColor" />
           </div>
           <div className="pairing-details">
             <p className="hint">Scan with the ASync app, or enter the server address and code:</p>
@@ -107,10 +107,11 @@ export default function AddDevicePanel({ knownDeviceIds, onDeviceAdded, onClose 
             </dl>
             <p className="hint">On a server or in Docker:</p>
             <pre className="command">async-cli enroll --server {server} --code {created.code}</pre>
-            <p className={expired ? 'error-msg' : 'muted'}>
-              {expired ? 'This code has expired. Close and make a new one.' :
-                `${created.reusable ? 'Reusable' : 'Works once'} · expires ${relativeTime(created.expiresAt, now)}`}
-            </p>
+            {expired ? <p className="error-msg">This code has expired. Close and make a new one.</p> : (
+              <p className="muted small-text">
+                <span className="pill pill-accent">{created.reusable ? 'Reusable' : 'Works once'}</span> expires {relativeTime(created.expiresAt, now)}
+              </p>
+            )}
             {joined.length > 0 && <p className="success-msg">Added: {joined.join(', ')}</p>}
           </div>
         </div>

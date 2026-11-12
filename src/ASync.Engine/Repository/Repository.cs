@@ -264,6 +264,24 @@ public sealed class Repository
 
     public static string NewSnapshotId() => Guid.CreateVersion7().ToString("N");
 
+    /// <summary>
+    /// The last 8 hex digits of a snapshot id, for showing to people. Ids are Guid v7, whose leading digits are
+    /// a millisecond timestamp shared by snapshots made around the same time; the trailing ones are random.
+    /// </summary>
+    public static string ShortSnapshotId(string id) => id.Length > 8 ? id[^8..] : id;
+
+    /// <summary>
+    /// The snapshots whose id starts or ends with <paramref name="wanted"/> (a full id, a prefix, or the short id
+    /// people see), ignoring case. Callers treat anything other than exactly one match as "not found".
+    /// </summary>
+    public static List<Snapshot> FindSnapshots(IEnumerable<Snapshot> snapshots, string wanted)
+    {
+        wanted = wanted.Trim().Replace("-", "");
+        if (wanted.Length == 0) return [];
+        return [.. snapshots.Where(s => s.Id.StartsWith(wanted, StringComparison.OrdinalIgnoreCase)
+                                     || s.Id.EndsWith(wanted, StringComparison.OrdinalIgnoreCase))];
+    }
+
     public Task SaveSnapshotAsync(Snapshot snapshot, CancellationToken ct = default) =>
         WriteEncryptedAsync($"snapshots/{snapshot.Id}", snapshot, EngineJson.Default.Snapshot, "snapshot", ct);
 

@@ -63,21 +63,25 @@ export default function Devices() {
         <p className="empty">No devices yet. Use <strong>Add device</strong> to connect a phone, computer or server.</p>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="stack">
             <thead>
               <tr><th>Name</th><th>Platform</th><th>Version</th><th>Last seen</th><th>Added</th><th></th></tr>
             </thead>
             <tbody>
               {active.map(d => (
                 <tr key={d.id}>
-                  <td>{d.name}</td>
-                  <td>{PLATFORM_LABELS[d.platform]}</td>
-                  <td className="muted">{d.appVersion ?? '—'}</td>
-                  <td title={d.lastSeenAt ? formatDate(d.lastSeenAt) : undefined}>{d.lastSeenAt ? relativeTime(d.lastSeenAt) : 'Never'}</td>
-                  <td className="muted">{formatDate(d.createdAt)}</td>
-                  <td className="row-actions">
-                    <button className="secondary small" onClick={() => rename(d)}>Rename</button>
-                    <button className="danger small" onClick={() => revoke(d)}>Remove</button>
+                  <td className="title-cell"><span>{d.name}</span></td>
+                  <td data-label="Platform"><span className="pill">{PLATFORM_LABELS[d.platform]}</span></td>
+                  <td data-label="Version" className="muted nowrap"><span>{d.appVersion ?? '—'}</span></td>
+                  <td data-label="Last seen" className="nowrap" title={d.lastSeenAt ? formatDate(d.lastSeenAt) : undefined}>
+                    <span>{d.lastSeenAt ? relativeTime(d.lastSeenAt) : 'Never'}</span>
+                  </td>
+                  <td data-label="Added" className="muted nowrap"><span>{formatDate(d.createdAt)}</span></td>
+                  <td className="actions-cell">
+                    <div className="row-actions">
+                      <button className="secondary small" onClick={() => rename(d)}>Rename</button>
+                      <button className="danger small" onClick={() => revoke(d)}>Remove</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -103,10 +107,10 @@ export default function Devices() {
           <ul className="plain-list">
             {enrollments.map(e => (
               <li key={e.id}>
-                <span>
-                  {e.label ?? (e.reusable ? 'Reusable code' : 'One-time code')}
-                  {e.reusable && <span className="muted"> · used {e.usedCount}×</span>}
-                  <span className="muted"> · expires {relativeTime(e.expiresAt)}</span>
+                <span className="item-title">
+                  <span>{e.label ?? (e.reusable ? 'Reusable code' : 'One-time code')}</span>
+                  <span className={`pill${e.reusable ? ' pill-accent' : ''}`}>{e.reusable ? `reusable · used ${e.usedCount}×` : 'one-time'}</span>
+                  <span className="muted small-text">expires {relativeTime(e.expiresAt)}</span>
                 </span>
                 <button className="secondary small" onClick={() => cancelCode(e)}>Cancel</button>
               </li>

@@ -6,6 +6,11 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 > **Status: early development (v0.1.0).** The server, accounts, device provisioning, storage back-ends and the
 > sync engine work. Syncing between devices (the CLI agent) and the apps are next. See [AGENTS.md](AGENTS.md) for the design and roadmap.
 
+<p>
+  <img src="docs/screenshots/dark-02-folders.png" alt="Folders page, dark theme" width="64%">
+  <img src="docs/screenshots/phone-02-folders.png" alt="Folders page on a phone" width="22%">
+</p>
+
 ## What works today
 
 - **Accounts:** the first account becomes admin, and admins create the others. Optional single sign-on
@@ -36,6 +41,10 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 - **Restoring from the browser:** for Backup folders with standard encryption, *Snapshots* lists every
   backup. Walk through its folders and download single files or whole folders as a ZIP. End-to-end encrypted
   backups can only be read on your devices: restore them with `async-cli restore`.
+- **Web UI:** a sidebar layout with light, dark and system themes, usable on phones too.
+  [More screenshots](docs/screenshots/): [snapshot browser](docs/screenshots/light-03-snapshots.png),
+  [devices](docs/screenshots/light-06-add-device-qr.png), [storage](docs/screenshots/dark-08-storage.png),
+  [phone menu](docs/screenshots/phone-02b-sidebar-open.png).
 - **Sync engine** (used by the upcoming agent and apps):
   - **Backups:** deduplicated, compressed, always encrypted snapshots, with retention rules, pruning and
     integrity checks.
@@ -119,7 +128,7 @@ async-cli run                                                                # k
 | `set-path`, `pause`, `resume` | Changes this device's settings for a folder. |
 | `init-encryption --folder N` | Sets up an end-to-end encrypted Backup folder (on one device) and prints its recovery key. |
 | `unlock --folder N` | Unlocks an end-to-end encrypted folder on another device, with the passphrase or the recovery key. |
-| `snapshots`, `restore` | Lists a Backup folder's snapshots, and restores one (or `--path` a part of it) into `--target`. |
+| `snapshots`, `restore` | Lists a Backup folder's snapshots, and restores one (or `--path` a part of it) into `--target`. `--snapshot` takes the short id that `snapshots` and the web UI show (the id's last 8 digits), the start of the id, or `latest`. |
 | `forget` | Removes this device's identity from the machine. |
 
 Passphrases are read from `ASYNC_PASSPHRASE`, from `--passphrase-file`, or typed in. A sync that would delete

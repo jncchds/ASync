@@ -3,7 +3,7 @@ import {
   downloadFromSnapshot, errorMessage, getSnapshots, getSnapshotTree,
   type Folder, type Snapshot, type SnapshotTree,
 } from '../api'
-import { formatBytes, formatDate, relativeTime } from '../utils/format'
+import { formatBytes, formatDate, relativeTime, shortSnapshotId } from '../utils/format'
 
 interface Props {
   folder: Folder
@@ -47,7 +47,7 @@ export default function SnapshotBrowser({ folder, refresh, onClose }: Props) {
   return (
     <div className="card section">
       <div className="header">
-        <h2>Snapshots of {folder.name}</h2>
+        <h2>🕘 Snapshots of {folder.name}</h2>
         <button type="button" className="secondary small" onClick={onClose}>Close</button>
       </div>
       {error && <p className="error-msg">{error}</p>}
@@ -60,7 +60,10 @@ export default function SnapshotBrowser({ folder, refresh, onClose }: Props) {
             {snapshots.map(s => (
               <li key={s.id}>
                 <button type="button" className={`snapshot-item${selected?.id === s.id ? ' selected' : ''}`} onClick={() => open(s, '')}>
-                  <strong title={formatDate(s.time)}>{formatDate(s.time)}</strong>
+                  <span className="snap-head">
+                    <span>{formatDate(s.time)}</span>
+                    <code className="pill" title={`Snapshot ${s.id}`}>{shortSnapshotId(s.id)}</code>
+                  </span>
                   <span className="muted">
                     {s.deviceName || s.hostname || 'Removed device'} · {relativeTime(s.time)}
                   </span>
@@ -91,24 +94,26 @@ export default function SnapshotBrowser({ folder, refresh, onClose }: Props) {
                 </div>
                 {loadingTree && !tree ? <div className="loading">Loading…</div> : tree && (
                   <div className="table-wrap">
-                    <table>
+                    <table className="stack">
                       <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th></th></tr></thead>
                       <tbody>
                         {tree.nodes.length === 0 && <tr><td colSpan={4} className="muted">Empty directory</td></tr>}
                         {tree.nodes.map(n => (
                           <tr key={n.name}>
-                            <td className="name-cell">
+                            <td className="title-cell">
                               {n.type === 'Directory'
                                 ? <button type="button" className="link" onClick={() => open(selected, n.path)}>📁 {n.name}</button>
                                 : n.type === 'Symlink'
                                   ? <span className="muted" title={n.linkTarget ?? undefined}>↪ {n.name}</span>
-                                  : <span>{n.name}</span>}
+                                  : <span>📄 {n.name}</span>}
                             </td>
-                            <td className="muted">{n.type === 'File' ? formatBytes(n.size) : ''}</td>
-                            <td className="muted">{formatDate(n.modified)}</td>
-                            <td className="row-actions">
-                              {n.type === 'File' && <button type="button" className="secondary small" onClick={() => download(n.path, false)}>Download</button>}
-                              {n.type === 'Directory' && <button type="button" className="secondary small" onClick={() => download(n.path, true)}>ZIP</button>}
+                            <td data-label="Size" className="muted nowrap">{n.type === 'File' ? <span>{formatBytes(n.size)}</span> : null}</td>
+                            <td data-label="Modified" className="muted nowrap"><span>{formatDate(n.modified)}</span></td>
+                            <td className="actions-cell">
+                              <div className="row-actions">
+                                {n.type === 'File' && <button type="button" className="secondary small" onClick={() => download(n.path, false)}>Download</button>}
+                                {n.type === 'Directory' && <button type="button" className="secondary small" onClick={() => download(n.path, true)}>ZIP</button>}
+                              </div>
                             </td>
                           </tr>
                         ))}
