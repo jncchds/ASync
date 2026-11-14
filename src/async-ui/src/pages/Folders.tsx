@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  deleteFolder, detachFolderDevice, errorMessage, getDevices, getFolders, getStorageBackends,
-  type Device, type Folder, type FolderDevice, type MaintenanceStatus, type StorageBackend,
+  deleteFolder, detachFolderDevice, errorMessage, getAlertIncidents, getDevices, getFolders, getStorageBackends,
+  type AlertIncident, type Device, type Folder, type FolderDevice, type MaintenanceStatus, type StorageBackend,
 } from '../api'
 import FolderForm from '../components/FolderForm'
 import FolderDeviceForm from '../components/FolderDeviceForm'
@@ -10,6 +10,7 @@ import SnapshotBrowser from '../components/SnapshotBrowser'
 import RecoveryKeyPanel from '../components/RecoveryKeyPanel'
 import { useSyncEvents, type SyncEvent } from '../hooks/useSyncEvents'
 import { kindLabel, modeLabel } from '../utils/folders'
+import { ALERT_KIND_LABELS, openByDevice } from '../utils/alerts'
 import { formatDate, formatMinutes, relativeTime } from '../utils/format'
 
 /** The last prune or check of a Backup folder as a pill: green when fine, red when failed, grey when not run or off. */
@@ -38,6 +39,8 @@ export default function Folders() {
   const [folders, setFolders] = useState<Folder[] | null>(null)
   const [backends, setBackends] = useState<StorageBackend[]>([])
   const [devices, setDevices] = useState<Device[]>([])
+  /** Open alert incidents (overdue or failing devices, failed checks/prunes). */
+  const [incidents, setIncidents] = useState<AlertIncident[]>([])
   const [editing, setEditing] = useState<number | 'new' | null>(null)
   const [deviceEdit, setDeviceEdit] = useState<DeviceEdit | null>(null)
   const [browsing, setBrowsing] = useState<number | null>(null)
@@ -57,14 +60,18 @@ export default function Folders() {
     })
     .catch(err => setError(errorMessage(err, 'Could not load folders.'))), [])
 
-  useEffect(() => { load() }, [load])
+  // Only open incidents (resolved within the last 0 days = none); failures here must not hide the folders.
+  const loadIncidents = useCallback(() => getAlertIncidents(0).then(setIncidents).catch(() => setIncidents([])), [])
+
+  useEffect(() => { load(); loadIncidents() }, [load, loadIncidents])
 
   const onEvent = useCallback((e: SyncEvent) => {
     if (e.name === 'config.changed' || e.name === 'folder.status' || e.name === 'reconnected') {
       load()
       if (e.name === 'folder.status') setSyncReports(n => n + 1)
     }
-  }, [load])
+    if (e.name === 'alerts.changed' || e.name === 'reconnected') loadIncidents()
+  }, [load, loadIncidents])
   const live = useSyncEvents(onEvent)
 
   const reload = async () => {
@@ -90,6 +97,8 @@ export default function Folders() {
   const editingFolder = typeof editing === 'number' ? current(editing) : undefined
   const browsingFolder = browsing !== null ? current(browsing) : undefined
   const recoveryFolder = recoveryFor !== null ? current(recoveryFor.folderId) : undefined
+  const deviceAlerts = openByDevice(incidents)
+  const openCount = incidents.filter(i => !i.resolvedAt).length
 
   return (
     <>
@@ -103,6 +112,12 @@ export default function Folders() {
         </div>
       </div>
       <p className="hint">What your devices sync or back up, and where it is stored.</p>
+      {openCount > 0 && (
+        <div className="notice danger">
+          <strong>{openCount === 1 ? '1 open problem' : `${openCount} open problems`}</strong>: a device is overdue or failing, or a check failed.{' '}
+          <Link to="/alerts">See alerts</Link>
+        </div>
+      )}
       {error && <p className="error-msg">{error}</p>}
       {folders !== null && backends.length === 0 && (
         <p className="hint">First <Link to="/storage">add storage</Link> where your folders will be kept.</p>
@@ -219,7 +234,12 @@ export default function Folders() {
                           {f.devices.map(d => (
                             <tr key={d.deviceId}>
                               <td className="title-cell">
-                                <span>{d.deviceName}{d.paused && <> <span className="pill pill-warning">Paused</span></>}</span>
+                                <span>{d.deviceName}{d.paused && <> <span className="pill pill-warning">Paused</span></>}
+                                  {(() => {
+                                    const alert = deviceAlerts.get(`${f.id}:${d.deviceId}`)
+                                    return alert && <> <span className={`pill ${alert.kind === 'Overdue' ? 'pill-warning' : 'pill-danger'}`} title={alert.detail}>⚠ {ALERT_KIND_LABELS[alert.kind]}</span></>
+                                  })()}
+                                </span>
                               </td>
                               <td data-label="Folder" className="wrap"><code title={d.localPath}>{d.localPath}</code></td>
                               {f.mode === 'Mirror' && (

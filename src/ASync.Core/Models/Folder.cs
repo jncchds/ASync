@@ -69,6 +69,14 @@ public class FolderDevice
     public DateTime? LastSyncAt { get; set; }
     public bool? LastSyncOk { get; set; }
     public string? LastSyncMessage { get; set; }
+    /// <summary>When the device was attached or last resumed: overdue detection counts from the later of this and <see cref="LastSuccessAt"/>.</summary>
+    public DateTime AttachedAt { get; set; }
+    /// <summary>The last run reported as successful (<see cref="LastSyncAt"/> is the last run of any outcome).</summary>
+    public DateTime? LastSuccessAt { get; set; }
+    /// <summary>Failed runs in a row; 0 after a success.</summary>
+    public int ConsecutiveFailures { get; set; }
+    /// <summary>The first failed run of the current streak; null after a success.</summary>
+    public DateTime? FailingSince { get; set; }
 
     public Folder? Folder { get; set; }
     public Device? Device { get; set; }

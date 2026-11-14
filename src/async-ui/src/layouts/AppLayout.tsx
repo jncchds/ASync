@@ -26,6 +26,7 @@ export default function AppLayout() {
         <SidebarLink to="/folders" icon="📁" label="Folders" />
         <SidebarLink to="/devices" icon="💻" label="Devices" />
         <SidebarLink to="/storage" icon="🗄️" label="Storage" />
+        <SidebarLink to="/alerts" icon="🔔" label="Alerts" />
         {user?.isAdmin && (
           <>
             <SidebarDivider />

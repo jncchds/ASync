@@ -13,6 +13,8 @@ project=async-e2e
 work="$PWD/artifacts/e2e"
 export ASYNC_PORT="$port"
 export ASYNC_MAINTENANCE_POLL_SECONDS=5   # the server looks for folders due for prune/check every 5 s, not 15 min
+# Overdue alerts within seconds: scan every 3 s, a device is overdue 20 s after its last successful run.
+export ASYNC_ALERTS_POLL_SECONDS=3 ASYNC_ALERTS_MINIMUM_GRACE_MINUTES=0.34 ASYNC_ALERTS_GRACE_FACTOR=0
 
 compose() { docker compose -p "$project" "$@"; }
 cleanup() {

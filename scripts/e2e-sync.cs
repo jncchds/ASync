@@ -1,16 +1,21 @@
 // End-to-end sync test: a running server plus real `async-cli` agents with separate config directories.
 //   dotnet run scripts/e2e-sync.cs -- --cli <async-cli.dll> [--server URL] [--admin USER] [--password PW]
 //                                     [--work DIR] [--server-container NAME] [--docker-image IMG --docker-network NET]
+//                                     [--webhook-host HOST]
 // Usually started by scripts/e2e-sync.sh, which builds the CLI, starts a throw-away server stack and cleans up.
 // The person's side (admin account, a Local back-end under /data, folders, codes, attaching devices, revoking) goes
 // through the REST API; the devices' side is the CLI. With --server-container it also looks at the storage on the
-// server's disk; with --docker-image a third agent runs from the async-cli image.
+// server's disk; with --docker-image a third agent runs from the async-cli image. Alerts go to a small webhook listener
+// on this machine, which the server reaches as --webhook-host (default host.docker.internal); the server must run with
+// a short overdue grace (e2e-sync.sh sets Alerts__MinimumGraceMinutes and Alerts__GraceFactor=0).
 #:property TargetFramework=net10.0
 #:property ManagePackageVersionsCentrally=false
 #:property PublishAot=false
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -29,6 +34,7 @@ var work = Path.GetFullPath(Opt("work", Path.Combine(Path.GetTempPath(), $"async
 var serverContainer = opts.GetValueOrDefault("server-container");
 var dockerImage = opts.GetValueOrDefault("docker-image");
 var dockerNetwork = opts.GetValueOrDefault("docker-network");
+var webhookHost = Opt("webhook-host", "host.docker.internal");
 var runId = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
 var storageRoot = $"/data/e2e-{runId}";
 
@@ -533,6 +539,67 @@ async Task<int> RunAsync()
         }
     }
 
+    // ── Alerts: overdue and back to normal, by webhook ────────────────────────
+    Section("alerts (webhook)");
+    using (var hook = new WebhookListener())
+    {
+        var hookUrl = $"http://{webhookHost}:{hook.Port}/hook";
+        var badScheme = await Send(HttpMethod.Post, "/api/alerts/channels", new { name = "ftp", settings = new { type = "Webhook", url = "ftp://example.com/x" } }, token);
+        Check(badScheme.Status == HttpStatusCode.BadRequest, "a webhook with a non-http(s) address is refused", badScheme.Raw);
+        var channel = await Send(HttpMethod.Post, "/api/alerts/channels",
+            new { name = "e2e hook", settings = new { type = "Webhook", url = hookUrl, authorization = "Bearer e2e-hook-secret" } }, token);
+        var channelId = channel.Body?["id"]?.GetValue<int>() ?? 0;
+        Check(channel.Status == HttpStatusCode.OK && channel.Body?["settings"]?["authorization"] is null
+              && channel.Body?["secretsSet"]?.AsArray().Any(x => x?.GetValue<string>() == "Authorization") == true,
+            "add a webhook channel (its Authorization header is stored, never shown)", channel.Raw);
+        var tested = await Send(HttpMethod.Post, $"/api/alerts/channels/{channelId}/test", token: token);
+        var testHit = await WaitFor(() => hook.Received.Any(r => r.Body?["event"]?.GetValue<string>() == "test"), 30);
+        Check(tested.Body?["ok"]?.GetValue<bool>() == true && testHit
+              && hook.Received.First(r => r.Body?["event"]?.GetValue<string>() == "test").Authorization == "Bearer e2e-hook-secret",
+            "\"Send test\" reaches the webhook, with the Authorization header", tested.Raw);
+        await Cli(a, ["status"]); // refreshes A's cached access token
+        var hookDeviceToken = JsonNode.Parse(File.ReadAllText(Path.Combine(a.Config, "token.json")))?["accessToken"]?.GetValue<string>();
+        var deviceCalls = await Send(HttpMethod.Get, "/api/alerts/channels", token: hookDeviceToken);
+        Check(deviceCalls.Status == HttpStatusCode.Forbidden, $"a device token cannot read alert channels → {deviceCalls.Status}", deviceCalls.Raw);
+
+        var watch = await Folder("watch", "TwoWay", "Transport", (a, "watch", null));
+        Write(a.Path("watch", "w.txt"), "watched");
+        await Sync(a, watch, "A syncs the watched folder once");
+        bool Mentions(JsonNode? body, string list, string kind) =>
+            body?[list]?.AsArray().Any(i => i?["folderName"]?.GetValue<string>() == "watch" && i?["kind"]?.GetValue<string>() == kind
+                                             && i?["deviceName"]?.GetValue<string>() == a.Name) == true;
+        var overdue = await WaitFor(() => hook.Received.Any(r => Mentions(r.Body, "opened", "overdue")), 120);
+        Check(overdue, "after the (shortened) grace, the webhook gets an overdue alert for A on \"watch\"",
+            string.Join("\n", hook.Received.Select(r => r.Raw)));
+        var alertBody = hook.Received.FirstOrDefault(r => Mentions(r.Body, "opened", "overdue")).Body;
+        Check(alertBody?["version"]?.GetValue<int>() == 1 && alertBody?["user"]?.GetValue<string>() == adminUser
+              && alertBody?["title"]?.GetValue<string>().StartsWith("ASync:") == true && alertBody?["text"]?.GetValue<string>().Contains("watch") == true,
+            "the alert has the documented payload (version, user, title, text)", alertBody?.ToJsonString());
+        var incidents = (await Send(HttpMethod.Get, "/api/alerts/incidents", token: token)).Body?.AsArray() ?? [];
+        Check(incidents.Any(i => i?["folderId"]?.GetValue<int>() == watch && i?["kind"]?.GetValue<string>() == "Overdue" && i?["resolvedAt"] is null),
+            "the web UI lists the open incident", incidents.ToJsonString());
+        var alertsBefore = hook.Received.Count(r => Mentions(r.Body, "opened", "overdue"));
+        await Task.Delay(TimeSpan.FromSeconds(8)); // a few more scans
+        Check(hook.Received.Count(r => Mentions(r.Body, "opened", "overdue")) == alertsBefore, "the overdue alert is sent once, not on every scan");
+
+        await Sync(a, watch, "A syncs again");
+        var backToNormal = await WaitFor(() => hook.Received.Any(r => Mentions(r.Body, "resolved", "overdue")), 60);
+        Check(backToNormal, "the webhook gets a \"back to normal\" message", string.Join("\n", hook.Received.Select(r => r.Raw)));
+        var after = (await Send(HttpMethod.Get, "/api/alerts/incidents", token: token)).Body?.AsArray() ?? [];
+        // (With a 20-second grace it may already be overdue again: only the resolved one matters here.)
+        Check(after.Any(i => i?["folderId"]?.GetValue<int>() == watch && i?["kind"]?.GetValue<string>() == "Overdue" && i?["resolvedAt"] is not null),
+            "the incident is resolved", after.ToJsonString());
+        if (serverContainer is not null)
+        {
+            var log = await Docker(["logs", serverContainer]);
+            Check(!log.Output.Contains("e2e-hook-secret"), "the webhook's secret never appears in the server log");
+        }
+        // Detach A and remove the channel, so nothing more is sent while the rest runs.
+        await Send(HttpMethod.Delete, $"/api/folders/{watch}/devices/{a.Id}", token: token);
+        await Send(HttpMethod.Delete, $"/api/alerts/channels/{channelId}", token: token);
+    }
+
+
     // ── Revocation ────────────────────────────────────────────────────────────
     Section("revocation");
     var revoke = await Send(HttpMethod.Delete, $"/api/devices/{b.Id}", token: token);
@@ -675,4 +742,87 @@ sealed class Log
     public void Add(string? line) { if (line is not null) lock (_text) _text.AppendLine(line); }
     public bool Contains(string value) => ToString().Contains(value, StringComparison.Ordinal);
     public override string ToString() { lock (_text) return _text.ToString(); }
+}
+
+/// <summary>
+/// A minimal HTTP listener for webhook alerts: accepts POSTs on every address of this machine (so the server's
+/// container reaches it via host.docker.internal), answers 200 and keeps each body with its Authorization header.
+/// </summary>
+sealed class WebhookListener : IDisposable
+{
+    private readonly TcpListener _listener = new(IPAddress.Any, 0);
+    private readonly CancellationTokenSource _stop = new();
+    private readonly ConcurrentQueue<(string Raw, JsonNode? Body, string? Authorization)> _queue = new();
+    public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+    public IReadOnlyList<(string Raw, JsonNode? Body, string? Authorization)> Received => [.. _queue];
+
+    public WebhookListener()
+    {
+        _listener.Start();
+        _ = Task.Run(AcceptAsync);
+    }
+
+    private async Task AcceptAsync()
+    {
+        while (!_stop.IsCancellationRequested)
+        {
+            TcpClient client;
+            try { client = await _listener.AcceptTcpClientAsync(_stop.Token); }
+            catch (Exception) { return; }
+            _ = Task.Run(() => HandleAsync(client));
+        }
+    }
+
+    private async Task HandleAsync(TcpClient client)
+    {
+        using (client)
+        {
+            try
+            {
+                var stream = client.GetStream();
+                var buffer = new List<byte>();
+                var chunk = new byte[8192];
+                int headerEnd;
+                while ((headerEnd = IndexOf(buffer, "\r\n\r\n"u8.ToArray())) < 0)
+                {
+                    var n = await stream.ReadAsync(chunk);
+                    if (n == 0) return;
+                    buffer.AddRange(chunk.AsSpan(0, n).ToArray());
+                }
+                var lines = Encoding.ASCII.GetString(buffer.GetRange(0, headerEnd).ToArray()).Split("\r\n");
+                string? Header(string name) => lines.Skip(1).Select(l => l.Split(':', 2))
+                    .Where(p => p.Length == 2 && p[0].Trim().Equals(name, StringComparison.OrdinalIgnoreCase)).Select(p => p[1].Trim()).FirstOrDefault();
+                var length = int.TryParse(Header("Content-Length"), out var l) ? l : 0;
+                while (buffer.Count - headerEnd - 4 < length)
+                {
+                    var n = await stream.ReadAsync(chunk);
+                    if (n == 0) break;
+                    buffer.AddRange(chunk.AsSpan(0, n).ToArray());
+                }
+                var body = Encoding.UTF8.GetString(buffer.Skip(headerEnd + 4).Take(length).ToArray());
+                JsonNode? json = null;
+                try { json = JsonNode.Parse(body); } catch (System.Text.Json.JsonException) { }
+                _queue.Enqueue(($"{lines[0]} {body}", json, Header("Authorization")));
+                await stream.WriteAsync("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray());
+            }
+            catch (IOException) { }
+        }
+    }
+
+    private static int IndexOf(List<byte> data, byte[] pattern)
+    {
+        for (var i = 0; i + pattern.Length <= data.Count; i++)
+        {
+            var match = true;
+            for (var j = 0; j < pattern.Length && match; j++) match = data[i + j] == pattern[j];
+            if (match) return i;
+        }
+        return -1;
+    }
+
+    public void Dispose()
+    {
+        _stop.Cancel();
+        _listener.Stop();
+    }
 }

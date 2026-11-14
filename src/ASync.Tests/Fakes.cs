@@ -125,6 +125,7 @@ internal sealed class FakeFolderRepository : IFolderRepository
     public Task<List<Folder>> GetOnBackendAsync(int storageBackendId) => Task.FromResult(Folders.Where(f => f.StorageBackendId == storageBackendId).ToList());
     public Task<List<Folder>> GetServerMaintainedAsync() => Task.FromResult(Folders
         .Where(f => f.Mode == SyncMode.Backup && f.Encryption == FolderEncryption.Transport && f.ProtectedRepositoryKey != null).ToList());
+    public Task<List<Folder>> GetAllWithDevicesAsync() => Task.FromResult(Folders.ToList());
     public Task<Folder> AddAsync(Folder folder) { folder.Id = Folders.Count + 1; Folders.Add(folder); return Task.FromResult(folder); }
     public Task SaveAsync() { Saves++; return Task.CompletedTask; }
     public Task DeleteAsync(Folder folder) { Folders.Remove(folder); return Task.CompletedTask; }

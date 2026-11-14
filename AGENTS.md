@@ -111,7 +111,23 @@ Implemented (M2), both in `src/ASync.Core/Models/Folder.cs`:
   - Maintenance results: LastPruneAt, LastPruneOk, LastPruneMessage, LastPruneBy and the same four for
     LastCheck. `By` is `server` or a device's name. Writing them does not change `Revision`.
 - **FolderDevice**: a device's membership in a folder: Id, FolderId, DeviceId, LocalPath, Direction (Mirror
-  only, otherwise null), Paused, LastSyncAt, LastSyncOk, LastSyncMessage.
+  only, otherwise null), Paused, LastSyncAt, LastSyncOk, LastSyncMessage (the last run of any outcome), and for
+  overdue detection: AttachedAt (attached or last resumed; database default `now()`, so memberships from before
+  the migration `AlertsAndOverdue` count from it), LastSuccessAt, ConsecutiveFailures, FailingSince (the first
+  failure of the current streak). `FolderService.RecordReportAsync` keeps the last three.
+
+Implemented (gap item 3, alerts), in `src/ASync.Core/Models/Alerts.cs`:
+
+- **AlertIncident**: Id, UserId, FolderId (cascade with the folder), DeviceId (null for folder problems),
+  Kind (`Overdue`/`Failing`/`CheckFailed`/`PruneFailed`), FolderName, DeviceName, Detail, OpenedAt, UpdatedAt,
+  ResolvedAt (null = open), NotifiedAt (the opening was sent or settled; null = to send), ResolvedNotifiedAt
+  (the "back to normal" message was sent or skipped). Resolved incidents are deleted after
+  `Alerts__KeepResolvedDays` (30).
+- **AlertChannel**: Id, UserId, Name, Type (`Webhook`/`Ntfy`/`Email`), Enabled, ProtectedSettings (Data
+  Protection, purpose `ASync.AlertChannel.Settings.v1`, JSON of an `AlertChannelSettings`), CreatedAt,
+  UpdatedAt, LastSentAt, LastOk, LastError.
+- **AlertSettings** (key UserId, made on demand): GraceFactor, MinimumGraceHours, FailureThreshold,
+  ReminderHours (each null = the server default), LastSentAt (reminders count from it), LastFailedAttemptAt.
 
 The server keeps no index of file contents: snapshots live in the repository on the back-end, and Mirror/TwoWay
 state lives in each device's `sync-state.json`.
@@ -120,8 +136,7 @@ Planned (none of this exists yet):
 
 - **StorageBackend.Quota** and stored usage; periodic health checks (today `LastChecked*` is only set by a
   manual connection test).
-- **FolderDevice**: metered-network and battery rules; an expected-by time for overdue detection.
-- Alert settings per user (a failed check or prune is only shown on the Folders page today).
+- **FolderDevice**: metered-network and battery rules.
 - **Device.PushTarget**: relay token / APNs / FCM / UnifiedPush endpoint.
 
 ## Auth
@@ -186,6 +201,9 @@ code lives in `Services/DeviceProvisioningService.cs` (API: `DevicesController` 
    - `JwtBearerEvents.OnTokenValidated` checks `IsActiveAsync` for every device token, so a revoked device's
      current token stops working immediately, not after up to 15 minutes.
    - Revoked rows are kept and shown as "Removed devices".
+   - The device's live-updates connections are closed (`DeviceConnections.Abort`), after sending it
+     `device.revoked`: an aborted connection is not always noticed at once (the client would only see it after
+     its 30-second server timeout), so the agent checks its sign-in as soon as the event arrives and stops.
 - `PublicUrl` (env) sets the address put in QR codes and links. Without it the request host is used.
 - `CleanupService` (hourly) deletes sessions and codes that expired more than 7 days ago.
 - Challenges live in `IMemoryCache`. Running several server replicas would need a shared cache.
@@ -405,7 +423,8 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
   the right to reconcile a Mirror or TwoWay folder.
 - **Live events:** SignalR `/hubs/sync` sends `SyncEvent {seq, name, args}` on the method `event`, only
   through `ISyncNotifier`. Devices join `device:<id>` and people join `user:<id>`. The events are
-  `config.changed`, `folder.changed` (folderId, originDeviceId) and `folder.status`.
+  `config.changed`, `folder.changed` (folderId, originDeviceId), `folder.status`, `device.revoked` (to the
+  device being removed) and `alerts.changed` (to people, when incidents open, change or close).
 
 **Mirror and TwoWay** (`FolderSyncer`):
 - It compares, file by file, the local file, the remote listing, and both as they were after the last sync
@@ -636,7 +655,8 @@ a random id in a container.
 
 ## Background work and wake-ups (M3–M4)
 
-Planned; nothing in this section or in "Push" is implemented yet.
+Planned, except for the server's overdue detection and alerts (below, implemented) and `Push__Mode=None`
+(the only push mode so far). Nothing else in this section or in "Push" exists yet.
 
 - **Desktop:** the agent runs as a Windows Service, a systemd unit or a launchd agent. The tray UI talks to it
   over a named pipe or Unix socket. The CLI container runs the same agent.
@@ -651,8 +671,8 @@ Planned; nothing in this section or in "Push" is implemented yet.
   - A PhotoKit change observer queues new photos.
 - **Android:** WorkManager with constraints, a foreground service during large transfers, FCM high-priority
   data messages, and UnifiedPush for de-Googled devices and F-Droid builds.
-- **Server scheduler:** knows each device's expected schedule. It wakes overdue devices through the relay and
-  alerts the user after a grace period.
+- **Server scheduler:** knows each device's expected schedule and alerts the person after a grace period
+  (implemented: "Overdue detection and alerts"). From M4 it also wakes overdue devices through the relay.
 
 ### Working without push
 
@@ -676,6 +696,49 @@ Push is an optimisation, never a requirement. Every platform must back up on its
   - UnifiedPush where a distributor is installed. It needs neither our relay nor Google.
 - **Server:** overdue detection alerts the person (webhook, ntfy or e-mail), not the device. It works from
   what devices already report (`FolderDevice.LastSyncAt`), so it needs no push channel at all.
+
+### Overdue detection and alerts
+
+Implemented in `ASync.Core/Alerts/AlertRules.cs` (pure rules, unit-tested with a fake clock) and
+`ASync.Api/Services/Alerts/` (`AlertMonitor`, `AlertService`, `AlertSender`, `AlertMessages`), run by
+`AlertScheduler` every `Alerts__PollSeconds` (300). It reads only what devices and maintenance runs already
+report, so it needs no push channel, no relay and nothing on the device.
+
+- **Rules** (per person; `AlertSettings` overrides the server's `Alerts__*` defaults):
+  - *grace* = max(`MinimumGraceMinutes` (240), folder interval × `GraceFactor` (3)).
+  - **Overdue:** an attached, unpaused, unrevoked device has had no successful run for longer than the grace,
+    counted from the later of its last success and `AttachedAt` (attaching or resuming restarts the clock; a
+    device that never synced counts from attaching).
+  - **Failing:** the last run failed, and either `FailureThreshold` (3) runs in a row failed or the streak began
+    longer than the grace ago. Failing wins over Overdue.
+  - **CheckFailed / PruneFailed:** a Backup folder's last check or prune failed (results from "Prune and check").
+  - Time before the server process started (`ServerStarted`) does not count towards a *new* Overdue incident:
+    devices cannot sync while the server is down, so a restart must not raise a wave of alerts. Open incidents
+    stay open.
+- **Incidents** (`IncidentTracker`): at most one open per subject: folder + device for Overdue/Failing (one can
+  turn into the other without a new alert), folder + kind for the others. A problem that is gone resolves the
+  incident. If its subject is no longer watched (device detached, paused or revoked, folder not a Backup any
+  more), or it was never announced (it lasted less than a scan), it closes quietly.
+- **Messages** (`AlertDispatch`): at most one per person and scan, covering every folder: new problems,
+  problems back to normal, and everything still open. Open problems are repeated only as a reminder every
+  `ReminderHours` (24; 0 = never) after the last message. With no enabled channel a message is settled at once
+  (incidents still show in the web UI). A message counts as delivered when one channel took it; if none did, the
+  next try waits `Alerts__RetryMinutes` (15).
+- **Channels** (`AlertSender`): webhook (JSON POST of `AlertPayload`, documented in README "Alerts", with an
+  optional `Authorization` header), ntfy (its JSON publishing API: topic, title, message, priority, tags, click;
+  optional bearer token) and e-mail (MailKit, through the server-wide `Smtp__*` settings; a per-person address).
+  Bodies are buffered with a Content-Length. Secrets (the webhook's Authorization, the ntfy token) are
+  write-only and protected like storage settings; "Send test" may reuse the stored ones.
+- **SSRF:** webhook and ntfy addresses are user-supplied. Only absolute http(s) URLs are accepted, the
+  `alerts` HTTP client follows no redirects and gives up after 10 seconds. Like storage back-ends (see
+  "Storage back-ends"), they can still point at hosts on the server's own network: a known gap, fine for
+  self-hosting with trusted users.
+- **API** (people only, `AlertsController`): `GET/PUT /api/alerts/settings`, `GET /api/alerts/incidents?days=7`
+  (open ones plus those resolved in the last days), `GET/POST /api/alerts/channels`, `PUT/DELETE
+  /api/alerts/channels/{id}`, `POST /api/alerts/channels/test` (unsaved settings) and
+  `POST /api/alerts/channels/{id}/test`.
+- **Web UI:** an *Alerts* page (open problems, channels with "Send test", the rules, recently fixed problems)
+  and on the *Folders* page an Overdue/Failing pill per device plus a notice linking to the Alerts page.
 
 ## Push (M4)
 
@@ -715,10 +778,12 @@ device ──push token──► its ASync server ──POST /v1/wake──► r
 
 | `Push__Mode` | Who uses it | Needs |
 |---|---|---|
-| `Relay` (default) | Self-hosters using our published apps | Nothing. `Push__RelayUrl` defaults to our relay |
+| `Relay` (planned default from M4) | Self-hosters using our published apps | Nothing. `Push__RelayUrl` defaults to our relay |
 | `Direct` | Self-hosters who build the apps under their own bundle id | Their APNs `.p8` key, Key ID, Team ID and bundle id; FCM service-account JSON |
 | `Relay` + custom `Push__RelayUrl` | Self-hosters with their own builds and several servers | Their own relay: deploy the Worker (free Cloudflare) or the `async-push-relay` container |
-| `None` | Anyone who wants no outside service involved | Nothing. The server sends no wake-ups; devices rely on their own scheduling and the person gets overdue alerts (see "Working without push") |
+| `None` (the default, and the only mode until M4) | Anyone who wants no outside service involved | Nothing. The server sends no wake-ups; devices rely on their own scheduling and the person gets overdue alerts (see "Working without push") |
+
+Today `PushSettings` reads `Push__Mode`; `Relay` or `Direct` fall back to `None` with a warning in the log.
 
 **UnifiedPush** (F-Droid and de-Googled Android) never uses a relay: the server posts straight to the
 device's distributor endpoint (for example ntfy).
@@ -764,7 +829,7 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 3. **M2 — sync over the CLI (done).** The sync protocol (storage gateway, leases, live events) and `async-cli`
    (enroll, Backup, Mirror, TwoWay, end-to-end encryption, restore), the `async-cli` Docker image, the
    end-to-end test in CI, and the web UI for folders and for browsing and downloading snapshots.
-   **← current stage; next is "Before M3: gaps to close" (items 1 and 2 are done).**
+   **← current stage; next is "Before M3: gaps to close" (items 1–3 are done).**
 4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
    overdue devices.
@@ -778,16 +843,18 @@ app starts after them, because it would otherwise be built on the same holes.
 
 1. **Prune and check never run. — Done.** `async-cli prune` and `check`, a per-folder schedule run by the
    server (Transport) or a device's agent (end-to-end), and the last results on the Folders page. See "Prune
-   and check" under "Sync". Left for item 3: telling the person about a failed check (today it is only shown).
+   and check" under "Sync". A failed check or prune is now also an alert (item 3).
 2. **Transport repository key recovery. — Done.** A recovery key per Transport Backup folder (shown at
    creation, re-issued by the owner after re-entering their password), offline `snapshots`/`restore --repo`,
    taking a repository over on a new server with its recovery key, and `secrets export-folder-keys` for
    admins. See "Recovery of Transport folders" under "Repository layout". Left open: folders created before
    v0.1.4 stay database-dependent until their owner makes a key (the Folders page asks them to).
-3. **Server-side overdue detection and alerts.** The server stores `FolderDevice.LastSyncAt` and
-   `LastSyncOk` but nothing looks at them: no scheduler, no notification of any kind. Needed: a hosted
-   service that finds overdue and failing devices and tells the person by webhook, ntfy or e-mail. It must
-   not depend on push, so that `Push__Mode=None` is a complete setup (see "Working without push").
+3. **Server-side overdue detection and alerts. — Done.** `AlertScheduler` finds overdue and failing devices
+   and failed checks and prunes, keeps one incident per problem, and tells the person by webhook, ntfy or
+   e-mail (once, again when it is fixed, and as a daily reminder). It needs no push: `Push__Mode=None` (the
+   default) is a complete setup. See "Overdue detection and alerts" under "Background work and wake-ups".
+   Left open: webhook/ntfy addresses can reach the server's own network (the SSRF gap of storage back-ends);
+   no per-folder grace (per person only); devices are not woken up (M4).
 4. **Account and folder housekeeping.**
    - *Own-password change:* `PATCH /api/auth/profile` changes only the display name. Passwords can only be
      set by an admin (`PUT /api/users/{id}/password`).
@@ -838,5 +905,7 @@ Open questions:
   on iOS.
 - **SMB** always uses port 445 (SMBLibrary has no port option). The test Samba is reached on its container
   IP.
+- **Webhook bodies are buffered** (`ByteArrayContent`, not `JsonContent`): `JsonContent` streams with chunked
+  transfer encoding, which some receivers (and the e2e test's tiny listener) do not read.
 - **SPA:** `vite build` writes to `src/ASync.Api/wwwroot` (gitignored). The Docker image builds the UI
   itself.

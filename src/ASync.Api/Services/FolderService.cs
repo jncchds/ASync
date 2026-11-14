@@ -317,11 +317,12 @@ public class FolderService(
         var membership = folder.Devices.FirstOrDefault(d => d.DeviceId == req.DeviceId);
         if (membership is null)
         {
-            membership = new FolderDevice { FolderId = folder.Id, DeviceId = device.Id, Device = device };
+            membership = new FolderDevice { FolderId = folder.Id, DeviceId = device.Id, Device = device, AttachedAt = Now };
             folder.Devices.Add(membership);
         }
         membership.LocalPath = req.LocalPath.Trim();
         membership.Direction = folder.Mode == SyncMode.Mirror ? req.Direction : null;
+        if (membership.Paused && !req.Paused) membership.AttachedAt = Now; // resumed: overdue detection starts afresh
         membership.Paused = req.Paused;
         await SaveAndNotifyAsync(folder);
         return ServiceResult<Folder>.Ok(folder);
@@ -347,7 +348,11 @@ public class FolderService(
         if (ValidateMembership(folder, path, direction) is { } invalid) return ServiceResult<Folder>.Fail(invalid);
         membership.LocalPath = path;
         membership.Direction = folder.Mode == SyncMode.Mirror ? direction : null;
-        if (req.Paused is bool paused) membership.Paused = paused;
+        if (req.Paused is bool paused)
+        {
+            if (membership.Paused && !paused) membership.AttachedAt = Now; // resumed: overdue detection starts afresh
+            membership.Paused = paused;
+        }
         await SaveAndNotifyAsync(folder, extraDevices: [membership.DeviceId]);
         return ServiceResult<Folder>.Ok(folder);
     }
@@ -363,6 +368,17 @@ public class FolderService(
     {
         membership.LastSyncAt = Now;
         membership.LastSyncOk = report.Ok;
+        if (report.Ok)
+        {
+            membership.LastSuccessAt = Now;
+            membership.ConsecutiveFailures = 0;
+            membership.FailingSince = null;
+        }
+        else
+        {
+            membership.ConsecutiveFailures++;
+            membership.FailingSince ??= Now;
+        }
         var message = report.Message ?? (report.Ok
             ? $"{report.Uploaded} up, {report.Downloaded} down, {report.Deleted} deleted{(report.Conflicts > 0 ? $", {report.Conflicts} conflicts" : "")}"
             : "Failed");
