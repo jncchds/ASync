@@ -26,7 +26,7 @@ namespace ASync.Api.Services;
 /// </summary>
 public class FolderService(
     IFolderRepository folders, IStorageBackendRepository backends, IDeviceRepository devices, FolderBackendCache backendCache, IDataProtectionProvider dataProtection, ISyncNotifier notifier, TimeProvider clock,
-    ILogger<FolderService> logger)
+    MaintenanceClaims claims, ILogger<FolderService> logger)
 {
     private IDataProtector Protector => dataProtection.CreateProtector("ASync.Folder.RepositoryKey.v1");
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
@@ -48,7 +48,9 @@ public class FolderService(
         [.. f.Devices.OrderBy(d => d.Device?.Name).Select(d => new FolderDeviceDto(
             d.DeviceId, d.Device?.Name ?? "", d.Device?.Platform ?? DevicePlatform.Unknown, d.LocalPath, d.Direction, d.Paused,
             d.LastSyncAt, d.LastSyncOk, d.LastSyncMessage))],
-        f.CreatedAt);
+        f.CreatedAt, f.PruneIntervalDays, f.CheckIntervalDays, f.CheckReadDataPercent,
+        f.LastPruneAt is { } pruned ? new MaintenanceStatusDto(pruned, f.LastPruneOk == true, f.LastPruneMessage, f.LastPruneBy) : null,
+        f.LastCheckAt is { } checkedAt ? new MaintenanceStatusDto(checkedAt, f.LastCheckOk == true, f.LastCheckMessage, f.LastCheckBy) : null);
 
     public static DeviceFolderDto ToDeviceDto(Folder f, FolderDevice m) => new(
         f.Id, f.Name, f.Mode, f.Encryption, f.Kind, f.IntervalMinutes, f.Excludes, Retention(f), f.VersionsKeepDays, f.TrashKeepDays,
@@ -118,7 +120,9 @@ public class FolderService(
     /// <summary>Creates a repository opened by a random server key; returns that key, protected.</summary>
     private async Task<string> CreateRepositoryAsync(Folder folder, CancellationToken ct)
     {
-        var backend = await backendCache.GetAsync(folder, ct);
+        // Not the cached connection: the cache is keyed by folder id, and a folder being created has none yet (0),
+        // so a second new folder would get the first one's directory.
+        await using var backend = await backendCache.OpenDedicatedAsync(folder);
         if (await Repo.ExistsAsync(backend, ct))
             throw new InvalidOperationException("there is already a backup repository in that directory. Choose another directory.");
         var keys = RepositoryKeys.Generate();
@@ -164,6 +168,9 @@ public class FolderService(
         if (req.IntervalMinutes is < 1 or > 60 * 24 * 31) return "The sync interval must be between 1 minute and 31 days.";
         if (req.VersionsKeepDays is < 0 or > 3650 || req.TrashKeepDays is < 0 or > 3650) return "Keep versions and trash for 0–3650 days.";
         if (req.Excludes is { Length: > 200 }) return "At most 200 exclude patterns.";
+        if (req.PruneIntervalDays is < 0 or > 3650 || req.CheckIntervalDays is < 0 or > 3650)
+            return "Free space and verify every 0–3650 days (0 = never).";
+        if (req.CheckReadDataPercent is < 0 or > 100) return "A check reads back 0–100% of the data.";
         return null;
     }
 
@@ -174,6 +181,9 @@ public class FolderService(
         folder.RetentionJson = JsonSerializer.Serialize(req.Retention ?? new RetentionDto(), JsonSerializerOptions.Web);
         folder.VersionsKeepDays = req.VersionsKeepDays;
         folder.TrashKeepDays = req.TrashKeepDays;
+        folder.PruneIntervalDays = req.PruneIntervalDays;
+        folder.CheckIntervalDays = req.CheckIntervalDays;
+        folder.CheckReadDataPercent = req.CheckReadDataPercent;
     }
 
     private static bool Overlaps(string a, string b) =>
@@ -244,6 +254,47 @@ public class FolderService(
         membership.LastSyncMessage = message.Length > 1000 ? message[..1000] : message;
         await folders.SaveAsync();
         await notifier.ToUserAsync(membership.Folder!.UserId, SyncEvents.FolderStatus, membership.FolderId, membership.DeviceId);
+    }
+
+    // ── Maintenance (prune, check) ────────────────────────────────────────────
+
+    public const string ServerActor = "server";
+
+    /// <summary>
+    /// The prune and check a device should run now. Only end-to-end folders are handed to devices (the server
+    /// maintains Transport folders itself), and each due job goes to one device at a time.
+    /// </summary>
+    public MaintenanceClaimDto ClaimMaintenance(FolderDevice membership)
+    {
+        var folder = membership.Folder!;
+        bool Claim(MaintenanceKind kind) =>
+            MaintenanceSchedule.Applies(folder) && folder.Encryption == FolderEncryption.EndToEnd && !membership.Paused
+            && MaintenanceSchedule.IsDue(folder, kind, Now) && claims.TryClaim(folder.Id, kind, membership.DeviceId);
+        return new MaintenanceClaimDto(Claim(MaintenanceKind.Prune), Claim(MaintenanceKind.Check), folder.CheckReadDataPercent);
+    }
+
+    /// <summary>A device's prune or check result (scheduled, or from `async-cli prune` / `check`).</summary>
+    public async Task<ServiceResult<Folder>> ReportMaintenanceAsync(FolderDevice membership, MaintenanceReportRequest report, string deviceName)
+    {
+        var folder = membership.Folder!;
+        if (folder.Mode != SyncMode.Backup) return ServiceResult<Folder>.Fail("Only Backup folders are pruned and checked.");
+        claims.Release(folder.Id, report.Kind, membership.DeviceId);
+        if (!report.Skipped) await RecordMaintenanceAsync(folder, report.Kind, report.Ok, report.Message, deviceName);
+        return ServiceResult<Folder>.Ok(folder);
+    }
+
+    /// <summary>Stores the folder's last prune or check and tells the owner's open pages. Not a settings change: the revision stays.</summary>
+    public async Task RecordMaintenanceAsync(Folder folder, MaintenanceKind kind, bool ok, string? message, string by)
+    {
+        message = message is { Length: > 1000 } ? message[..1000] : message;
+        by = by.Length > 100 ? by[..100] : by;
+        if (kind == MaintenanceKind.Prune)
+            (folder.LastPruneAt, folder.LastPruneOk, folder.LastPruneMessage, folder.LastPruneBy) = (Now, ok, message, by);
+        else
+            (folder.LastCheckAt, folder.LastCheckOk, folder.LastCheckMessage, folder.LastCheckBy) = (Now, ok, message, by);
+        await folders.SaveAsync();
+        if (!ok) logger.LogWarning("{Kind} of folder {FolderId} by {By} failed: {Message}", kind, folder.Id, by, message);
+        await notifier.ToUserAsync(folder.UserId, SyncEvents.FolderStatus, folder.Id);
     }
 
     public async Task MarkRepositoryReadyAsync(Folder folder)

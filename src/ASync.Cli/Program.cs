@@ -42,7 +42,8 @@ Command Define(string name, string description, Func<CliContext, ParseResult, Ca
             Console.Error.WriteLine($"error: cannot use the config directory: {e.Message} (it must be writable by this user)");
             return 1;
         }
-        catch (Exception e) when (e is CliException or ApiException or SyncRefusedException or HttpRequestException or WrongKeyException)
+        catch (Exception e) when (e is CliException or ApiException or SyncRefusedException or HttpRequestException or WrongKeyException
+                                     or RepositoryLockedException)
         {
             Console.Error.WriteLine($"error: {e.Message}");
             return 1;
@@ -255,5 +256,75 @@ Define("restore", "Restore a snapshot (or part of it) into a directory.", async 
     foreach (var e in result.Errors.Take(20)) Console.Error.WriteLine($"  {e}");
     return result.Errors.Count == 0 ? 0 : 1;
 }, folderOption, snapshotOption, targetOption, subPathOption);
+
+// ── prune / check ─────────────────────────────────────────────────────────────
+var readDataOption = new Option<double>("--read-data")
+{
+    Description = "Also download this percentage of the stored data (0–100) and verify it. Default 0: structure only.",
+};
+
+// Runs a prune or a check on one Backup folder, or on all of this device's. Exit code 1 when any failed.
+async Task<int> MaintainAsync(CliContext ctx, ParseResult p, MaintenanceKind kind, CancellationToken ct)
+{
+    var only = p.GetValue(optionalFolderOption);
+    var readData = kind == MaintenanceKind.Check ? p.GetValue(readDataOption) : 0;
+    if (readData is < 0 or > 100) throw new CliException("--read-data takes a percentage from 0 to 100.");
+    var all = await ctx.Api.GetFoldersAsync(ct);
+    if (only is not null && all.FirstOrDefault(f => f.FolderId == only) is { } chosen && chosen.Mode != SyncMode.Backup)
+        throw new CliException($"\"{chosen.Name}\" is a {chosen.Mode} folder. Only Backup folders have a repository to {(kind == MaintenanceKind.Prune ? "prune" : "check")}.");
+    var folders = all.Where(f => f.Mode == SyncMode.Backup && (only is null || f.FolderId == only)).ToList();
+    if (folders.Count == 0)
+        throw new CliException(only is null
+            ? "This device has no Backup folders."
+            : $"Folder {only} is not assigned to this device. `async-cli folders` lists the ones that are.");
+
+    await using var agent = new SyncAgent(ctx.Api, ctx.Store, ctx.Loggers.CreateLogger("maintenance"));
+    var failed = 0;
+    foreach (var folder in folders)
+    {
+        Console.WriteLine($"{folder.Name}…");
+        var outcome = await agent.RunMaintenanceAsync(folder, kind, readData, ct);
+        if (!outcome.Ok) failed++;
+        if (outcome.Busy)
+        {
+            Console.WriteLine($"  BUSY: {outcome.Message}");
+        }
+        else if (outcome.Prune is { } pruned)
+        {
+            Console.WriteLine(pruned.PacksDeleted + pruned.PacksRepacked == 0
+                ? "  Nothing to remove: every stored pack is still used by a snapshot."
+                : $"  Removed {pruned.PacksDeleted} unused pack(s), repacked {pruned.PacksRepacked}, dropped {pruned.BlobsRemoved} unused chunk(s).");
+            Console.WriteLine($"  Freed {ASync.Engine.Maintenance.ByteSize.Format(pruned.BytesFreed)} ({pruned.BytesFreed:N0} bytes).");
+        }
+        else if (outcome.Check is { } check)
+        {
+            Console.WriteLine($"  Checked {check.Snapshots} snapshot(s) and {check.Packs} pack(s)" +
+                              (check.PacksRead > 0 ? $"; read back and verified {check.PacksRead} pack(s)." : "; no data read back (see --read-data)."));
+            foreach (var w in check.Warnings.Take(20)) Console.WriteLine($"  warning: {w}");
+            if (check.Warnings.Count > 20) Console.WriteLine($"  … and {check.Warnings.Count - 20} more warnings.");
+            if (check.Ok)
+            {
+                Console.WriteLine("  OK: no problems found.");
+            }
+            else
+            {
+                Console.WriteLine($"  FAILED: {check.Errors.Count} problem(s) found:");
+                foreach (var e in check.Errors.Take(50)) Console.WriteLine($"    {e}");
+                if (check.Errors.Count > 50) Console.WriteLine($"    … and {check.Errors.Count - 50} more.");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"  FAILED: {outcome.Message}");
+        }
+    }
+    return failed == 0 ? 0 : 1;
+}
+
+Define("prune", "Free the space of forgotten snapshots in Backup folders (all of this device's, or one).",
+    (ctx, p, ct) => MaintainAsync(ctx, p, MaintenanceKind.Prune, ct), optionalFolderOption);
+
+Define("check", "Verify that Backup folders' repositories are complete and readable. Exit code 1 when problems are found.",
+    (ctx, p, ct) => MaintainAsync(ctx, p, MaintenanceKind.Check, ct), optionalFolderOption, readDataOption);
 
 return await root.Parse(args).InvokeAsync();

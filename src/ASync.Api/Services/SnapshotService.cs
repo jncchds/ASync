@@ -261,6 +261,12 @@ public sealed class SnapshotService(FolderBackendCache backends, IDataProtection
         }
     }
 
+    /// <summary>
+    /// Forgets the folder's cached repository, so the next request loads the index afresh. Called after the server
+    /// pruned the folder. A prune by a device is not announced: <see cref="ReadAsync"/> notices it by a failed read.
+    /// </summary>
+    public void Invalidate(int folderId) => _entries.TryRemove(folderId, out _);
+
     /// <summary>Drops repositories nobody browsed for a while (their index can be large).</summary>
     private void Sweep()
     {

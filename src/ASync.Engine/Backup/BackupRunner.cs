@@ -123,6 +123,7 @@ public sealed class BackupRunner(Repository.Repository repository)
                     content.Add(id);
                     size += chunk.Length;
                     stats.BytesProcessed += chunk.Length;
+                    await RefreshLockIfDueAsync(); // a huge file must not let the lock go stale (a prune would start)
                     if (stored > 0)
                     {
                         stats.BytesAdded += chunk.Length;

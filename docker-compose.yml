@@ -30,6 +30,11 @@ services:
       # ── Storage ───────────────────────────────────────────────────────────────
       # Where admins may create "Local" back-ends (comma-separated). Mount disks or NAS shares below these.
       # - Storage__LocalRoots=/data
+      # ── Backup housekeeping ───────────────────────────────────────────────────
+      # The server prunes and checks standard-encryption Backup folders on each folder's schedule (set in the
+      # folder form). This is how often it looks for folders that are due; Maintenance__Enabled=false turns it off.
+      - Maintenance__PollSeconds=${ASYNC_MAINTENANCE_POLL_SECONDS:-900}
+      # - Maintenance__Enabled=true
     volumes:
       - async_data:/data                      # or a host path, e.g. /mnt/backups:/data
     depends_on:

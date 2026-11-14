@@ -56,6 +56,18 @@ public sealed class FolderBackendCache(IServiceScopeFactory scopes, TimeProvider
         }
     }
 
+    /// <summary>
+    /// A connection of the caller's own to the folder's storage, for long jobs (prune, check): the cached one is
+    /// closed after a few minutes without a new request. The caller disposes it.
+    /// </summary>
+    public async Task<IStorageBackend> OpenDedicatedAsync(Folder folder)
+    {
+        var backend = folder.StorageBackend ?? throw new InvalidOperationException("Load the folder with its storage back-end.");
+        await using var scope = scopes.CreateAsyncScope();
+        var service = scope.ServiceProvider.GetRequiredService<StorageBackendService>();
+        return new PrefixedBackend(service.OpenForUser(backend, folder.UserId), folder.RootPath);
+    }
+
     /// <summary>Closes connections idle for a while (called periodically).</summary>
     public async Task SweepAsync()
     {

@@ -21,7 +21,22 @@ public record FolderDto(
     int Id, string Name, SyncMode Mode, FolderEncryption Encryption, FolderKind Kind,
     int StorageBackendId, string StorageBackendName, string RootPath,
     int IntervalMinutes, string[] Excludes, RetentionDto Retention, int VersionsKeepDays, int TrashKeepDays,
-    long Revision, bool RepositoryReady, FolderDeviceDto[] Devices, DateTime CreatedAt);
+    long Revision, bool RepositoryReady, FolderDeviceDto[] Devices, DateTime CreatedAt,
+    int PruneIntervalDays = MaintenanceDefaults.PruneIntervalDays, int CheckIntervalDays = MaintenanceDefaults.CheckIntervalDays,
+    int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent,
+    MaintenanceStatusDto? LastPrune = null, MaintenanceStatusDto? LastCheck = null);
+
+/// <summary>Defaults of a Backup folder's housekeeping schedule (days between runs; 0 = off).</summary>
+public static class MaintenanceDefaults
+{
+    public const int PruneIntervalDays = 7;
+    public const int CheckIntervalDays = 30;
+    /// <summary>The share of packs each scheduled check downloads and verifies.</summary>
+    public const int CheckReadDataPercent = 10;
+}
+
+/// <summary>The last prune or check of a Backup folder. <paramref name="By"/> is "server" or a device's name.</summary>
+public record MaintenanceStatusDto(DateTime At, bool Ok, string? Message, string? By);
 
 public record FolderDeviceDto(
     Guid DeviceId, string DeviceName, DevicePlatform Platform, string LocalPath, MirrorDirection? Direction, bool Paused,
@@ -31,7 +46,9 @@ public record FolderDeviceDto(
 public record SaveFolderRequest(
     string Name, SyncMode Mode, FolderEncryption Encryption, FolderKind Kind, int StorageBackendId, string RootPath,
     int IntervalMinutes = 60, string[]? Excludes = null, RetentionDto? Retention = null, int VersionsKeepDays = 30, int TrashKeepDays = 30,
-    long? ExpectedRevision = null);
+    long? ExpectedRevision = null,
+    int PruneIntervalDays = MaintenanceDefaults.PruneIntervalDays, int CheckIntervalDays = MaintenanceDefaults.CheckIntervalDays,
+    int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent);
 
 public record AttachDeviceRequest(Guid DeviceId, string LocalPath, MirrorDirection? Direction = null, bool Paused = false, long? ExpectedRevision = null);
 
@@ -47,6 +64,18 @@ public record DeviceFolderDto(
 public record UpdateDeviceFolderRequest(string? LocalPath = null, MirrorDirection? Direction = null, bool? Paused = null, long? ExpectedRevision = null);
 
 public record SyncReportRequest(bool Ok, string? Message, int Uploaded = 0, int Downloaded = 0, int Deleted = 0, int Conflicts = 0, long Bytes = 0);
+
+/// <summary>
+/// Which housekeeping this device should do now for an end-to-end Backup folder (the server cannot: it has no key).
+/// A job is handed to one device at a time; the device answers with a <see cref="MaintenanceReportRequest"/>.
+/// </summary>
+public record MaintenanceClaimDto(bool Prune, bool Check, int CheckReadDataPercent);
+
+/// <summary>
+/// A device's prune or check result. <paramref name="Skipped"/>: it did not run (the repository was busy), so
+/// nothing is recorded and the job is free for the next device that asks.
+/// </summary>
+public record MaintenanceReportRequest(MaintenanceKind Kind, bool Ok, string? Message, bool Skipped = false);
 
 /// <summary>Exclusive right to sync a folder for a short time, so two devices never reconcile the same folder at once.</summary>
 public record LeaseDto(string LeaseId, DateTime ExpiresAt);
@@ -72,6 +101,6 @@ public static class SyncEvents
     public const string ConfigChanged = "config.changed";
     /// <summary>Args: folderId, originDeviceId. Another device changed the folder's content.</summary>
     public const string FolderChanged = "folder.changed";
-    /// <summary>Args: folderId, deviceId. A device finished a sync (for web UIs).</summary>
+    /// <summary>Args: folderId, deviceId (absent for server maintenance). A sync, prune or check finished (for web UIs).</summary>
     public const string FolderStatus = "folder.status";
 }

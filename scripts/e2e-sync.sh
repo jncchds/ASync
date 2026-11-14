@@ -12,6 +12,7 @@ port="${ASYNC_E2E_PORT:-5190}"
 project=async-e2e
 work="$PWD/artifacts/e2e"
 export ASYNC_PORT="$port"
+export ASYNC_MAINTENANCE_POLL_SECONDS=5   # the server looks for folders due for prune/check every 5 s, not 15 min
 
 compose() { docker compose -p "$project" "$@"; }
 cleanup() {

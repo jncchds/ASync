@@ -74,6 +74,8 @@ public interface IFolderRepository
     Task<FolderDevice?> GetMembershipAsync(int folderId, Guid deviceId);
     Task<bool> AnyUsingBackendAsync(int storageBackendId);
     Task<List<Folder>> GetOnBackendAsync(int storageBackendId);
+    /// <summary>Backup folders whose repository the server can open (Transport encryption), with their back-end.</summary>
+    Task<List<Folder>> GetServerMaintainedAsync();
     Task<Folder> AddAsync(Folder folder);
     Task SaveAsync();
     Task DeleteAsync(Folder folder);

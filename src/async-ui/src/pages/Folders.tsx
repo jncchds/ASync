@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   deleteFolder, detachFolderDevice, errorMessage, getDevices, getFolders, getStorageBackends,
-  type Device, type Folder, type FolderDevice, type StorageBackend,
+  type Device, type Folder, type FolderDevice, type MaintenanceStatus, type StorageBackend,
 } from '../api'
 import FolderForm from '../components/FolderForm'
 import FolderDeviceForm from '../components/FolderDeviceForm'
@@ -10,6 +10,24 @@ import SnapshotBrowser from '../components/SnapshotBrowser'
 import { useSyncEvents, type SyncEvent } from '../hooks/useSyncEvents'
 import { kindLabel, modeLabel } from '../utils/folders'
 import { formatDate, formatMinutes, relativeTime } from '../utils/format'
+
+/** The last prune or check of a Backup folder as a pill: green when fine, red when failed, grey when not run or off. */
+function MaintenancePill({ status, intervalDays, done, failed, never, off }: {
+  status: MaintenanceStatus | null
+  intervalDays: number
+  done: string
+  failed: string
+  never: string
+  off: string
+}) {
+  const schedule = intervalDays > 0 ? `Scheduled every ${intervalDays === 1 ? 'day' : `${intervalDays} days`}.` : 'Not scheduled (set in Edit).'
+  if (status === null)
+    return <span className="pill" title={schedule}>{intervalDays > 0 ? never : off}</span>
+  const title = `${formatDate(status.at)}${status.by ? ` by ${status.by}` : ''}${status.message ? `\n${status.message}` : ''}\n${schedule}`
+  return status.ok
+    ? <span className="pill pill-success" title={title}>✓ {done} {relativeTime(status.at)}</span>
+    : <span className="pill pill-danger" title={title}>⚠ {failed} {relativeTime(status.at)}</span>
+}
 
 /** Which device form is open: adding one to a folder, or editing one device's settings there. */
 type DeviceEdit = { folderId: number; deviceId?: string }
@@ -124,6 +142,14 @@ export default function Folders() {
                       <span>folder #{f.id}</span>
                     </div>
                     {f.excludes.length > 0 && <span className="muted small-text">Excludes: {f.excludes.join(', ')}</span>}
+                    {f.mode === 'Backup' && f.repositoryReady && (
+                      <div className="pills">
+                        <MaintenancePill status={f.lastPrune} intervalDays={f.pruneIntervalDays}
+                          done="Space freed" failed="Freeing space failed" never="Space not freed yet" off="Freeing space: off" />
+                        <MaintenancePill status={f.lastCheck} intervalDays={f.checkIntervalDays}
+                          done="Verified" failed="Verify failed" never="Not verified yet" off="Verifying: off" />
+                      </div>
+                    )}
                   </div>
                   <div className="row-actions">
                     {browsable && <button className="secondary small" onClick={() => setBrowsing(browsing === f.id ? null : f.id)}>Snapshots</button>}
@@ -132,6 +158,19 @@ export default function Folders() {
                   </div>
                 </div>
 
+                {f.mode === 'Backup' && f.lastCheck && !f.lastCheck.ok && (
+                  <div className="notice danger">
+                    <strong>The last integrity check failed</strong> ({relativeTime(f.lastCheck.at)}{f.lastCheck.by ? `, by ${f.lastCheck.by}` : ''}).{' '}
+                    {f.lastCheck.message} Some backups in this folder may not restore. For the full list, run on one of its devices
+                    <pre className="command">async-cli check --folder {f.id} --read-data 100</pre>
+                  </div>
+                )}
+                {f.mode === 'Backup' && f.lastPrune && !f.lastPrune.ok && (
+                  <div className="notice">
+                    Freeing space failed {relativeTime(f.lastPrune.at)}{f.lastPrune.by ? ` (by ${f.lastPrune.by})` : ''}: {f.lastPrune.message}{' '}
+                    Nothing was lost; it is tried again within a day.
+                  </div>
+                )}
                 {f.mode === 'Backup' && f.encryption === 'EndToEnd' && !f.repositoryReady && (
                   <div className="notice">
                     Not set up yet. On one of your devices, run

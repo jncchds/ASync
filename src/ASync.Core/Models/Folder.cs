@@ -28,6 +28,22 @@ public class Folder
     public bool RepositoryReady { get; set; }
     /// <summary>Transport-encrypted repositories: the key that opens their server key file, protected with Data Protection.</summary>
     public string? ProtectedRepositoryKey { get; set; }
+    /// <summary>Backup folders: days between prunes (forgotten snapshots free space). 0 = never.</summary>
+    public int PruneIntervalDays { get; set; } = MaintenanceDefaults.PruneIntervalDays;
+    /// <summary>Backup folders: days between integrity checks. 0 = never.</summary>
+    public int CheckIntervalDays { get; set; } = MaintenanceDefaults.CheckIntervalDays;
+    /// <summary>The share of packs (0–100) a scheduled check downloads and verifies.</summary>
+    public int CheckReadDataPercent { get; set; } = MaintenanceDefaults.CheckReadDataPercent;
+    /// <summary>The last prune: by the server (Transport) or reported by a device.</summary>
+    public DateTime? LastPruneAt { get; set; }
+    public bool? LastPruneOk { get; set; }
+    public string? LastPruneMessage { get; set; }
+    /// <summary>"server" or the device's name.</summary>
+    public string? LastPruneBy { get; set; }
+    public DateTime? LastCheckAt { get; set; }
+    public bool? LastCheckOk { get; set; }
+    public string? LastCheckMessage { get; set; }
+    public string? LastCheckBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

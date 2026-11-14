@@ -269,6 +269,20 @@ export interface Folder {
   repositoryReady: boolean
   devices: FolderDevice[]
   createdAt: string
+  /** Backup folders: days between prunes and between integrity checks (0 = never), and how much data a check reads back. */
+  pruneIntervalDays: number
+  checkIntervalDays: number
+  checkReadDataPercent: number
+  lastPrune: MaintenanceStatus | null
+  lastCheck: MaintenanceStatus | null
+}
+
+/** The last prune or check of a Backup folder; `by` is "server" or a device's name. */
+export interface MaintenanceStatus {
+  at: string
+  ok: boolean
+  message: string | null
+  by: string | null
 }
 
 export interface SaveFolder {
@@ -283,6 +297,9 @@ export interface SaveFolder {
   retention: Retention
   versionsKeepDays: number
   trashKeepDays: number
+  pruneIntervalDays: number
+  checkIntervalDays: number
+  checkReadDataPercent: number
   expectedRevision?: number
 }
 

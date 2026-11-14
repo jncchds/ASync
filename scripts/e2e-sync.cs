@@ -225,6 +225,14 @@ async Task<int> RunAsync()
     // ── Backup (Transport) ────────────────────────────────────────────────────
     Section("Backup (Transport)");
     var backup = await Folder("backup", "Backup", "Transport", (a, "backup", null), (b, "backup-b", null));
+    // The server maintains Transport folders itself; a new folder is due at once (the stack polls every few seconds).
+    var serverRan = await WaitForAsync(async () =>
+    {
+        var f = (await Send(HttpMethod.Get, $"/api/folders/{backup}", token: token)).Body;
+        return f?["lastPrune"]?["by"]?.GetValue<string>() == "server" && f?["lastCheck"]?["ok"]?.GetValue<bool>() == true;
+    }, 60, 1);
+    Check(serverRan, "the server prunes and checks the new Transport folder on its own schedule",
+        (await Send(HttpMethod.Get, $"/api/folders/{backup}", token: token)).Raw);
     Write(a.Path("backup", "photo.raw"), RandomBytes(5 * 1024 * 1024));
     Write(a.Path("backup", "notes/today.txt"), "backed up");
     Write(a.Path("backup", "empty.txt"), "");
@@ -242,6 +250,72 @@ async Task<int> RunAsync()
     var partial = await Cli(b, ["restore", "--folder", $"{backup}", "--target", part, "--path", "notes"]);
     Check(partial.Exit == 0 && File.Exists(Path.Combine(part, "notes", "today.txt")) && !File.Exists(Path.Combine(part, "photo.raw")),
         "a partial restore (--path notes) restores only that directory", partial.Output);
+
+    // ── prune and check ───────────────────────────────────────────────────────
+    Section("prune");
+    async Task<long> StoredBytes(string folderName)
+    {
+        if (serverContainer is null) return -1;
+        var du = await Docker(["exec", serverContainer, "du", "-sb", $"{storageRoot}/{folderName}/data"]);
+        return long.TryParse(du.Output.Split('\t', ' ')[0], out var n) ? n : -1;
+    }
+    var wrongMode = await Cli(a, ["prune", "--folder", $"{two}"]);
+    Check(wrongMode.Exit == 1 && wrongMode.Output.Contains("Only Backup folders"), "`prune` on a TwoWay folder is refused", wrongMode.Output);
+    var sizeBefore = await StoredBytes("backup");
+    var early = await Cli(a, ["prune", "--folder", $"{backup}"]);
+    Check(early.Exit == 0 && early.Output.Contains("Nothing to remove"), "A: `prune` with every snapshot still kept removes nothing", early.Output);
+    // Keep only the newest snapshot from now on, and drop the 5 MB file: the next backup forgets the two older snapshots.
+    var keepOne = await Send(HttpMethod.Put, $"/api/folders/{backup}", new
+    {
+        name = "backup", mode = "Backup", encryption = "Transport", kind = "Files", storageBackendId = backendId, rootPath = "backup",
+        intervalMinutes = 60, retention = new { last = 1, daily = 0, weekly = 0, monthly = 0, withinHours = (int?)null },
+        pruneIntervalDays = 7, checkIntervalDays = 30, checkReadDataPercent = 50,
+    }, token);
+    Check(keepOne.Status == HttpStatusCode.OK && keepOne.Body?["checkReadDataPercent"]?.GetValue<int>() == 50,
+        "the folder's retention and maintenance schedule can be edited", keepOne.Raw);
+    File.Delete(a.Path("backup", "photo.raw"));
+    var third = await Sync(a, backup, "A backs up without the big file");
+    Check(third.Output.Contains("2 old snapshots forgotten"), "the backup forgets the two older snapshots", third.Output);
+    if (serverContainer is not null)
+        Check(await StoredBytes("backup") >= sizeBefore, "forgetting snapshots alone frees no space on the storage");
+    var pruned = await Cli(a, ["prune", "--folder", $"{backup}"]);
+    Check(pruned.Exit == 0 && pruned.Output.Contains("Freed") && !pruned.Output.Contains("Nothing to remove"), "A: `prune` reports what it removed", pruned.Output);
+    if (serverContainer is not null)
+    {
+        var sizeAfter = await StoredBytes("backup");
+        Check(sizeBefore > 5_000_000 && sizeAfter >= 0 && sizeAfter < sizeBefore - 5_000_000,
+            $"the space is actually reclaimed on the storage ({sizeBefore:N0} → {sizeAfter:N0} bytes)", pruned.Output);
+    }
+    var afterPrune = Path.Combine(work, "restore-after-prune");
+    var restoreAfterPrune = await Cli(b, ["restore", "--folder", $"{backup}", "--target", afterPrune, "--snapshot", ShortId(third.Output)]);
+    Check(restoreAfterPrune.Exit == 0 && Same(a.Path("backup"), afterPrune, "notes/today.txt", "empty.txt")
+          && Directory.GetFiles(afterPrune, "*", SearchOption.AllDirectories).Length == 2,
+        "a restore after the prune is still byte-identical", restoreAfterPrune.Output);
+    var prunedInfo = (await Send(HttpMethod.Get, $"/api/folders/{backup}", token: token)).Body;
+    Check(prunedInfo?["lastPrune"]?["by"]?.GetValue<string>() == "e2e-A" && prunedInfo?["lastPrune"]?["ok"]?.GetValue<bool>() == true
+          && prunedInfo?["lastPrune"]?["message"]?.GetValue<string>().Contains("freed") == true,
+        "the server shows the device's prune (who, ok, bytes freed)", prunedInfo?["lastPrune"]?.ToJsonString());
+
+    Section("check");
+    var good = await Cli(b, ["check", "--folder", $"{backup}", "--read-data", "100"]);
+    Check(good.Exit == 0 && good.Output.Contains("OK: no problems found") && good.Output.Contains("read back and verified"),
+        "B: `check --read-data 100` passes on the good repository", good.Output);
+    var allGood = await Cli(a, ["check"]);
+    Check(allGood.Exit == 0 && allGood.Output.Contains("backup…"), "A: `check` without --folder checks every Backup folder of the device", allGood.Output);
+    if (serverContainer is not null)
+    {
+        // Overwrite 16 bytes in the middle of one pack file, as a failing disk or a bad copy would.
+        var damage = await Docker(["exec", serverContainer, "sh", "-c",
+            $"f=$(find {storageRoot}/backup/data -type f | head -n 1) && printf 'ASYNC-E2E-DAMAGE' | dd of=\"$f\" bs=1 seek=40 conv=notrunc 2>/dev/null && echo altered $f"]);
+        Check(damage.Output.Contains("altered"), "alter a pack file on the storage", damage.Output);
+        var bad = await Cli(b, ["check", "--folder", $"{backup}", "--read-data", "100"]);
+        Check(bad.Exit == 1 && bad.Output.Contains("FAILED") && bad.Output.Contains("damaged"),
+            "B: `check` reports the altered pack and exits with 1", bad.Output);
+        var badInfo = (await Send(HttpMethod.Get, $"/api/folders/{backup}", token: token)).Body;
+        Check(badInfo?["lastCheck"]?["ok"]?.GetValue<bool>() == false && badInfo?["lastCheck"]?["by"]?.GetValue<string>() == "e2e-B"
+              && badInfo?["lastCheck"]?["message"]?.GetValue<string>().Contains("problem") == true,
+            "the server shows the failed check for the folder", badInfo?["lastCheck"]?.ToJsonString());
+    }
 
     // ── Backup (end-to-end) ───────────────────────────────────────────────────
     Section("Backup (end-to-end)");
@@ -295,6 +369,20 @@ async Task<int> RunAsync()
         return File.Exists(a.Path("two", "watched.txt"));
     }, 45, pollSeconds: 3);
     Check(watched, "B's agent uploads a local change it noticed by itself", runB.Log.ToString());
+
+    // End-to-end folders are pruned and checked by a device's agent: the server has no key for them.
+    var agentRan = await WaitForAsync(async () =>
+    {
+        var f = (await Send(HttpMethod.Get, $"/api/folders/{e2e}", token: token)).Body;
+        return f?["lastPrune"]?["by"]?.GetValue<string>() == "e2e-B" && f?["lastPrune"]?["ok"]?.GetValue<bool>() == true
+               && f?["lastCheck"]?["by"]?.GetValue<string>() == "e2e-B" && f?["lastCheck"]?["ok"]?.GetValue<bool>() == true;
+    }, 90, 1);
+    Check(agentRan && runB.Log.Contains("\"e2e\": prune:") && runB.Log.Contains("\"e2e\": check:"),
+        "B's agent prunes and checks the end-to-end folder on schedule and reports both", runB.Log.ToString());
+    var e2eCheck = await Cli(a, ["check", "--folder", $"{e2e}", "--read-data", "100"]);
+    Check(e2eCheck.Exit == 0 && e2eCheck.Output.Contains("OK: no problems found"), "A: `check` works on the end-to-end folder too", e2eCheck.Output);
+    var e2ePrune = await Cli(a, ["prune", "--folder", $"{e2e}"]);
+    Check(e2ePrune.Exit == 0 && e2ePrune.Output.Contains("Nothing to remove"), "A: `prune` works on the end-to-end folder too", e2ePrune.Output);
 
     // A folder attached while the agent runs (config.changed).
     var late = await Folder("late", "TwoWay", "Transport", (a, "late", null));
@@ -378,7 +466,8 @@ async Task<(int Exit, string Output)> Sync(Agent agent, int folderId, string wha
     for (var attempt = 0; ; attempt++)
     {
         var r = await Cli(agent, ["sync", "--folder", $"{folderId}"]);
-        if (r.Output.Contains("Another device is syncing") && attempt < 10) { await Task.Delay(2000); continue; }
+        // ...or a prune or check has the repository for a moment.
+        if ((r.Output.Contains("Another device is syncing") || r.Output.Contains("The repository is busy")) && attempt < 10) { await Task.Delay(2000); continue; }
         Check(r.Exit == 0 && !r.Output.Contains("FAILED"), $"{agent.Name}: {what}", r.Output);
         return r;
     }
@@ -445,6 +534,13 @@ async Task<(HttpStatusCode Status, JsonNode? Body, string Raw)> Send(HttpMethod 
 }
 
 static byte[] RandomBytes(int length) => RandomNumberGenerator.GetBytes(length);
+
+/// <summary>The snapshot id in a backup's result line ("Snapshot 1a2b3c4d: …").</summary>
+static string ShortId(string syncOutput)
+{
+    var at = syncOutput.IndexOf("Snapshot ", StringComparison.Ordinal);
+    return at < 0 ? "latest" : syncOutput[(at + 9)..].Split(':')[0].Trim();
+}
 
 static void Write(string path, object content)
 {
