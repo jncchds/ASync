@@ -228,6 +228,153 @@ async Task<int> RunAsync()
     await Sync(b, mirror, "B follows");
     Check(!File.Exists(b.Path("mirror", "one.txt")) && Same(a.Path("mirror"), b.Path("mirror"), "sub/two.bin"), "the deletion and the edit reach B");
 
+    // ── Files, versions and trash of a plain folder in the web UI ─────────────
+    Section("web UI: files, versions and trash (TwoWay)");
+    var web = await Folder("webfiles", "TwoWay", "Transport", (a, "webfiles", null), (b, "webfiles", null));
+    Write(a.Path("webfiles", "notes/plan.txt"), "v1");
+    await Sync(a, web, "A uploads notes/plan.txt (v1)");
+    Write(a.Path("webfiles", "notes/plan.txt"), "v2, longer");
+    await Sync(a, web, "A uploads an edit (v2)");
+    Write(a.Path("webfiles", "notes/plan.txt"), "v3, the longest one");
+    Write(a.Path("webfiles", "gone.txt"), "deleted by A");
+    Write(a.Path("webfiles", "scrap.txt"), "for the emptied trash");
+    await Sync(a, web, "A uploads a second edit (v3) and two more files");
+    await Sync(b, web, "B downloads them");
+    File.Delete(a.Path("webfiles", "gone.txt"));
+    File.Delete(a.Path("webfiles", "scrap.txt"));
+    await Sync(a, web, "A deletes gone.txt and scrap.txt");
+    await Sync(b, web, "B applies the deletions");
+    Check(File.ReadAllText(b.Path("webfiles", "notes/plan.txt")) == "v3, the longest one" && !File.Exists(b.Path("webfiles", "gone.txt")),
+        "B has v3 and no gone.txt");
+
+    async Task<(HttpStatusCode Status, byte[] Bytes)> Fetch(string url)
+    {
+        using var res = await http.GetAsync(url);
+        return (res.StatusCode, await res.Content.ReadAsByteArrayAsync());
+    }
+    async Task<(HttpStatusCode Status, byte[] Bytes)> DownloadPlain(int folderId, string source, string path, string? stamp = null, bool zip = false)
+    {
+        var link = await Send(HttpMethod.Post, $"/api/folders/{folderId}/files/download-link", new { source, path, stamp, zip }, token);
+        var url = link.Body?["url"]?.GetValue<string>();
+        return url is null ? (link.Status, []) : await Fetch(url);
+    }
+
+    var root = await Send(HttpMethod.Get, $"/api/folders/{web}/files", token: token);
+    var rootNames = root.Body?["entries"]?.AsArray().Select(e => e?["name"]?.GetValue<string>()).ToList() ?? [];
+    Check(root.Status == HttpStatusCode.OK && rootNames.SequenceEqual(["notes"]), "the root lists only notes/ (no .async, no deleted files)", root.Raw);
+    var notes = await Send(HttpMethod.Get, $"/api/folders/{web}/files?path=notes", token: token);
+    var plan = notes.Body?["entries"]?.AsArray().SingleOrDefault(e => e?["name"]?.GetValue<string>() == "plan.txt");
+    Check(plan?["versions"]?.GetValue<int>() == 2 && plan?["size"]?.GetValue<long>() == "v3, the longest one".Length,
+        "notes/plan.txt is listed with its size and 2 versions", notes.Raw);
+    var wHistory = await Send(HttpMethod.Get, $"/api/folders/{web}/files/history?path=notes/plan.txt", token: token);
+    var versions = wHistory.Body?["versions"]?.AsArray() ?? [];
+    Check(versions.Count == 2 && versions[1]?["size"]?.GetValue<long>() == 2, "the history lists v2 and v1, newest first", wHistory.Raw);
+    var v1Stamp = versions.Count == 2 ? versions[1]!["stamp"]!.GetValue<string>() : "";
+    var v1 = await DownloadPlain(web, "Version", "notes/plan.txt", v1Stamp);
+    Check(v1.Status == HttpStatusCode.OK && Encoding.UTF8.GetString(v1.Bytes) == "v1", "v1 downloads through a download link", $"{v1.Status}");
+    var current = await DownloadPlain(web, "Current", "notes/plan.txt");
+    Check(Encoding.UTF8.GetString(current.Bytes) == "v3, the longest one", "the current file downloads");
+    var zipped = await DownloadPlain(web, "Current", "", zip: true);
+    var zipNames = new List<string>();
+    if (zipped.Status == HttpStatusCode.OK)
+        using (var archive = new System.IO.Compression.ZipArchive(new MemoryStream(zipped.Bytes))) zipNames = [.. archive.Entries.Select(e => e.FullName)];
+    Check(zipNames.SequenceEqual(["notes/plan.txt"]), "the folder downloads as a ZIP without .async", string.Join(", ", zipNames));
+    var allVersions = await Send(HttpMethod.Get, $"/api/folders/{web}/files/versions", token: token);
+    Check(allVersions.Body?.AsArray().Any(f => f?["path"]?.GetValue<string>() == "notes/plan.txt" && f?["versions"]?.GetValue<int>() == 2) == true,
+        "the files-with-versions view lists notes/plan.txt", allVersions.Raw);
+    var trash = await Send(HttpMethod.Get, $"/api/folders/{web}/files/trash", token: token);
+    var trashItems = trash.Body?["groups"]?.AsArray().SelectMany(g => g?["items"]?.AsArray() ?? []).ToList() ?? [];
+    var goneStamp = trashItems.FirstOrDefault(i => i?["path"]?.GetValue<string>() == "gone.txt")?["stamp"]?.GetValue<string>();
+    Check(trash.Status == HttpStatusCode.OK && goneStamp is not null && trashItems.Count == 2, "the trash lists gone.txt and scrap.txt", trash.Raw);
+    var wTrashed = await DownloadPlain(web, "Trash", "gone.txt", goneStamp);
+    Check(Encoding.UTF8.GetString(wTrashed.Bytes) == "deleted by A", "a trashed file downloads");
+
+    var escape = await Send(HttpMethod.Get, $"/api/folders/{web}/files?path=../two", token: token);
+    var meta = await Send(HttpMethod.Get, $"/api/folders/{web}/files?path=.async/trash", token: token);
+    var badStamp = await Send(HttpMethod.Post, $"/api/folders/{web}/files/download-link", new { source = "Version", path = "notes/plan.txt", stamp = "../../x" }, token);
+    Check(escape.Status == HttpStatusCode.BadRequest && meta.Status == HttpStatusCode.BadRequest && badStamp.Status == HttpStatusCode.BadRequest,
+        "`..`, .async/ and a forged stamp → 400", $"{escape.Status} {meta.Status} {badStamp.Status}");
+    var expired = await Fetch("/api/file-downloads?t=forged");
+    Check(expired.Status == HttpStatusCode.Forbidden, "a forged download ticket → 403", $"{expired.Status}");
+    var snapshotsOfPlain = await Send(HttpMethod.Get, $"/api/folders/{web}/snapshots", token: token);
+    Check(snapshotsOfPlain.Status == HttpStatusCode.BadRequest, "the snapshot endpoints still refuse a TwoWay folder (400)", snapshotsOfPlain.Raw);
+
+    // A device holds the folder's lease (as while it syncs): restores are refused, and nothing changes.
+    var webDeviceToken = JsonNode.Parse(File.ReadAllText(Path.Combine(a.Config, "token.json")))?["accessToken"]?.GetValue<string>();
+    var deviceFiles = await Send(HttpMethod.Get, $"/api/folders/{web}/files", token: webDeviceToken);
+    Check(deviceFiles.Status == HttpStatusCode.Forbidden, "a device token gets 403 on the files endpoints", deviceFiles.Raw);
+    var restoreBody = new
+    {
+        items = new object[]
+        {
+            new { source = "Version", path = "notes/plan.txt", stamp = v1Stamp },
+            new { source = "Trash", path = "gone.txt", stamp = goneStamp },
+        },
+    };
+    var held = await Send(HttpMethod.Post, $"/api/sync/folders/{web}/lease", token: webDeviceToken);
+    var leaseId = held.Body?["leaseId"]?.GetValue<string>();
+    Check(leaseId is not null, "A takes the folder's lease", held.Raw);
+    var busy = await Send(HttpMethod.Post, $"/api/folders/{web}/files/restore", restoreBody, token);
+    Check(busy.Status == HttpStatusCode.Conflict && busy.Raw.Contains("e2e-A is syncing this folder"), "a restore while A holds the lease → 409 naming A", busy.Raw);
+    var stillTrashed = await Send(HttpMethod.Get, $"/api/folders/{web}/files/trash", token: token);
+    Check(stillTrashed.Raw.Contains("gone.txt"), "the refused restore changed nothing");
+    var released = await Send(HttpMethod.Delete, $"/api/sync/folders/{web}/lease/{leaseId}", token: webDeviceToken);
+    Check(released.Status == HttpStatusCode.NoContent, "A releases the lease", released.Raw);
+
+    var wRestored = await Send(HttpMethod.Post, $"/api/folders/{web}/files/restore", restoreBody, token);
+    var restoredTo = wRestored.Body?["restoredTo"]?.AsArray().Select(p => p?.GetValue<string>()).ToList() ?? [];
+    Check(wRestored.Status == HttpStatusCode.OK && restoredTo.SequenceEqual(["notes/plan.txt", "gone.txt"]) && wRestored.Body?["warning"] is null,
+        "restore v1 of notes/plan.txt and the trashed gone.txt (no warning: no Mirror Upload device)", wRestored.Raw);
+    var wAfter = await Send(HttpMethod.Get, $"/api/folders/{web}/files/history?path=notes/plan.txt", token: token);
+    Check(wAfter.Body?["versions"]?.AsArray().Any(v => v?["size"]?.GetValue<long>() == "v3, the longest one".Length) == true,
+        "v3 became a version (nothing is lost)", wAfter.Raw);
+    var wAgain = await Send(HttpMethod.Post, $"/api/folders/{web}/files/restore",
+        new { items = new[] { new { source = "Trash", path = "gone.txt", stamp = goneStamp } } }, token);
+    Check(wAgain.Status == HttpStatusCode.NotFound, "restoring the same trashed file twice → 404", wAgain.Raw);
+
+    await Sync(b, web, "B pulls the restored files");
+    Check(File.ReadAllText(b.Path("webfiles", "notes/plan.txt")) == "v1" && File.ReadAllText(b.Path("webfiles", "gone.txt")) == "deleted by A",
+        "B has v1 of notes/plan.txt and gone.txt back");
+    await Sync(a, web, "A pulls the restored files");
+    Check(File.ReadAllText(a.Path("webfiles", "notes/plan.txt")) == "v1" && File.ReadAllText(a.Path("webfiles", "gone.txt")) == "deleted by A",
+        "A (which made the edits and the deletion) has both back too");
+
+    // A conflict: gone.txt exists again, so restoring an older deletion of it is refused, then renamed.
+    File.Delete(a.Path("webfiles", "gone.txt"));
+    await Sync(a, web, "A deletes gone.txt again");
+    Write(a.Path("webfiles", "gone.txt"), "a new gone.txt");
+    await Sync(a, web, "A creates a new gone.txt");
+    var trash2 = await Send(HttpMethod.Get, $"/api/folders/{web}/files/trash", token: token);
+    var gone2 = trash2.Body?["groups"]?.AsArray().SelectMany(g => g?["items"]?.AsArray() ?? [])
+        .FirstOrDefault(i => i?["path"]?.GetValue<string>() == "gone.txt")?["stamp"]?.GetValue<string>();
+    var clash = await Send(HttpMethod.Post, $"/api/folders/{web}/files/restore",
+        new { items = new[] { new { source = "Trash", path = "gone.txt", stamp = gone2 } } }, token);
+    Check(clash.Status == HttpStatusCode.Conflict && clash.Body?["conflicts"]?.AsArray().Count == 1, "restoring onto an existing file → 409 with the conflict", clash.Raw);
+    var renamed = await Send(HttpMethod.Post, $"/api/folders/{web}/files/restore",
+        new { items = new[] { new { source = "Trash", path = "gone.txt", stamp = gone2 } }, onConflict = "Rename" }, token);
+    var renamedTo = renamed.Body?["restoredTo"]?[0]?.GetValue<string>() ?? "";
+    Check(renamed.Status == HttpStatusCode.OK && renamedTo.StartsWith("gone (restored "), "…and with Rename it is restored next to it", renamed.Raw);
+    await Sync(b, web, "B pulls the renamed file");
+    Check(File.Exists(b.Path("webfiles", renamedTo)) && File.ReadAllText(b.Path("webfiles", renamedTo)) == "deleted by A"
+          && File.ReadAllText(b.Path("webfiles", "gone.txt")) == "a new gone.txt", "B has both gone.txt files");
+
+    var notConfirmed = await Send(HttpMethod.Delete, $"/api/folders/{web}/files/trash", token: token);
+    var emptied = await Send(HttpMethod.Delete, $"/api/folders/{web}/files/trash?confirm=true", token: token);
+    var trash3 = await Send(HttpMethod.Get, $"/api/folders/{web}/files/trash", token: token);
+    Check(notConfirmed.Status == HttpStatusCode.BadRequest && emptied.Status == HttpStatusCode.OK && emptied.Body?["deleted"]?.GetValue<int>() >= 1
+          && trash3.Body?["files"]?.GetValue<int>() == 0, "emptying the trash needs confirm=true, then the trash is empty", emptied.Raw + trash3.Raw);
+
+    // Mirror: A uploads (and deleted one.txt above), so a restore is undone by A's next run: the answer warns.
+    var mirrorTrash = await Send(HttpMethod.Get, $"/api/folders/{mirror}/files/trash", token: token);
+    var oneStamp = mirrorTrash.Body?["groups"]?.AsArray().SelectMany(g => g?["items"]?.AsArray() ?? [])
+        .FirstOrDefault(i => i?["path"]?.GetValue<string>() == "one.txt")?["stamp"]?.GetValue<string>();
+    var mirrorRestore = await Send(HttpMethod.Post, $"/api/folders/{mirror}/files/restore",
+        new { items = new[] { new { source = "Trash", path = "one.txt", stamp = oneStamp } } }, token);
+    Check(mirrorRestore.Status == HttpStatusCode.OK && mirrorRestore.Body?["warning"]?.GetValue<string>()?.Contains("e2e-A") == true,
+        "restoring in a Mirror folder warns about the Upload device (A)", mirrorRestore.Raw);
+    await Sync(b, mirror, "B (Download) pulls the restored one.txt");
+    Check(File.ReadAllText(b.Path("mirror", "one.txt")) == "one", "B has one.txt back");
+
     // ── Backup (Transport) ────────────────────────────────────────────────────
     Section("Backup (Transport)");
     var backup = await Folder("backup", "Backup", "Transport", (a, "backup", null), (b, "backup-b", null));

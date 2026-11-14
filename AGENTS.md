@@ -408,6 +408,12 @@ still shows normal folders:
 - Deletions go to the trash. Versions and trashed files can be restored, and the current file then becomes a
   version.
 - `CleanUpAsync(versionsAge, trashAge, maxVersionsPerFile)` enforces retention and removes abandoned uploads.
+- `EmptyTrashAsync` deletes the trash (through `StorageTree.DeleteAsync`, one pass). `IsStamp`,
+  `VersionStoragePath(path, stamp)` and `TrashStoragePath(stamp, path)` turn a (path, stamp) pair from a client
+  into a storage path, validating both, so no client ever names a storage path under `.async/` itself.
+- Every deleted file gets its own stamp (random suffix), so a trash directory holds exactly one file. Grouping "by
+  deletion" is therefore by time (the web UI groups by minute).
+- The web UI's view of all this is under "Web UI: files, versions and trash of plain folders".
 
 ## Sync (M2)
 
@@ -614,6 +620,8 @@ The UI belongs to the owner's app family (abook, nopds, …): same layout and co
   the form from the latest folder.
 - Devices are attached, edited and detached with `FolderDeviceForm`, which uses the same revision check.
 - End-to-end folders whose repository is not ready show the `async-cli init-encryption --folder N` hint.
+- Transport Backup folders have a *Snapshots* button, Mirror and TwoWay folders a *Files* button (see "Web UI:
+  files, versions and trash of plain folders"); both open their browser above the list.
 - Transport Backup folders have a *Recovery key* button (`RecoveryKeyPanel`: password or SSO confirm, then the
   key once with Copy and the offline restore command); a new folder's key opens the same panel right after
   creation. Folders without a key (`recoveryKeyCreatedAt` null) show a notice. `FolderForm` offers "take them
@@ -665,11 +673,67 @@ The UI belongs to the owner's app family (abook, nopds, …): same layout and co
   - Snapshot ids are validated as 32 lowercase hex characters before they become a repository path.
   - Paths go through `StoragePath.Normalize`, so `..` gives a 400.
   - `ZipArchive` still writes synchronously when an entry or the archive is disposed, even with the .NET 10
-    async API, and Kestrel refuses synchronous writes. `SnapshotBrowser` therefore writes through
-    `SyncWriteBuffer`, which holds synchronous writes and drains them asynchronously after each entry.
+    async API, and Kestrel refuses synchronous writes. `SnapshotBrowser` (and `PlainBrowser`) therefore write
+    through `SyncWriteBuffer` (`Services/ZipStreaming.cs`), which holds synchronous writes and drains them
+    asynchronously after each entry.
 - **Checks:** `SnapshotServiceTests` (unit tests on local repositories) and `scripts/smoke-snapshots.cs`, which
   runs end to end against a running server. That script enrolls a device, backs up through the gateway, then
   browses and downloads, and checks every refusal.
+
+## Web UI: files, versions and trash of plain folders
+
+Gap item 5. Code: `PlainFilesController`, `Services/PlainFileService.cs` (`PlainBrowser` + `PlainFileService`),
+`components/PlainFileBrowser.tsx`. The same patterns as the snapshot browser, on the plain layout.
+
+- **Which folders:** Mirror and TwoWay folders (without end-to-end encryption, the only kind there is for now; an
+  end-to-end one would answer 409). Backup folders answer 400 (they have Snapshots). Owner only: anyone else gets
+  404, a device token 403 (`Roles.Users`).
+- **Endpoints** under `/api/folders/{id}/files`:
+  - `GET ?path=` one directory as it is on the storage: directories first, then files, by name, with size,
+    modification time and the number of versions of each file (one non-recursive listing of
+    `.async/versions/<dir>`). `.async/` is not listed.
+  - `GET history?path=` a file's versions, newest first, with `stamp`, time replaced, size, and whether the file
+    exists now. `GET versions` every file that has versions (also deleted ones). `GET trash` the trash grouped by
+    the minute of deletion, with totals.
+  - `POST download-link {source: Current|Version|Trash, path, stamp?, zip}` → `/api/file-downloads?t=<ticket>`
+    (Data Protection purpose `ASync.PlainDownload.v1`, 5 minutes, names user, folder, source, path, stamp and
+    kind; the anonymous endpoint checks the owner again). `GET download?…` does the same with a bearer token.
+    ZIPs are of current directories only and hold files only (the plain layout syncs no empty directories).
+  - `POST restore {items: [{source: Version|Trash, path, stamp}], onConflict: Refuse|Rename|Replace}`.
+  - `DELETE trash?confirm=true` empties the trash (400 without `confirm`).
+- **Identifying versions and trashed files:** the client sends (path, stamp), never a storage path. The server
+  builds `.async/versions/<path>~<stamp>` or `.async/trash/<stamp>/<path>` with `PlainStore.VersionStoragePath`/
+  `TrashStoragePath`, after `StoragePath.Normalize` (`..` → 400), refusing `.async/…` as a path and anything that
+  is not a stamp (`yyyyMMddTHHmmssfffZ-xxxx`, lowercase hex) → 400.
+- **Restores:**
+  - A version replaces the current file, which becomes a version (`PlainStore.RestoreAsync`): nothing is lost,
+    so there is no conflict to ask about.
+  - A trashed file goes back to its original path. If that path is taken now: `Refuse` (the default) checks
+    every item first and answers 409 `{message, conflicts}` without changing anything; the UI then offers
+    `Rename` (`name (restored 2026-11-14 1203).ext`, then `… 2)`) or `Replace` (the existing file becomes a
+    version). A path taken during the request itself (the same file restored twice) is renamed. A directory in
+    the way is always renamed around. The emptied `.async/trash/<stamp>/…` directories are removed.
+  - **The folder's lease:** a restore takes the same lease a device's reconcile takes (`FolderLeaseService`), under
+    a holder id of its own per request (so two restores exclude each other too), renews it every 45 seconds of
+    work, and releases it before notifying. While a device holds it the answer is 409 "<device> is syncing this
+    folder right now"; nothing waits (the person tries again, as with purges). A device that asks for the lease
+    meanwhile gets its usual 409 and retries after 30 seconds.
+  - **Afterwards** every device of the folder gets `folder.changed` (originDeviceId `Guid.Empty`). TwoWay and
+    Mirror Download agents sync at once and pull the file: its size and modification time differ from their
+    `SyncState`. Mirror Upload agents ignore the event, and their next run makes the storage equal to their
+    folder again, undoing the restore. The result's `warning` names the (unpaused) Upload devices, and the UI
+    says it up front on the Versions and Trash tabs.
+  - Emptying the trash takes no lease: a device only adds to the trash (and its clean-up deletes from it), and
+    only what was listed is deleted.
+- **UI:** *Files* on Mirror/TwoWay folders (next to *Snapshots* for Backup ones) opens a card with three tabs.
+  *Files*: breadcrumbs, a `table.stack` (fits 390 px), Download / ZIP, and *Versions (n)* per file, which opens
+  that file's history (Download, Restore with a second click to confirm). *Versions*: every versioned file, each
+  opening the same history. *Trash*: groups with *Restore all*, per-file Download/Restore, and *Empty trash…* with
+  a confirmation. A refused restore shows the conflicting paths with *Keep both* / *Replace* / *Cancel*. The views
+  reload after a restore and when a device reports a sync.
+- **Checks:** `PlainBrowserTests` and `PlainFileServiceTests` (local `PlainStore`: listing, `..` and `.async`
+  refusals, bad stamps, history, version and trash restores, conflicts, ZIP, empty trash, lease refusal and release,
+  notifications, the Upload warning, tickets) and the e2e test's "web UI: files, versions and trash" section.
 
 ## CLI agent: Docker image and end-to-end test (M2)
 
@@ -715,6 +779,11 @@ a random id in a container.
     and versions.
   - Pause and resume, set-path, the mass-deletion guard and a missing local folder.
   - Mirror Upload and Download.
+  - The web UI's files, versions and trash (a TwoWay folder): A edits a file twice and deletes one; through the
+    API the listing (no `.async`, version counts), history, downloads by link (current, version, trashed, ZIP), the
+    refusals (`..`, `.async`, a forged stamp or ticket, a device token), a restore refused while A holds the lease,
+    then restoring v1 and the trashed file, which both agents pull back; a trash conflict (409, then Rename);
+    emptying the trash; and the Upload warning of a Mirror restore.
   - Transport Backup with a byte-identical full and partial restore.
   - Transport recovery key: shown at creation and never again; a device token gets 403 and a wrong password
     400 when asking for a new one; with the new key, `snapshots` and `restore --repo` on a `docker cp` of the
@@ -911,7 +980,7 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 3. **M2 — sync over the CLI (done).** The sync protocol (storage gateway, leases, live events) and `async-cli`
    (enroll, Backup, Mirror, TwoWay, end-to-end encryption, restore), the `async-cli` Docker image, the
    end-to-end test in CI, and the web UI for folders and for browsing and downloading snapshots.
-   **← current stage; next is "Before M3: gaps to close" (items 1–4 are done).**
+   **← current stage; next is "Before M3: gaps to close" (items 1–5 are done).**
 4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
    overdue devices.
@@ -943,9 +1012,13 @@ app starts after them, because it would otherwise be built on the same holes.
    leaves the folder's root (`PurgeJob`, `GET /api/purges`). See "Auth" and "Deleting folders and users". Left
    open: other browsers' open tabs keep their access token for up to 15 minutes after a password change; the
    physical-overlap check goes by settings as typed; the display name still has no UI.
-5. **Web UI for Mirror/TwoWay files, versions and trash.** `PlainStore` keeps versions and a trash and can
-   restore both, but only the engine and its tests use that. The snapshot endpoints answer 400 for these
-   folders, and there are no others.
+5. **Web UI for Mirror/TwoWay files, versions and trash. — Done.** *Files* on these folders: browse and download
+   the current files (ZIP for directories), each file's versions, a "files with versions" view, and the trash
+   grouped by time; restore versions and trashed files (conflicts: refuse, keep both or replace) under the
+   folder's lease, then `folder.changed`; empty the trash. See "Web UI: files, versions and trash of plain
+   folders". Left open: a Mirror Upload device undoes a restore on its next run (only warned about); no
+   restore of a whole directory as of a point in time (files are restored one by one or by trash group); the
+   listing is per directory, with no search.
 6. **Large files in plain folders.**
    - An upload is one PUT: the device sends the whole file, the gateway buffers all of it (in memory up to
      32 MB, otherwise in a temp file on the server) and then writes it to the back-end.

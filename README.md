@@ -3,7 +3,7 @@
 Self-hosted sync and backup for all your devices: Windows, macOS, Linux, iOS and Android. One server, many
 users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud, SFTP or SMB.
 
-> **Status: early development.** The server, the web UI (folders, devices, storage, snapshot browsing) and the
+> **Status: early development.** The server, the web UI (folders, devices, storage, snapshot and file browsing) and the
 > headless CLI agent work: devices sync and back up folders through the server today. The desktop and mobile
 > apps are next. The current version is in [VERSION](VERSION), changes are in
 > [RELEASE_NOTES.md](RELEASE_NOTES.md), and the design, roadmap and known gaps are in [AGENTS.md](AGENTS.md).
@@ -63,6 +63,19 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 - **Restoring from the browser:** for Backup folders with standard encryption, *Snapshots* lists every
   backup. Walk through its folders and download single files or whole folders as a ZIP. End-to-end encrypted
   backups can only be read on your devices: restore them with `async-cli restore`.
+- **Files, old versions and the trash of Mirror and two-way folders:** *Files* on such a folder shows what is on
+  the storage now. Walk through its folders, download a file or a whole folder as a ZIP.
+  - *Versions (n)* next to a file lists the copies that were replaced, with their time and size. Download one,
+    or restore it: the current file is then kept as a version too, so nothing is lost. The *Versions* tab lists
+    every file that has old versions, including deleted ones.
+  - *Trash* lists deleted files grouped by when they were deleted. Download or restore them (one, or a whole
+    group) to where they were. If a file of that name exists again, you choose: keep both (the restored one
+    gets a name like `report (restored 2026-11-14 1203).pdf`) or replace the current one (which becomes a
+    version). *Empty trash* deletes it all for good, after asking.
+  - A restore never runs at the same time as a device's sync: while a device is syncing the folder it is refused ("… is syncing this folder
+    right now"), so try again a moment later. Afterwards the folder's devices are told at once, and two-way and
+    Mirror *Download* devices fetch the restored files. A Mirror *Upload* device makes the storage equal to its
+    own folder, so it undoes a restore on its next run: the page warns about that.
 - **Alerts when something stops:** the server notices on its own when a device has not synced or backed up a
   folder for too long, when its runs keep failing, or when a backup's verification or space freeing failed. It
   tells you by [ntfy](https://ntfy.sh), a webhook or e-mail (see [Alerts](#alerts)): once per problem, again
@@ -71,6 +84,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   service.
 - **Web UI:** a sidebar layout with light, dark and system themes, usable on phones too.
   [More screenshots](docs/screenshots/): [snapshot browser](docs/screenshots/light-03-snapshots.png),
+  [files and versions](docs/screenshots/light-11-files.png), [trash](docs/screenshots/dark-11-files-trash.png),
+  [files on a phone](docs/screenshots/phone-04-files.png),
   [devices](docs/screenshots/light-06-add-device-qr.png), [storage](docs/screenshots/dark-08-storage.png),
   [phone menu](docs/screenshots/phone-02b-sidebar-open.png).
 - **Sync engine** (used by the CLI agent today, and by the apps to come):
@@ -110,7 +125,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   with the folder unlocked.
 - Devices that share a Backup folder need roughly correct clocks (within half an hour). A device whose clock
   is far off can take a running backup's lock for an abandoned one.
-- Mirror and two-way folders have no file, version or trash browser in the web UI yet.
+- The *Files* view shows the storage as it is; a device's changes that have not been synced yet are not there.
+  Empty directories are not synced, so they do not show either, and ZIP downloads contain files only.
 - Deleting stored data checks the storage settings of every other folder, so two storage entries pointing at the
   same disk, bucket or share cannot lose each other's data. It goes by the settings as typed: an SFTP server
   reached under two host names, or a path relative to two different users' home directories, looks like two

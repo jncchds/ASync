@@ -73,6 +73,15 @@
   everywhere.** Only a cookie that was already exchanged for a new one (a sign of theft) does that now.
 - Database migration `PurgeJobs` (applied at start).
 
+- feat(ui): **Files, old versions and the trash of Mirror and two-way folders in the browser.** *Files* on such a
+  folder shows what is on the storage: walk through it and download a file or a folder as a ZIP. *Versions (n)*
+  next to a file lists the copies it replaced; download one or restore it (the current file is kept as a
+  version). The *Versions* tab lists every file with old versions, the *Trash* tab deleted files grouped by when
+  they went, to download, restore (one or a whole group) or empty for good. A restore onto a file that exists
+  again asks whether to keep both or replace it. Restores are refused while a device is syncing the folder, and
+  afterwards the devices fetch the restored files at once; the page warns that a Mirror *Upload* device undoes a
+  restore on its next run.
+
 ## v0.1.3 — 2026-11-12
 
 - feat(ui): **New look, in the family style**: a collapsible sidebar (Folders, Devices, Storage, Users) with the

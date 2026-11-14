@@ -351,6 +351,20 @@ pre.command {
 .tree-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .crumbs { font-size: 0.9rem; overflow-wrap: anywhere; min-width: 0; }
 
+/* ── Files of Mirror/TwoWay folders ── */
+.tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); margin-bottom: 0.9rem; flex-wrap: wrap; }
+.tab {
+  background: transparent; color: var(--text-muted); border: none; border-bottom: 2px solid transparent; border-radius: 0;
+  padding: 0.4rem 0.8rem; font-weight: 500; margin-bottom: -1px;
+}
+.tab:hover { background: var(--accent-faint); color: var(--text); }
+.tab.selected { color: var(--accent); border-bottom-color: var(--accent); }
+.plain-browser > .notice, .plain-browser > div > .notice { margin-bottom: 0.75rem; }
+.plain-browser .notice p + .actions { margin-top: 0.5rem; }
+.history-panel { display: flex; flex-direction: column; gap: 0.5rem; }
+.trash-group { display: flex; flex-direction: column; gap: 0.4rem; }
+button.secondary.active { border-color: var(--accent); color: var(--accent); }
+
 @media (max-width: 760px) {
   .snapshot-browser { grid-template-columns: minmax(0, 1fr); }
   .snapshot-list { max-height: 240px; }

@@ -7,6 +7,7 @@ import {
 import FolderForm from '../components/FolderForm'
 import FolderDeviceForm from '../components/FolderDeviceForm'
 import SnapshotBrowser from '../components/SnapshotBrowser'
+import PlainFileBrowser from '../components/PlainFileBrowser'
 import RecoveryKeyPanel from '../components/RecoveryKeyPanel'
 import DeleteFolderPanel from '../components/DeleteFolderPanel'
 import PurgeList from '../components/PurgeList'
@@ -155,7 +156,9 @@ export default function Folders() {
       )}
       <PurgeList refresh={purges} owner={user?.username} />
 
-      {browsingFolder && <SnapshotBrowser key={browsingFolder.id} folder={browsingFolder} refresh={syncReports} onClose={() => setBrowsing(null)} />}
+      {browsingFolder && (browsingFolder.mode === 'Backup'
+        ? <SnapshotBrowser key={browsingFolder.id} folder={browsingFolder} refresh={syncReports} onClose={() => setBrowsing(null)} />
+        : <PlainFileBrowser key={browsingFolder.id} folder={browsingFolder} refresh={syncReports} onClose={() => setBrowsing(null)} />)}
 
       {folders === null ? <div className="loading">Loading…</div> : folders.length === 0 ? (
         <p className="empty">No folders yet. Add one, then attach the devices that should sync it.</p>
@@ -163,6 +166,7 @@ export default function Folders() {
         <div className="card-list section">
           {folders.map(f => {
             const browsable = f.mode === 'Backup' && f.encryption === 'Transport' && f.repositoryReady
+            const hasFiles = f.mode !== 'Backup' && f.encryption === 'Transport'
             return (
               <div key={f.id} className="card folder">
                 <div className="item-head">
@@ -193,6 +197,7 @@ export default function Folders() {
                   </div>
                   <div className="row-actions">
                     {browsable && <button className="secondary small" onClick={() => setBrowsing(browsing === f.id ? null : f.id)}>Snapshots</button>}
+                    {hasFiles && <button className="secondary small" onClick={() => setBrowsing(browsing === f.id ? null : f.id)}>Files</button>}
                     {browsable && recoveryFor?.folderId !== f.id && (
                       <button className="secondary small" onClick={() => setRecoveryFor({ folderId: f.id })}>Recovery key</button>
                     )}
