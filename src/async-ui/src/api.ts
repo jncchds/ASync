@@ -437,6 +437,51 @@ export async function downloadFromSnapshot(folderId: number, snapshotId: string,
   a.remove()
 }
 
+// ── Files, versions and trash (Mirror/TwoWay folders, plain layout) ───────────
+
+export interface PlainEntry { name: string; path: string; isDirectory: boolean; size: number; modified: string | null; versions: number }
+export interface PlainDirectory { path: string; entries: PlainEntry[] }
+export interface PlainVersion { stamp: string; replacedAt: string; size: number; modified: string | null }
+export interface PlainFileHistory { path: string; exists: boolean; size: number | null; modified: string | null; versions: PlainVersion[] }
+export interface PlainVersionedFile { path: string; versions: number; latestReplacedAt: string; versionsSize: number }
+export interface PlainTrashItem { path: string; stamp: string; deletedAt: string; size: number }
+export interface PlainTrashGroup { deletedAt: string; items: PlainTrashItem[] }
+export interface PlainTrash { groups: PlainTrashGroup[]; files: number; size: number }
+export type PlainSource = 'Current' | 'Version' | 'Trash'
+export type PlainRestoreConflict = 'Refuse' | 'Rename' | 'Replace'
+export interface PlainRestoreItem { source: PlainSource; path: string; stamp: string }
+export interface PlainRestoreResult { restoredTo: string[]; warning: string | null }
+
+export const getPlainDirectory = (folderId: number, path: string) =>
+  api.get<PlainDirectory>(`/folders/${folderId}/files`, { params: { path } }).then(r => r.data)
+export const getPlainHistory = (folderId: number, path: string) =>
+  api.get<PlainFileHistory>(`/folders/${folderId}/files/history`, { params: { path } }).then(r => r.data)
+export const getPlainVersionedFiles = (folderId: number) =>
+  api.get<PlainVersionedFile[]>(`/folders/${folderId}/files/versions`).then(r => r.data)
+export const getPlainTrash = (folderId: number) => api.get<PlainTrash>(`/folders/${folderId}/files/trash`).then(r => r.data)
+export const emptyPlainTrash = (folderId: number) =>
+  api.delete<{ deleted: number }>(`/folders/${folderId}/files/trash`, { params: { confirm: true } }).then(r => r.data)
+/** 409 with `conflicts` when a trashed file's path is taken (and `onConflict` is Refuse), or while a device syncs the folder. */
+export const restorePlain = (folderId: number, items: PlainRestoreItem[], onConflict: PlainRestoreConflict = 'Refuse') =>
+  api.post<PlainRestoreResult>(`/folders/${folderId}/files/restore`, { items, onConflict }).then(r => r.data)
+/** The paths in the way when a restore answered 409 because files exist (not when the folder was busy). */
+export function restoreConflicts(err: unknown): string[] | null {
+  if (!axios.isAxiosError(err) || err.response?.status !== 409) return null
+  const conflicts = (err.response.data as { conflicts?: string[] } | undefined)?.conflicts
+  return conflicts?.length ? conflicts : null
+}
+
+/** Starts a browser download of a current file, a version or a trashed file, or a current directory as a ZIP. */
+export async function downloadPlain(folderId: number, source: PlainSource, path: string, stamp?: string, zip = false) {
+  const { data } = await api.post<{ url: string; expiresAt: string }>(`/folders/${folderId}/files/download-link`, { source, path, stamp, zip })
+  const a = document.createElement('a')
+  a.href = data.url
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
 // ── Alerts ────────────────────────────────────────────────────────────────────
 
 export type AlertKind = 'Overdue' | 'Failing' | 'CheckFailed' | 'PruneFailed'

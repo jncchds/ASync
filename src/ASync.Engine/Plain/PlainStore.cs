@@ -3,9 +3,18 @@ using ASync.Engine.Storage;
 
 namespace ASync.Engine.Plain;
 
-public sealed record FileVersion(string Path, string StoragePath, DateTimeOffset ReplacedAt, long Size);
+/// <summary>An earlier version of <paramref name="Path"/>. <paramref name="Modified"/> is the version's own modification time.</summary>
+public sealed record FileVersion(string Path, string StoragePath, DateTimeOffset ReplacedAt, long Size, DateTimeOffset? Modified = null)
+{
+    /// <summary>The stamp in the version's name (<c>&lt;path&gt;~&lt;stamp&gt;</c>), which identifies it together with the path.</summary>
+    public string Stamp => StoragePath[(StoragePath.LastIndexOf('~') + 1)..];
+}
 
-public sealed record TrashedFile(string Path, string StoragePath, DateTimeOffset DeletedAt, long Size);
+public sealed record TrashedFile(string Path, string StoragePath, DateTimeOffset DeletedAt, long Size)
+{
+    /// <summary>The stamp of the trash directory (<c>.async/trash/&lt;stamp&gt;/&lt;path&gt;</c>).</summary>
+    public string Stamp => StoragePath[(PlainStore.Trash.Length + 1)..].Split('/')[0];
+}
 
 /// <summary>
 /// The plain layout for Mirror and TwoWay folders without end-to-end encryption: files are stored as themselves,
@@ -22,8 +31,8 @@ public sealed record TrashedFile(string Path, string StoragePath, DateTimeOffset
 public sealed class PlainStore(IStorageBackend backend)
 {
     public const string MetaDirectory = ".async";
-    private const string Versions = MetaDirectory + "/versions";
-    private const string Trash = MetaDirectory + "/trash";
+    public const string Versions = MetaDirectory + "/versions";
+    public const string Trash = MetaDirectory + "/trash";
     private const string Incoming = MetaDirectory + "/incoming";
     private const string StampFormat = "yyyyMMdd'T'HHmmssfff'Z'";
 
@@ -83,7 +92,7 @@ public sealed class PlainStore(IStorageBackend backend)
         var result = new List<FileVersion>();
         await foreach (var entry in backend.ListAsync(directory, ct: ct))
             if (!entry.IsDirectory && entry.Name.StartsWith(prefix, StringComparison.Ordinal) && ParseStamp(entry.Name[prefix.Length..]) is { } at)
-                result.Add(new FileVersion(path, entry.Path, at, entry.Size));
+                result.Add(new FileVersion(path, entry.Path, at, entry.Size, entry.LastModified));
         return [.. result.OrderByDescending(v => v.ReplacedAt)];
     }
 
@@ -95,7 +104,7 @@ public sealed class PlainStore(IStorageBackend backend)
             var relative = entry.Path[(Versions.Length + 1)..];
             var tilde = relative.LastIndexOf('~');
             if (tilde > 0 && ParseStamp(relative[(tilde + 1)..]) is { } at)
-                result.Add(new FileVersion(relative[..tilde], entry.Path, at, entry.Size));
+                result.Add(new FileVersion(relative[..tilde], entry.Path, at, entry.Size, entry.LastModified));
         }
         return result;
     }
@@ -121,6 +130,24 @@ public sealed class PlainStore(IStorageBackend backend)
         if (await backend.StatAsync(path, ct) is { IsDirectory: false }) await backend.MoveAsync(path, VersionPath(path, DateTimeOffset.UtcNow), ct);
         await backend.MoveAsync(storagePath, path, ct);
     }
+
+    /// <summary>Deletes everything in the trash (what is there when the listing is made). Returns the number of files deleted.</summary>
+    public async Task<int> EmptyTrashAsync(CancellationToken ct = default) =>
+        (int)(await StorageTree.DeleteAsync(backend, Trash, passes: 1, ct: ct)).Files;
+
+    /// <summary>Whether <paramref name="stamp"/> has the shape of a version or trash stamp (<c>20261111T120000123Z-3fa2</c>).</summary>
+    public static bool IsStamp(string? stamp) =>
+        stamp is { Length: 24 } && stamp[8] == 'T' && stamp[18] == 'Z' && stamp[19] == '-'
+        && stamp[..8].All(char.IsAsciiDigit) && stamp[9..18].All(char.IsAsciiDigit) && stamp[20..].All(char.IsAsciiHexDigitLower)
+        && ParseStamp(stamp) is not null;
+
+    /// <summary>Where the version <paramref name="stamp"/> of <paramref name="path"/> is stored. Validates both.</summary>
+    public static string VersionStoragePath(string path, string stamp) =>
+        IsStamp(stamp) ? $"{Versions}/{CheckPath(path)}~{stamp}" : throw new ArgumentException($"'{stamp}' is not a version.", nameof(stamp));
+
+    /// <summary>Where the trashed file <paramref name="path"/> deleted at <paramref name="stamp"/> is stored. Validates both.</summary>
+    public static string TrashStoragePath(string stamp, string path) =>
+        IsStamp(stamp) ? $"{Trash}/{stamp}/{CheckPath(path)}" : throw new ArgumentException($"'{stamp}' is not a deletion.", nameof(stamp));
 
     /// <summary>
     /// Deletes versions and trash older than the given ages, keeps at most <paramref name="maxVersionsPerFile"/>
@@ -158,7 +185,8 @@ public sealed class PlainStore(IStorageBackend backend)
         return deleted;
     }
 
-    private static string CheckPath(string path)
+    /// <summary>Normalizes a synced file's path; refuses the root and anything under <c>.async/</c>.</summary>
+    public static string CheckPath(string path)
     {
         var normalized = StoragePath.Normalize(path);
         if (normalized.Length == 0 || IsMeta(normalized)) throw new ArgumentException($"'{path}' is not a valid file path.", nameof(path));
