@@ -42,6 +42,12 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   - End-to-end encrypted folders show the command that sets them up on a device.
   - Backup folders show when their space was last freed and when they were last verified. A failed
     verification is shown in red with what was found.
+- **Recovery keys for standard-encryption backups:** a new Backup folder with standard encryption shows its
+  recovery key once. Keep it somewhere safe, away from the server. With it and the storage, the backups can
+  be restored with no server at all (`async-cli restore --repo …`, below), and a new server can take them over
+  with their history: add a Backup folder on the same storage and directory, tick "take them over" and enter
+  the key. *Recovery key* on a folder makes a new key after you re-enter your password; the previous one then
+  stops working. Folders made before recovery keys existed show a notice until they get one.
 - **Restoring from the browser:** for Backup folders with standard encryption, *Snapshots* lists every
   backup. Walk through its folders and download single files or whole folders as a ZIP. End-to-end encrypted
   backups can only be read on your devices: restore them with `async-cli restore`.
@@ -64,9 +70,15 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 
 ## Known limits
 
-- **Keep a database backup.** Backups with standard (Transport) encryption can only be opened with a key the
-  server keeps in its PostgreSQL database. If the database is lost, so are those backups. End-to-end
-  encrypted backups do not depend on the server: the passphrase or the recovery key opens them.
+- **Keep each folder's recovery key.** Day to day, backups with standard encryption are opened with a key
+  the server keeps in its PostgreSQL database. If the database is lost, the backups are still readable with
+  the folder's recovery key (or with the keys an admin exported with `secrets export-folder-keys`), but not
+  without one of them. A database backup is still worth having: it keeps accounts, devices and folder
+  settings, which a recovery key does not bring back. End-to-end encrypted backups never depend on the
+  server: the passphrase or the recovery key opens them.
+- Taking backups over on a new server needs the folder's directory at the same place relative to the
+  storage. On *shared* storage each user's area is `users/<id>/`, and a new server may give the person a
+  different id: move the directory into their new area first.
 - A failed verification is shown on the *Folders* page only: nobody is notified. Look there from time to
   time, or run `async-cli check` from a scheduled job and use its exit code.
 - A scheduled verification reads back only a sample of the data. `async-cli check --read-data 100` reads
@@ -108,6 +120,16 @@ To move a generated signing key into the environment:
 ```bash
 docker compose exec async-server dotnet ASync.Api.dll secrets show
 ```
+
+For disaster recovery, an admin can also export the keys of every folder with standard encryption:
+
+```bash
+docker compose exec async-server dotnet ASync.Api.dll secrets export-folder-keys > folder-keys.txt
+```
+
+Each `folder-<id>=…` line opens that folder's backups offline, like its recovery key. The file can read all of
+those backups, so keep it as carefully as the backups themselves, and away from the server. Keys of folders
+created later are not in it: export again from time to time. People's own recovery keys work without it.
 
 Always put the server behind HTTPS (a reverse proxy such as Caddy or Traefik) before devices connect over
 the internet.
@@ -163,6 +185,7 @@ async-cli run                                                                # k
 | `init-encryption --folder N` | Sets up an end-to-end encrypted Backup folder (on one device) and prints its recovery key. |
 | `unlock --folder N` | Unlocks an end-to-end encrypted folder on another device, with the passphrase or the recovery key. |
 | `snapshots`, `restore` | Lists a Backup folder's snapshots, and restores one (or `--path` a part of it) into `--target`. `--snapshot` takes the short id that `snapshots` and the web UI show (the id's last 8 digits), the start of the id, or `latest`. |
+| `snapshots --repo <dir>`, `restore --repo <dir>` | The same **without a server**, straight from the storage: `--repo` is the folder's directory (a local disk, a mounted share or a copy). For S3, WebDAV, SFTP or SMB add `--storage settings.json` (the connection settings, see below) and give the directory on that storage as `--repo`. Opens with the recovery key, an end-to-end passphrase, or an exported folder key, from `--key-file`, `ASYNC_RECOVERY_KEY` or typed in. Needs no enrolment. |
 | `prune [--folder N]` | Frees the space of dropped snapshots in a Backup folder (or in all of this device's) now, and says what was removed and how much was freed. |
 | `check [--folder N] [--read-data <percent>]` | Verifies a Backup folder (or all of this device's): nothing missing, and with `--read-data` that this share of the stored data reads back correctly (100 = everything). Lists the problems and exits with code 1 when it finds any. |
 | `forget` | Removes this device's identity from the machine. |
@@ -172,6 +195,27 @@ more than half of a folder's files stops; run it with `--allow-mass-delete` if t
 the device in the web UI cuts it off at once: a running agent stops with an explanation. `prune` and `check`
 work on standard and end-to-end folders alike; their results appear on the *Folders* page. Both say "BUSY"
 and exit with code 1 when a backup or another prune is using the folder: run them again later.
+
+### Restoring without the server
+
+You need the folder's directory on the storage (the web UI shows it with the recovery key: on shared storage it
+is inside `users/<id>/`) and its recovery key. Nothing else: no server, no database, no enrolled device.
+
+```bash
+async-cli snapshots --repo /mnt/backup-disk/photos                 # asks for the recovery key
+async-cli restore --repo /mnt/backup-disk/photos --target ~/photos --snapshot latest
+
+# On remote storage: the connection settings as JSON (the same fields as in the web UI's storage form)
+cat > s3.json <<'EOF'
+{ "type": "S3", "endpoint": "https://s3.example.com", "region": "us-east-1", "bucket": "backups",
+  "prefix": "async", "accessKeyId": "…", "secretAccessKey": "…", "forcePathStyle": true }
+EOF
+ASYNC_RECOVERY_KEY=ABCD-EFGH-… async-cli restore --storage s3.json --repo photos --target ~/photos
+```
+
+The `type` is `S3`, `WebDav` (`url`, `username`, `password`), `Sftp` (`host`, `port`, `username`, `password` or
+`privateKey`, `path`, optionally `hostKeyFingerprint`) or `Smb` (`host`, `share`, `path`, `username`,
+`password`). Without a `hostKeyFingerprint` an SFTP server's key is accepted as it is.
 
 ## Development
 

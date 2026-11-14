@@ -10,12 +10,14 @@ WORKDIR /src
 COPY Directory.Build.props Directory.Packages.props VERSION ./
 COPY src/ASync.Contracts/ASync.Contracts.csproj src/ASync.Contracts/
 COPY src/ASync.Engine/ASync.Engine.csproj src/ASync.Engine/
+COPY src/ASync.Storage/ASync.Storage.csproj src/ASync.Storage/
 COPY src/ASync.Client.Core/ASync.Client.Core.csproj src/ASync.Client.Core/
 COPY src/ASync.Cli/ASync.Cli.csproj src/ASync.Cli/
 RUN dotnet restore src/ASync.Cli/ASync.Cli.csproj -a $TARGETARCH
 
 COPY src/ASync.Contracts/ src/ASync.Contracts/
 COPY src/ASync.Engine/ src/ASync.Engine/
+COPY src/ASync.Storage/ src/ASync.Storage/
 COPY src/ASync.Client.Core/ src/ASync.Client.Core/
 COPY src/ASync.Cli/ src/ASync.Cli/
 RUN dotnet publish src/ASync.Cli/ASync.Cli.csproj -c Release -a $TARGETARCH --self-contained false -o /app/publish --no-restore

@@ -28,6 +28,11 @@ public class Folder
     public bool RepositoryReady { get; set; }
     /// <summary>Transport-encrypted repositories: the key that opens their server key file, protected with Data Protection.</summary>
     public string? ProtectedRepositoryKey { get; set; }
+    /// <summary>
+    /// Transport Backup folders: when the person's current recovery key was made (null = none yet, e.g. a folder
+    /// from before recovery keys). The key itself is never stored: only its key file in the repository.
+    /// </summary>
+    public DateTime? RecoveryKeyCreatedAt { get; set; }
     /// <summary>Backup folders: days between prunes (forgotten snapshots free space). 0 = never.</summary>
     public int PruneIntervalDays { get; set; } = MaintenanceDefaults.PruneIntervalDays;
     /// <summary>Backup folders: days between integrity checks. 0 = never.</summary>

@@ -305,6 +305,7 @@ dd { min-width: 0; overflow-wrap: anywhere; }
 .qr { background: var(--qr-bg); padding: 0.5rem; border-radius: 8px; line-height: 0; }
 .pairing-details { flex: 1 1 260px; min-width: 0; }
 .big-code { font-size: 1.3rem; letter-spacing: 0.08em; font-weight: 600; color: var(--accent); }
+pre.command.recovery-key { font-size: 1rem; font-weight: 600; letter-spacing: 0.04em; color: var(--accent); user-select: all; }
 pre.command {
   background: var(--input-bg); border: 1px solid var(--border); border-radius: 6px;
   padding: 0.6rem 0.8rem; font-size: 0.8rem; overflow-x: auto; margin-bottom: 0.75rem; max-width: 100%;

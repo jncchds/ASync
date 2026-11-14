@@ -27,6 +27,21 @@
   (`AGENTS.md`) marks milestone M2 as done, describes the folder tables as they are, lists the gaps to close
   before the desktop app, and describes how devices keep backing up without push notifications.
 
+- feat: **Backups with standard encryption survive losing the server's database.** A new Backup folder with
+  standard encryption shows a recovery key once: keep it safe. With it and the storage, the backups can be
+  restored without any server, and a new server can take them over with their history. Existing folders get
+  one with *Recovery key* on the Folders page (after re-entering your password), which also makes a new key
+  later; the previous key then stops working. Until they have one, they show a notice.
+- feat(cli): **Restore without a server:** `async-cli snapshots --repo <dir>` and `async-cli restore --repo <dir>`
+  open a Backup folder's directory straight from the storage with its recovery key (or an end-to-end
+  passphrase). A local directory, or S3, WebDAV, SFTP and SMB with `--storage <settings.json>`. No enrolment
+  needed.
+- feat: **Take backups over on a new server:** creating a standard-encryption Backup folder on a directory that
+  already holds backups asks for their recovery key and continues from the old snapshots. An end-to-end folder
+  created on existing backups is ready at once; its devices run `async-cli unlock`.
+- feat(admin): **`secrets export-folder-keys`** prints the server's key for every standard-encryption folder,
+  for disaster recovery. The output opens all of those backups: keep it like the backups.
+
 ## v0.1.3 — 2026-11-12
 
 - feat(ui): **New look, in the family style**: a collapsible sidebar (Folders, Devices, Storage, Users) with the

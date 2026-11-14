@@ -21,7 +21,8 @@ interface Props {
   backends: StorageBackend[]
   /** The folder as currently loaded (live updates replace it while the form is open). */
   existing?: Folder
-  onSaved: () => void
+  /** Called with the saved folder (a new one may carry its recovery key, to be shown once). */
+  onSaved: (saved: Folder) => void
   onCancel: () => void
   /** Discard the edits and start again from the latest version (after a 409). */
   onReload: () => void
@@ -44,12 +45,15 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
   const [pruneDays, setPruneDays] = useState(existing?.pruneIntervalDays ?? 7)
   const [checkDays, setCheckDays] = useState(existing?.checkIntervalDays ?? 30)
   const [checkPercent, setCheckPercent] = useState(existing?.checkReadDataPercent ?? 10)
+  const [takeOver, setTakeOver] = useState(false)
+  const [takeOverKey, setTakeOverKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState(false)
 
   const fixed = existing !== undefined
   const changedElsewhere = existing !== undefined && existing.revision !== startRevision
+  const canTakeOver = mode === 'Backup' && encryption === 'Transport'
 
   const chooseMode = (m: SyncMode) => {
     setMode(m)
@@ -68,11 +72,10 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
       retention, versionsKeepDays: versionsDays, trashKeepDays: trashDays,
       pruneIntervalDays: pruneDays, checkIntervalDays: checkDays, checkReadDataPercent: checkPercent,
       expectedRevision: startRevision,
+      recoveryKey: !existing && canTakeOver && takeOver ? takeOverKey.trim() : undefined,
     }
     try {
-      if (existing) await updateFolder(existing.id, req)
-      else await createFolder(req)
-      onSaved()
+      onSaved(existing ? await updateFolder(existing.id, req) : await createFolder(req))
     } catch (err) {
       if (isConflict(err)) setConflict(true)
       else setError(errorMessage(err, 'Could not save the folder.'))
@@ -139,11 +142,32 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
         )}
       </div>
       {fixed && <p className="hint">Mode, encryption, contents, storage and directory cannot change. Create a new folder instead.</p>}
-      {!fixed && encryption === 'EndToEnd' && (
+      {!fixed && mode === 'Backup' && encryption === 'EndToEnd' && (
         <p className="hint">
           After creating it, set it up on one device with <code>async-cli init-encryption</code>. Keep the passphrase and the
-          recovery key it prints: without them nobody, not even the server's admin, can restore these backups.
+          recovery key it prints: without them nobody, not even the server's admin, can restore these backups. If the directory
+          already holds this folder's backups (from an earlier server), its devices run <code>async-cli unlock</code> instead.
         </p>
+      )}
+      {!fixed && canTakeOver && (
+        <>
+          <label className="checkbox">
+            <input type="checkbox" checked={takeOver} onChange={e => setTakeOver(e.target.checked)} />
+            The directory already holds backups from an earlier ASync server: take them over
+          </label>
+          {takeOver ? (
+            <label>
+              Their recovery key
+              <input value={takeOverKey} onChange={e => setTakeOverKey(e.target.value)} required autoComplete="off" spellCheck={false}
+                placeholder="ABCD-EFGH-…" />
+              <span className="field-hint">
+                The snapshots stay and the server continues from them. The earlier server's key to them is removed.
+              </span>
+            </label>
+          ) : (
+            <p className="hint small-text">You get a recovery key when the folder is created. It is shown once: keep it safe.</p>
+          )}
+        </>
       )}
 
       {mode === 'Backup' && (

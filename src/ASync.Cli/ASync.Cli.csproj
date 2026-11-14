@@ -8,10 +8,16 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ASync.Client.Core\ASync.Client.Core.csproj" />
+    <!-- Offline restore from remote storage: opens S3, WebDAV, SFTP and SMB repositories directly, without a server. -->
+    <ProjectReference Include="..\ASync.Storage\ASync.Storage.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="System.CommandLine" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ASync.Tests" />
   </ItemGroup>
 </Project>
