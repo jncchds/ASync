@@ -170,6 +170,8 @@ label.checkbox input { width: auto; margin: 0; flex-shrink: 0; }
   background: var(--warning-faint); border: 1px solid var(--warning-line); min-width: 0;
 }
 .notice pre.command { margin: 0.5rem 0; }
+.notice.danger { background: var(--danger-faint); border-color: var(--danger-line); overflow-wrap: anywhere; }
+.notice.danger strong { color: var(--danger); }
 .dot { font-size: 0.7em; vertical-align: 0.1em; margin-right: 0.3rem; }
 
 /* ── Pills ── */

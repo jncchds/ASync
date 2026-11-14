@@ -1,6 +1,25 @@
 # Release notes
 
-## v0.1.4 — 2026-11-12
+## v0.1.4 — 2026-11-14
+
+- feat: **Dropped snapshots now free their space, and backups are verified.** Every Backup folder is pruned
+  every 7 days and verified every 30 days (nothing missing, and 10% of the stored data read back), without
+  anyone asking. The server does it for folders with standard encryption; for end-to-end folders a device
+  running `async-cli run` does it. Both wait while a backup or download is using the folder. Change the
+  schedule, or switch it off with 0, under "Housekeeping" in the folder form. Until now repositories only
+  grew, and damage was noticed only when restoring.
+- feat(ui): **The Folders page shows when each Backup folder was last pruned and verified**, and a failed
+  verification in red with what was found.
+- feat(cli): **`async-cli prune` and `async-cli check`** do the same by hand, for one folder or all.
+  `check --read-data 100` reads everything back; it lists the problems and exits with code 1 when there are
+  any.
+- fix: **Creating a second Backup folder within a few minutes of the first no longer fails** with "there is
+  already a backup repository in that directory".
+- fix: **A download from the snapshot browser no longer breaks off after a device pruned the folder.**
+- fix: A backup that meets a running prune waits and retries instead of being reported as failed, and a
+  backup of a very large file keeps its lock alive.
+- New server settings: `Maintenance__PollSeconds` (how often the server looks for due folders, default 900)
+  and `Maintenance__Enabled`.
 
 - docs: **The documentation matches the code again.** The README no longer says the CLI agent is still to come,
   and it gains a "Known limits" section. Most important: backups with standard (Transport) encryption can only

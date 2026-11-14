@@ -21,9 +21,12 @@ public class SyncController : ControllerBase
     private readonly FolderService _service;
     private readonly FolderLeaseService _leases;
 
-    public SyncController(IFolderRepository folders, FolderService service, FolderLeaseService leases)
+    private readonly IDeviceRepository _devices;
+
+    public SyncController(IFolderRepository folders, IDeviceRepository devices, FolderService service, FolderLeaseService leases)
     {
         _folders = folders;
+        _devices = devices;
         _service = service;
         _leases = leases;
     }
@@ -95,6 +98,26 @@ public class SyncController : ControllerBase
         if (await MembershipAsync(id) is not { } m) return NotFound();
         if (m.Folder!.ProtectedRepositoryKey is null) return NotFound(new { message = "This folder's repository is end-to-end encrypted." });
         return new RepositoryKeyDto(Convert.ToBase64String(_service.ServerKey(m.Folder)));
+    }
+
+    // ── Maintenance (Backup) ──────────────────────────────────────────────────
+
+    /// <summary>Which prune or check this device should run now (end-to-end folders: only devices hold the key).</summary>
+    [HttpPost("{id:int}/maintenance/claim")]
+    public async Task<ActionResult<MaintenanceClaimDto>> ClaimMaintenance(int id)
+    {
+        if (await MembershipAsync(id) is not { } m) return NotFound();
+        return _service.ClaimMaintenance(m);
+    }
+
+    /// <summary>The result of a prune or check this device ran.</summary>
+    [HttpPost("{id:int}/maintenance/report")]
+    public async Task<IActionResult> ReportMaintenance(int id, [FromBody] MaintenanceReportRequest report)
+    {
+        if (await MembershipAsync(id) is not { } m) return NotFound();
+        var device = await _devices.GetAsync(DeviceId);
+        var result = await _service.ReportMaintenanceAsync(m, report, device?.Name ?? "a device");
+        return result.Success ? NoContent() : BadRequest(new { message = result.Error });
     }
 
     /// <summary>A device created this end-to-end folder's repository.</summary>

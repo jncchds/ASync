@@ -40,6 +40,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   - If someone else changed a folder while you were editing it, you are asked to reload instead of
     overwriting their change.
   - End-to-end encrypted folders show the command that sets them up on a device.
+  - Backup folders show when their space was last freed and when they were last verified. A failed
+    verification is shown in red with what was found.
 - **Restoring from the browser:** for Backup folders with standard encryption, *Snapshots* lists every
   backup. Walk through its folders and download single files or whole folders as a ZIP. End-to-end encrypted
   backups can only be read on your devices: restore them with `async-cli restore`.
@@ -49,8 +51,15 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   [phone menu](docs/screenshots/phone-02b-sidebar-open.png).
 - **Sync engine** (used by the CLI agent today, and by the apps to come):
   - **Backups:** deduplicated, compressed, always encrypted snapshots, with retention rules. Old snapshots
-    are dropped after each backup; reclaiming their space (pruning) and integrity checks exist in the engine
-    but are not run by anything yet.
+    are dropped after each backup.
+  - **Housekeeping, without anyone asking:** the space of dropped snapshots is freed (pruned) every 7 days,
+    and every 30 days the backups are verified: that nothing is missing, and that a sample of the stored data
+    (10%) still reads back correctly. Both schedules and the sample size are set per folder in the folder
+    form; 0 days turns one off.
+    - The server does this for folders with standard encryption.
+    - For end-to-end encrypted folders one of the folder's devices does it (a running `async-cli run` that
+      has the folder unlocked), because only devices have the key.
+    - Either waits while a backup or a download is using the folder, and tries again later.
   - **Mirror and two-way folders:** stored as normal files, with old versions and a trash.
 
 ## Known limits
@@ -58,7 +67,14 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 - **Keep a database backup.** Backups with standard (Transport) encryption can only be opened with a key the
   server keeps in its PostgreSQL database. If the database is lost, so are those backups. End-to-end
   encrypted backups do not depend on the server: the passphrase or the recovery key opens them.
-- Space used by dropped snapshots is not reclaimed yet, and nothing checks stored backups for damage.
+- A failed verification is shown on the *Folders* page only: nobody is notified. Look there from time to
+  time, or run `async-cli check` from a scheduled job and use its exit code.
+- A scheduled verification reads back only a sample of the data. `async-cli check --read-data 100` reads
+  all of it.
+- End-to-end encrypted folders are only pruned and verified while one of their devices runs `async-cli run`
+  with the folder unlocked.
+- Devices that share a Backup folder need roughly correct clocks (within half an hour). A device whose clock
+  is far off can take a running backup's lock for an abandoned one.
 - Nobody is told when a device stops backing up.
 - Mirror and two-way folders have no file, version or trash browser in the web UI yet.
 - Very large files in Mirror and two-way folders are uploaded in one piece, with no resume; on S3 storage
@@ -84,6 +100,8 @@ Open http://localhost:5100 and create the admin account. Settings are environmen
 | `Oidc__DisplayName` | Text on the sign-in button. |
 | `Oidc__AutoCreateUsers` | `true` (default): a new SSO user gets an account on first sign-in. |
 | `Storage__LocalRoots` | Where admins may create back-ends on the server's own disk (default `/data`, the `async_data` volume). Comma-separated. |
+| `Maintenance__PollSeconds` | How often the server looks for Backup folders due for pruning or verifying (default 900). |
+| `Maintenance__Enabled` | `false` stops the server from pruning and verifying on its own. |
 
 To move a generated signing key into the environment:
 
@@ -145,11 +163,15 @@ async-cli run                                                                # k
 | `init-encryption --folder N` | Sets up an end-to-end encrypted Backup folder (on one device) and prints its recovery key. |
 | `unlock --folder N` | Unlocks an end-to-end encrypted folder on another device, with the passphrase or the recovery key. |
 | `snapshots`, `restore` | Lists a Backup folder's snapshots, and restores one (or `--path` a part of it) into `--target`. `--snapshot` takes the short id that `snapshots` and the web UI show (the id's last 8 digits), the start of the id, or `latest`. |
+| `prune [--folder N]` | Frees the space of dropped snapshots in a Backup folder (or in all of this device's) now, and says what was removed and how much was freed. |
+| `check [--folder N] [--read-data <percent>]` | Verifies a Backup folder (or all of this device's): nothing missing, and with `--read-data` that this share of the stored data reads back correctly (100 = everything). Lists the problems and exits with code 1 when it finds any. |
 | `forget` | Removes this device's identity from the machine. |
 
 Passphrases are read from `ASYNC_PASSPHRASE`, from `--passphrase-file`, or typed in. A sync that would delete
 more than half of a folder's files stops; run it with `--allow-mass-delete` if that is what you want. Removing
-the device in the web UI cuts it off at once: a running agent stops with an explanation.
+the device in the web UI cuts it off at once: a running agent stops with an explanation. `prune` and `check`
+work on standard and end-to-end folders alike; their results appear on the *Folders* page. Both say "BUSY"
+and exit with code 1 when a backup or another prune is using the folder: run them again later.
 
 ## Development
 

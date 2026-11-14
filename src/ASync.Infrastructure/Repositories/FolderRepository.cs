@@ -1,3 +1,4 @@
+using ASync.Contracts;
 using ASync.Core.Interfaces;
 using ASync.Core.Models;
 using ASync.Infrastructure.Data;
@@ -34,6 +35,11 @@ public class FolderRepository(AppDbContext db) : IFolderRepository
 
     public Task<List<Folder>> GetOnBackendAsync(int storageBackendId) =>
         db.Folders.Where(f => f.StorageBackendId == storageBackendId).ToListAsync();
+
+    public Task<List<Folder>> GetServerMaintainedAsync() =>
+        db.Folders.Include(f => f.StorageBackend)
+            .Where(f => f.Mode == SyncMode.Backup && f.Encryption == FolderEncryption.Transport && f.ProtectedRepositoryKey != null)
+            .OrderBy(f => f.Id).ToListAsync();
 
     public async Task<Folder> AddAsync(Folder folder)
     {

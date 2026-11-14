@@ -172,6 +172,13 @@ public sealed class AsyncApiClient : IDisposable
     public Task MarkRepositoryReadyAsync(int folderId, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Post, $"api/sync/folders/{folderId}/repository-ready", null, ct);
 
+    /// <summary>Which prune or check the server wants this device to run now (end-to-end folders).</summary>
+    public Task<MaintenanceClaimDto> ClaimMaintenanceAsync(int folderId, CancellationToken ct = default) =>
+        SendAsync<MaintenanceClaimDto>(HttpMethod.Post, $"api/sync/folders/{folderId}/maintenance/claim", null, true, ct);
+
+    public Task ReportMaintenanceAsync(int folderId, MaintenanceReportRequest report, CancellationToken ct = default) =>
+        SendAsync(HttpMethod.Post, $"api/sync/folders/{folderId}/maintenance/report", report, ct);
+
     // ── Plumbing ──────────────────────────────────────────────────────────────
 
     /// <summary>Sends an authenticated request (retrying once with a fresh token after a 401). The caller disposes the response.</summary>

@@ -26,11 +26,13 @@ public class FolderStorageController : ControllerBase
 
     private readonly IFolderRepository _folders;
     private readonly FolderBackendCache _backends;
+    private readonly SnapshotService _snapshots;
 
-    public FolderStorageController(IFolderRepository folders, FolderBackendCache backends)
+    public FolderStorageController(IFolderRepository folders, FolderBackendCache backends, SnapshotService snapshots)
     {
         _folders = folders;
         _backends = backends;
+        _snapshots = snapshots;
     }
 
     private async Task<IStorageBackend?> BackendAsync(int folderId, CancellationToken ct)
@@ -109,6 +111,11 @@ public class FolderStorageController : ControllerBase
         return await Guard(async () =>
         {
             await backend.DeleteAsync(path, ct);
+            // Only a prune deletes index files and packs: the snapshot browser's cached index is now out of date.
+            // (Packs go last, after the new index is complete, so a reload after this point is right.)
+            var normalized = StoragePath.Normalize(path);
+            if (normalized.StartsWith("index/", StringComparison.Ordinal) || normalized.StartsWith("data/", StringComparison.Ordinal))
+                _snapshots.Invalidate(folderId);
             return NoContent();
         });
     }

@@ -53,6 +53,9 @@ builder.Services.AddSingleton<FolderBackendCache>();
 builder.Services.AddHostedService<FolderBackendSweeper>();
 builder.Services.AddSingleton<SnapshotService>();
 builder.Services.AddHostedService<CleanupService>();
+builder.Services.AddSingleton<MaintenanceClaims>();
+builder.Services.AddScoped<FolderMaintenanceService>();
+builder.Services.AddHostedService<MaintenanceScheduler>();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 // People: a short-lived JWT access token in page memory, refreshed with an httpOnly cookie sent only to /api/auth

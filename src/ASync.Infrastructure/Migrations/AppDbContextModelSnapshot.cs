@@ -156,6 +156,16 @@ namespace ASync.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("CheckIntervalDays")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(30);
+
+                    b.Property<int>("CheckReadDataPercent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(10);
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -176,6 +186,34 @@ namespace ASync.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<DateTime?>("LastCheckAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastCheckBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("LastCheckMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool?>("LastCheckOk")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastPruneAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastPruneBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("LastPruneMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool?>("LastPruneOk")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Mode")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -188,6 +226,11 @@ namespace ASync.Infrastructure.Migrations
 
                     b.Property<string>("ProtectedRepositoryKey")
                         .HasColumnType("text");
+
+                    b.Property<int>("PruneIntervalDays")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(7);
 
                     b.Property<bool>("RepositoryReady")
                         .HasColumnType("boolean");

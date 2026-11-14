@@ -60,7 +60,7 @@ src/
   ASync.Tests/            xUnit, hand-written fakes
   ASync.Client.Core/      device side: identity/store, API client, RemoteStorageBackend, FolderSyncer, BackupJob, SyncAgent
   ASync.Cli/              async-cli (System.CommandLine): enroll, status, folders, sync, run, set-path, pause/resume,
-                          init-encryption, unlock, snapshots, restore, forget
+                          init-encryption, unlock, snapshots, restore, prune, check, forget
   ASync.App/              (later) Avalonia shared UI (CommunityToolkit.Mvvm)
   ASync.App.Desktop/      (later) Win/Linux/macOS head: tray + background service host
   ASync.App.iOS/          (later) PhotoKit, Contacts, EventKit, BGTaskScheduler, APNs, background URLSession
@@ -102,6 +102,11 @@ Implemented (M2), both in `src/ASync.Core/Models/Folder.cs`:
   TrashKeepDays, Revision (grows with every change to the folder or its device settings), RepositoryReady
   (false until a device has initialised an end-to-end repository), ProtectedRepositoryKey (Transport Backup
   folders only: the server key, Data Protection purpose `ASync.Folder.RepositoryKey.v1`), CreatedAt, UpdatedAt.
+  - Maintenance schedule (Backup folders): PruneIntervalDays (default 7), CheckIntervalDays (default 30),
+    CheckReadDataPercent (default 10). 0 days = off. The defaults are database defaults too, so folders from
+    before the migration `FolderMaintenance` have them.
+  - Maintenance results: LastPruneAt, LastPruneOk, LastPruneMessage, LastPruneBy and the same four for
+    LastCheck. `By` is `server` or a device's name. Writing them does not change `Revision`.
 - **FolderDevice**: a device's membership in a folder: Id, FolderId, DeviceId, LocalPath, Direction (Mirror
   only, otherwise null), Paused, LastSyncAt, LastSyncOk, LastSyncMessage.
 
@@ -113,7 +118,7 @@ Planned (none of this exists yet):
 - **StorageBackend.Quota** and stored usage; periodic health checks (today `LastChecked*` is only set by a
   manual connection test).
 - **FolderDevice**: metered-network and battery rules; an expected-by time for overdue detection.
-- **Job** (prune, check, health) and alert settings per user.
+- Alert settings per user (a failed check or prune is only shown on the Folders page today).
 - **Device.PushTarget**: relay token / APNs / FCM / UnifiedPush endpoint.
 
 ## Auth
@@ -270,11 +275,24 @@ locks/<id>           encrypted lock files: shared (backup, restore) or exclusive
 - **Maintenance** (`RepositoryMaintenance`):
   - `ForgetAsync(RetentionPolicy)` applies last, hourly, daily, weekly, monthly, yearly and within rules,
     per source. It always keeps the newest snapshot.
-  - `PruneAsync` takes an exclusive lock. It deletes unused packs and repacks those more than 30% unused.
-    The order is crash-safe: new packs, new index, then delete old indexes, then delete old packs.
-  - `CheckAsync(readDataFraction)` verifies the structure and, for a sample of packs, every blob.
-  - Only `ForgetAsync` is used in production (by `BackupJob`). `PruneAsync` and `CheckAsync` are called only
-    from tests: see "Before M3: gaps to close".
+  - `PruneAsync` takes an exclusive lock and refreshes it while it works.
+    - It deletes unused packs and repacks those more than 30% unused.
+    - The order is crash-safe: new packs, new index, then delete old indexes, then delete old packs. A crash
+      at any point leaves extra data, never missing data (`MaintenanceTests` crashes it after every single
+      write and deletion and then checks and restores).
+    - An unreadable snapshot or tree aborts it before anything is deleted.
+    - Packs that no index lists (an interrupted backup or prune) are deleted once they are a day old
+      (`OrphanGrace`), not sooner: a backup whose lock went stale might still be uploading them.
+  - `CheckAsync(readDataFraction)` takes a shared lock (a prune moving data under it would look like damage;
+    backups may run). It verifies that every snapshot and tree loads, every used blob is indexed, every
+    indexed pack exists with its size and, for a random sample of packs, that the pack matches its id and
+    every blob decrypts. Problems are returned as a list, never thrown.
+  - `MaintenanceRunner` wraps both into a `MaintenanceOutcome` (ok, busy, one-line message). Busy means a
+    `RepositoryLockedException`: not a failure, try later. The server and the devices both use it; see
+    "Prune and check" under "Sync".
+  - **Known limit:** lock staleness (30 minutes) is judged by the clock of whoever looks. A device whose
+    clock is more than that ahead takes a live backup's lock for a dead one and may prune under it. The
+    snapshot that backup writes would then be reported by the next check. Server-issued locks would fix it.
 - **Key files:** they can be added and removed, but never the last one. Changing a passphrase writes a new
   key file and re-encrypts nothing.
 
@@ -354,8 +372,35 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
 - Only files are synced. Empty directories and symlinks are not.
 
 **Backup** (`BackupJob`): one snapshot per run, with Source = the device id and the device's newest snapshot as
-parent. After each run, snapshots are forgotten per the folder's retention. Prune and check are never run:
-forgotten snapshots free no space yet (see "Before M3: gaps to close").
+parent. After each run, snapshots are forgotten per the folder's retention. A backup that finds the repository
+locked by a prune is not a failed run: the agent retries it after 30 seconds and reports nothing.
+
+**Prune and check** (forgotten snapshots free space; damage is found before a restore):
+- **Schedule:** per folder (`PruneIntervalDays`, `CheckIntervalDays`, `CheckReadDataPercent`), edited in the
+  folder form. `MaintenanceSchedule.IsDue` (`ASync.Core`): due when it never ran, when the interval has
+  passed, or a day after a failed run. The server's clock decides for everyone.
+- **Transport folders: the server** (`MaintenanceScheduler` → `FolderMaintenanceService`).
+  - Every `Maintenance:PollSeconds` (default 900; first pass a minute after start) it runs what is due, one
+    job at a time, prune before check. `Maintenance:Enabled=false` turns it off.
+  - It works directly on the back-end, on a connection of its own (`FolderBackendCache.OpenDedicatedAsync`:
+    the cached gateway connection is closed after 3 idle minutes), with the folder's server key.
+  - A locked repository (a backup, a download, a device's prune) is skipped without a record and tried again
+    on the next pass.
+  - Anything else that goes wrong, including a repository that cannot be opened, is recorded as a failed run.
+- **End-to-end folders: a device**, because the server has no key. After each backup run, `SyncAgent`'s folder
+  worker (so `async-cli run`, not a one-off `sync`) asks `POST .../maintenance/claim`.
+  - The server answers which of prune and check this device should do now: due, and not claimed by another
+    device (`MaintenanceClaims`, in memory, 6 hours). Paused devices and folders that are not set up get none.
+  - The device needs the folder unlocked. It runs the job through the gateway and answers
+    `POST .../maintenance/report {kind, ok, message, skipped}`. `skipped` (the repository was busy, or the
+    agent was stopped) records nothing and frees the claim.
+  - The lock files give the safety; claims only avoid pointless duplicate work. After a server restart the
+    worst case is one extra run.
+- **By hand:** `async-cli prune` and `async-cli check [--read-data <percent>]`, for one Backup folder or all
+  of the device's, Transport or end-to-end. They report to the same endpoint, so the result shows on the
+  Folders page, and a manual run counts for the schedule. `check` exits with 1 when it finds problems.
+- **Results** are stored on the folder (see "Data model") by `FolderService.RecordMaintenanceAsync`, which
+  sends `folder.status` to the owner's pages. The folder's `Revision` does not change, so agents don't reload.
 
 **Agent** (`SyncAgent`, used by `async-cli run` and later by the desktop service):
 - One worker per folder, triggered by:
@@ -363,7 +408,9 @@ forgotten snapshots free no space yet (see "Before M3: gaps to close").
   - local file changes (FileSystemWatcher, 5-second debounce; TwoWay and Mirror Upload);
   - `folder.changed` (TwoWay and Mirror Download);
   - `config.changed`, which reloads the folder list.
-- A folder busy on another device is retried after 30 seconds.
+- A folder busy on another device (a lease, or a repository locked by a prune) is retried after 30 seconds.
+- After a run of an end-to-end Backup folder it does the prune or check the server hands it (see "Prune and
+  check").
 - Results go to `POST .../report`. Runs that changed the storage call `POST .../changed`.
 
 **Device identity on the CLI** (`FileClientStore`): stored in `ASYNC_CONFIG_DIR`, or by default
@@ -411,6 +458,12 @@ The UI belongs to the owner's app family (abook, nopds, …): same layout and co
   the form from the latest folder.
 - Devices are attached, edited and detached with `FolderDeviceForm`, which uses the same revision check.
 - End-to-end folders whose repository is not ready show the `async-cli init-encryption --folder N` hint.
+- Backup folders show two pills for the last prune and the last check (`MaintenancePill`): green with the
+  relative time, red when it failed, grey when it has not run or is switched off. The tooltip has the time,
+  who ran it, the message and the schedule. A failed check also gets a red notice (`.notice.danger`) with the
+  message and the `async-cli check --read-data 100` command; a failed prune gets a yellow one.
+- `FolderForm` has a "Housekeeping" group for Backup folders: days between prunes, days between checks, and
+  the percentage of data a check reads back.
 - **Live updates:** `useSyncEvents` connects to `/hubs/sync` (`@microsoft/signalr`). The token comes from
   `getAccessToken`, sent as `access_token` in the query. On `config.changed`, `folder.status` and after every
   (re)connect, the page reloads its data. Events sent while offline are lost, so a reconnect counts as "reload".
@@ -440,6 +493,10 @@ The UI belongs to the owner's app family (abook, nopds, …): same layout and co
   - Snapshots are written after their data and index, so that set is exactly what the cached index covers.
   - A request for any other snapshot reloads the index first.
   - A read that hits a missing blob or pack (a prune meanwhile) reloads once and retries.
+  - A prune drops the entry (`SnapshotService.Invalidate`): the server's own prune when it is done, and a
+    device's prune whenever the gateway deletes something under `index/` or `data/` (only a prune does; packs
+    go last, when the new index is complete). Without this a download, which streams and cannot retry, would
+    fail part-way on an index from before the prune.
   - The cache drops an entry when `FolderBackendCache` hands out a new back-end instance.
 - **Downloads take a shared repository lock**, so a prune cannot delete packs mid-download. ZIPs refresh the
   lock every 5 minutes. A failure after the response has started aborts the connection, so the browser shows a
@@ -499,6 +556,11 @@ a random id in a container.
   - Pause and resume, set-path, the mass-deletion guard and a missing local folder.
   - Mirror Upload and Download.
   - Transport Backup with a byte-identical full and partial restore.
+  - Prune and check: the server prunes and checks a new Transport folder by itself (the stack polls every
+    5 seconds, `ASYNC_MAINTENANCE_POLL_SECONDS`); after two snapshots are forgotten, `prune` reclaims the
+    space on the storage (measured with `du`) and a restore is still byte-identical; `check --read-data 100`
+    passes, then fails with exit code 1 after 16 bytes of a pack file are overwritten; the server shows both
+    results. `run` prunes and checks the end-to-end folder and reports it.
   - End-to-end Backup: init-encryption, no plaintext on storage, unlock with the recovery key on the second
     device, restore, and a backup from that device.
   - `run` reacting to `folder.changed`, to its file watcher and to `config.changed`.
@@ -636,7 +698,7 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 3. **M2 — sync over the CLI (done).** The sync protocol (storage gateway, leases, live events) and `async-cli`
    (enroll, Backup, Mirror, TwoWay, end-to-end encryption, restore), the `async-cli` Docker image, the
    end-to-end test in CI, and the web UI for folders and for browsing and downloading snapshots.
-   **← current stage; next is "Before M3: gaps to close".**
+   **← current stage; next is "Before M3: gaps to close" (item 1 is done).**
 4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
    overdue devices.
@@ -648,9 +710,9 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 Found by comparing this document with the code. They are listed in the order they will be done; the desktop
 app starts after them, because it would otherwise be built on the same holes.
 
-1. **Prune and check never run.** Nothing outside the tests calls `RepositoryMaintenance.PruneAsync` or
-   `CheckAsync`, and `async-cli` has no command for either. `BackupJob` forgets snapshots, so repositories
-   only grow, and damage is noticed only at restore time. Needed: CLI commands, and a schedule.
+1. **Prune and check never run. — Done.** `async-cli prune` and `check`, a per-folder schedule run by the
+   server (Transport) or a device's agent (end-to-end), and the last results on the Folders page. See "Prune
+   and check" under "Sync". Left for item 3: telling the person about a failed check (today it is only shown).
 2. **Transport repository key recovery.** A Transport folder's key exists only in
    `Folder.ProtectedRepositoryKey` (see the known gap under "Repository layout"). Needed: a way to get the
    key out of the database and back in, such as a recovery key shown at folder creation or an export.
@@ -689,6 +751,11 @@ Open questions:
 
 ## Implementation notes (gotchas)
 
+- **`FolderBackendCache` is keyed by folder id**, and a folder being created has id 0. Code that runs before
+  the folder is saved (creating its repository) must use `OpenDedicatedAsync`, or the second new folder gets
+  the first one's directory.
+- **Columns with a database default and 0 as a real value** (`PruneIntervalDays`…) need `HasSentinel(-1)`, or
+  EF leaves 0 out of the INSERT and the database stores the default.
 - **Central packages:** `Directory.Packages.props` uses transitive pinning. Without it, Npgsql's EF Core
   Relational dependency conflicts with EF Core 10.0.14 (MSB3277).
 - **Hashing:** `Codes.HashCode` normalizes (uppercase, no separators) and is for human-typed codes.

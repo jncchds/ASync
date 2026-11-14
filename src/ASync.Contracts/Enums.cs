@@ -40,3 +40,12 @@ public enum DevicePlatform
     /// <summary>The headless agent (usually the async-cli Docker image).</summary>
     Cli,
 }
+
+/// <summary>Housekeeping of a Backup folder's repository.</summary>
+public enum MaintenanceKind
+{
+    /// <summary>Remove the data of forgotten snapshots, so they free space.</summary>
+    Prune,
+    /// <summary>Verify that the repository is complete and (for a sample) readable.</summary>
+    Check,
+}

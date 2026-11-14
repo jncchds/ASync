@@ -41,6 +41,9 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
   const [retention, setRetention] = useState<Retention>(existing?.retention ?? DEFAULT_RETENTION)
   const [versionsDays, setVersionsDays] = useState(existing?.versionsKeepDays ?? 30)
   const [trashDays, setTrashDays] = useState(existing?.trashKeepDays ?? 30)
+  const [pruneDays, setPruneDays] = useState(existing?.pruneIntervalDays ?? 7)
+  const [checkDays, setCheckDays] = useState(existing?.checkIntervalDays ?? 30)
+  const [checkPercent, setCheckPercent] = useState(existing?.checkReadDataPercent ?? 10)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState(false)
@@ -63,6 +66,7 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
       intervalMinutes: interval,
       excludes: excludes.split('\n').map(x => x.trim()).filter(Boolean),
       retention, versionsKeepDays: versionsDays, trashKeepDays: trashDays,
+      pruneIntervalDays: pruneDays, checkIntervalDays: checkDays, checkReadDataPercent: checkPercent,
       expectedRevision: startRevision,
     }
     try {
@@ -140,6 +144,32 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
           After creating it, set it up on one device with <code>async-cli init-encryption</code>. Keep the passphrase and the
           recovery key it prints: without them nobody, not even the server's admin, can restore these backups.
         </p>
+      )}
+
+      {mode === 'Backup' && (
+        <fieldset className="fieldset">
+          <legend>Housekeeping <span className="muted">(0 days = never)</span></legend>
+          <div className="form-row compact">
+            <label>
+              Free space every (days)
+              <input type="number" min={0} max={3650} value={pruneDays} onChange={e => setPruneDays(Number(e.target.value))} />
+            </label>
+            <label>
+              Verify every (days)
+              <input type="number" min={0} max={3650} value={checkDays} onChange={e => setCheckDays(Number(e.target.value))} />
+            </label>
+            <label>
+              Data read back per verify (%)
+              <input type="number" min={0} max={100} value={checkPercent} onChange={e => setCheckPercent(Number(e.target.value))} />
+            </label>
+          </div>
+          <p className="hint small-text">
+            Freeing space removes the data of snapshots that are no longer kept. Verifying finds damage before you need a
+            restore. {encryption === 'EndToEnd'
+              ? 'For end-to-end folders your devices do both (only they have the key).'
+              : 'The server does both.'}
+          </p>
+        </fieldset>
       )}
 
       {mode === 'Backup' ? (

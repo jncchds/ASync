@@ -109,3 +109,34 @@ internal sealed class ManualClock(DateTimeOffset start) : TimeProvider
     public override DateTimeOffset GetUtcNow() => Now;
     public void Advance(TimeSpan by) => Now += by;
 }
+
+/// <summary>Folders in memory. <see cref="GetServerMaintainedAsync"/> filters like the EF query.</summary>
+internal sealed class FakeFolderRepository : IFolderRepository
+{
+    public readonly List<Folder> Folders = [];
+    public int Saves;
+
+    public Task<List<Folder>> GetForUserAsync(int userId) => Task.FromResult(Folders.Where(f => f.UserId == userId).ToList());
+    public Task<Folder?> GetAsync(int id) => Task.FromResult(Folders.FirstOrDefault(f => f.Id == id));
+    public Task<List<Folder>> GetForDeviceAsync(Guid deviceId) => Task.FromResult(Folders.Where(f => f.Devices.Any(d => d.DeviceId == deviceId)).ToList());
+    public Task<FolderDevice?> GetMembershipAsync(int folderId, Guid deviceId) =>
+        Task.FromResult(Folders.FirstOrDefault(f => f.Id == folderId)?.Devices.FirstOrDefault(d => d.DeviceId == deviceId));
+    public Task<bool> AnyUsingBackendAsync(int storageBackendId) => Task.FromResult(Folders.Any(f => f.StorageBackendId == storageBackendId));
+    public Task<List<Folder>> GetOnBackendAsync(int storageBackendId) => Task.FromResult(Folders.Where(f => f.StorageBackendId == storageBackendId).ToList());
+    public Task<List<Folder>> GetServerMaintainedAsync() => Task.FromResult(Folders
+        .Where(f => f.Mode == SyncMode.Backup && f.Encryption == FolderEncryption.Transport && f.ProtectedRepositoryKey != null).ToList());
+    public Task<Folder> AddAsync(Folder folder) { folder.Id = Folders.Count + 1; Folders.Add(folder); return Task.FromResult(folder); }
+    public Task SaveAsync() { Saves++; return Task.CompletedTask; }
+    public Task DeleteAsync(Folder folder) { Folders.Remove(folder); return Task.CompletedTask; }
+    public Task RemoveDeviceAsync(FolderDevice membership) => Task.CompletedTask;
+}
+
+/// <summary>Keeps the live events instead of sending them.</summary>
+internal sealed class RecordingNotifier : ASync.Api.Hubs.ISyncNotifier
+{
+    public readonly List<(string Name, object?[] Args)> ToUsers = [];
+    public readonly List<(string Name, object?[] Args)> ToDevices = [];
+
+    public Task ToDevicesAsync(IEnumerable<Guid> deviceIds, string name, params object?[] args) { ToDevices.Add((name, args)); return Task.CompletedTask; }
+    public Task ToUserAsync(int userId, string name, params object?[] args) { ToUsers.Add((name, args)); return Task.CompletedTask; }
+}

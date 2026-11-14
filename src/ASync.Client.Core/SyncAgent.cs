@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using ASync.Client.Core.Sync;
 using ASync.Contracts;
+using ASync.Engine.Maintenance;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
@@ -105,6 +106,12 @@ public sealed class SyncAgent : IAsyncDisposable
                     result.Conflicts, result.Bytes);
             }
         }
+        catch (ASync.Engine.Repository.RepositoryLockedException e)
+        {
+            // A prune (by the server or another device) has the repository to itself for a while: not a failed
+            // backup, just one that has to wait.
+            return new FolderRunResult(folder.FolderId, folder.Name, false, $"The repository is busy ({e.Owner}); will retry", Skipped: true);
+        }
         catch (Exception e) when (e is SyncRefusedException or IOException or UnauthorizedAccessException or ApiException
                                      or HttpRequestException or InvalidOperationException or System.Security.Cryptography.CryptographicException)
         {
@@ -117,6 +124,83 @@ public sealed class SyncAgent : IAsyncDisposable
         catch (Exception e) when (e is ApiException or HttpRequestException) { _logger.LogDebug("Could not report the result: {Message}", e.Message); }
         FolderRan?.Invoke(outcome);
         return outcome;
+    }
+
+    // ── Maintenance (Backup folders) ──────────────────────────────────────────
+
+    /// <summary>
+    /// Prunes or checks a Backup folder's repository now and reports the result to the server, which shows it on
+    /// the Folders page. A busy repository (a backup or download holds its lock) is not a failure and is not
+    /// recorded: <see cref="MaintenanceOutcome.Busy"/>.
+    /// </summary>
+    public async Task<MaintenanceOutcome> RunMaintenanceAsync(DeviceFolderDto folder, MaintenanceKind kind, double readDataPercent = 0,
+        CancellationToken ct = default)
+    {
+        MaintenanceOutcome? outcome = null;
+        try
+        {
+            try
+            {
+                var repo = await RepositoryAccess.OpenAsync(_api, _store, folder, new RemoteStorageBackend(_api, folder.FolderId), ct);
+                outcome = kind == MaintenanceKind.Prune
+                    ? await MaintenanceRunner.PruneAsync(repo, ct)
+                    : await MaintenanceRunner.CheckAsync(repo, readDataPercent, ct);
+            }
+            catch (SyncRefusedException e) // not set up, or locked on this device: the message says what to do
+            {
+                outcome = new MaintenanceOutcome(false, false, e.Message);
+            }
+            catch (Exception e) when (e is IOException or ApiException or HttpRequestException or InvalidOperationException
+                                         or System.Security.Cryptography.CryptographicException)
+            {
+                Observe(e);
+                outcome = new MaintenanceOutcome(false, false, $"Could not open the repository: {e.Message}");
+            }
+            return outcome;
+        }
+        finally
+        {
+            // Always answer, also when cancelled mid-run: the server then frees the job for another device.
+            var report = outcome is null or { Busy: true }
+                ? new MaintenanceReportRequest(kind, false, null, Skipped: true)
+                : new MaintenanceReportRequest(kind, outcome.Ok, outcome.Message);
+            try { await _api.ReportMaintenanceAsync(folder.FolderId, report, CancellationToken.None); }
+            catch (Exception e) when (e is ApiException or HttpRequestException) { _logger.LogDebug("Could not report the {Kind}: {Message}", kind, e.Message); }
+        }
+    }
+
+    /// <summary>
+    /// End-to-end Backup folders unlocked on this device: asks the server whether a prune or a check is due and not
+    /// taken by another device, and runs what it is given. (The server maintains Transport folders itself.)
+    /// </summary>
+    public async Task<List<(MaintenanceKind Kind, MaintenanceOutcome Outcome)>> RunDueMaintenanceAsync(DeviceFolderDto folder, CancellationToken ct = default)
+    {
+        var done = new List<(MaintenanceKind, MaintenanceOutcome)>();
+        if (folder.Mode != SyncMode.Backup || folder.Encryption != FolderEncryption.EndToEnd || folder.Paused || !folder.RepositoryReady
+            || _store.LoadRepositoryKeys(folder.FolderId) is null)
+            return done;
+
+        MaintenanceClaimDto claim;
+        try { claim = await _api.ClaimMaintenanceAsync(folder.FolderId, ct); }
+        catch (Exception e) when (e is ApiException or HttpRequestException)
+        {
+            Observe(e);
+            _logger.LogDebug("\"{Name}\": could not ask about maintenance: {Message}", folder.Name, e.Message);
+            return done;
+        }
+        if (claim.Prune) done.Add((MaintenanceKind.Prune, await RunMaintenanceAsync(folder, MaintenanceKind.Prune, ct: ct)));
+        if (claim.Check)
+        {
+            // Not claimed as run when cancelled before it started: say so, or the job stays taken for hours.
+            if (ct.IsCancellationRequested)
+            {
+                try { await _api.ReportMaintenanceAsync(folder.FolderId, new MaintenanceReportRequest(MaintenanceKind.Check, false, null, Skipped: true), CancellationToken.None); }
+                catch (Exception e) when (e is ApiException or HttpRequestException) { /* the claim expires by itself */ }
+                ct.ThrowIfCancellationRequested();
+            }
+            done.Add((MaintenanceKind.Check, await RunMaintenanceAsync(folder, MaintenanceKind.Check, claim.CheckReadDataPercent, ct)));
+        }
+        return done;
     }
 
     private async Task RenewLeaseAsync(int folderId, string leaseId, CancellationToken ct)
@@ -341,6 +425,16 @@ public sealed class SyncAgent : IAsyncDisposable
                     {
                         await Task.Delay(TimeSpan.FromSeconds(30), ct); // busy elsewhere: try again soon
                         Trigger("retry");
+                    }
+                    else if (!result.Skipped)
+                    {
+                        foreach (var (kind, outcome) in await _agent.RunDueMaintenanceAsync(Folder, ct))
+                        {
+                            var what = kind == MaintenanceKind.Prune ? "prune" : "check";
+                            if (outcome.Busy) _logger.LogInformation("\"{Name}\": {What} postponed: {Message}", Folder.Name, what, outcome.Message);
+                            else if (outcome.Ok) _logger.LogInformation("\"{Name}\": {What}: {Message}.", Folder.Name, what, outcome.Message);
+                            else _logger.LogWarning("\"{Name}\": {What} failed: {Message}", Folder.Name, what, outcome.Message);
+                        }
                     }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
