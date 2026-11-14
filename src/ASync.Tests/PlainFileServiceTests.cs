@@ -195,6 +195,9 @@ public class PlainBrowserTests : IDisposable
     {
         await _store.PutAsync("a.txt", Text("first"));
         await _store.DeleteAsync("a.txt");
+        // Trash stamps have millisecond resolution: without a pause both deletions can share one, and their order
+        // would then depend on the stamps' random suffixes.
+        await Task.Delay(5);
         await _store.PutAsync("a.txt", Text("second"));
         await _store.DeleteAsync("a.txt");
         var items = (await _browser.TrashAsync()).Groups.SelectMany(g => g.Items).OrderBy(i => i.DeletedAt).ToList();

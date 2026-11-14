@@ -81,6 +81,8 @@
   again asks whether to keep both or replace it. Restores are refused while a device is syncing the folder, and
   afterwards the devices fetch the restored files at once; the page warns that a Mirror *Upload* device undoes a
   restore on its next run.
+- fix(test): `SameFileTwiceFromTheTrash_TheSecondGetsANewName` failed about half the time: both deletions could
+  get the same millisecond trash stamp, and their order then came down to the random suffix.
 
 ## v0.1.3 — 2026-11-12
 
