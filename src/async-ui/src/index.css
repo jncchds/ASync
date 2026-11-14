@@ -161,6 +161,16 @@ label.checkbox input { width: auto; margin: 0; flex-shrink: 0; }
 .warning-text { color: var(--warning); }
 .error-msg { color: var(--danger); font-size: 0.875rem; margin: 0.5rem 0; overflow-wrap: anywhere; }
 .success-msg { color: var(--success); font-size: 0.9rem; margin: 0.5rem 0; }
+
+/* ── Deleting folders and users ── */
+.purge-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.purge-list li { min-width: 0; overflow-wrap: anywhere; }
+.purge-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem 0.5rem; }
+.delete-panel { overflow-wrap: anywhere; }
+.delete-panel ul.removes { margin: 0.25rem 0 0.75rem; padding-left: 1.25rem; }
+.delete-panel ul.removes li { overflow-wrap: anywhere; }
+.delete-panel .purge-option { margin: 0.75rem 0; padding: 0.75rem; border: 1px solid var(--danger-line); border-radius: 8px; background: var(--danger-faint); }
+.delete-panel .purge-option input[type="text"] { width: 100%; }
 .empty { color: var(--text-muted); padding: 1rem 0; }
 .loading { text-align: center; padding: 3rem; color: var(--text-muted); }
 .banner { padding: 0.6rem 1rem; font-size: 0.875rem; }

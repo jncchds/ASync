@@ -108,5 +108,15 @@ public sealed class LocalBackend : IStorageBackend
         return Task.CompletedTask;
     }
 
+    public Task DeleteDirectoryIfEmptyAsync(string path, CancellationToken ct = default)
+    {
+        var full = Full(path);
+        if (full == _root || !Directory.Exists(full)) return Task.CompletedTask;
+        // Left-over temporary files of interrupted writes (hidden from listings) do not keep a directory alive.
+        foreach (var temp in Directory.EnumerateFiles(full, "*" + TempSuffix)) File.Delete(temp);
+        if (!Directory.EnumerateFileSystemEntries(full).Any()) Directory.Delete(full);
+        return Task.CompletedTask;
+    }
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

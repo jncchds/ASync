@@ -254,6 +254,17 @@ public sealed class SmbBackend : IStorageBackend
         finally { share.CloseFile(handle!); }
     }, ct);
 
+    public Task DeleteDirectoryIfEmptyAsync(string path, CancellationToken ct = default) => RunAsync(share =>
+    {
+        if (StoragePath.Normalize(path).Length == 0) return;
+        var remote = Remote(path);
+        var handle = Open(share, remote, AccessMask.DELETE, CreateDisposition.FILE_OPEN, directory: true, out var status);
+        if (handle is null) return;
+        // The server refuses (STATUS_DIRECTORY_NOT_EMPTY) for a directory that still holds something: that is fine.
+        try { share.SetFileInformation(handle, new FileDispositionInformation { DeletePending = true }); }
+        finally { share.CloseFile(handle); }
+    }, ct);
+
     private static void EnsureDirectory(ISMBFileStore share, string directory)
     {
         if (directory.Length == 0) return;

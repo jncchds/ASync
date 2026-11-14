@@ -22,3 +22,16 @@ public record CreateUserRequest(string Username, string Password, bool IsAdmin =
 public record ChangePasswordRequest(string NewPassword);
 
 public record ChangeRoleRequest(bool IsAdmin);
+
+/// <summary>A signed-in person changes their own password. Accounts without one (single sign-on only) cannot.</summary>
+public record ChangeOwnPasswordRequest(string CurrentPassword, string NewPassword);
+
+// ── Admin: deleting users ─────────────────────────────────────────────────────
+
+/// <summary>What deleting the user removes, for the confirmation in the UI.</summary>
+public record UserDeletionPreviewDto(
+    int Id, string Username, int Devices, int Sessions, int EnrollmentCodes, int AlertChannels, int OpenIncidents,
+    List<string> Folders, List<string> StorageBackends, int FoldersOnSharedStorage);
+
+/// <summary>The answer to <c>DELETE /api/users/{id}</c>: the purges started for the user's folders (empty without <c>purge</c>).</summary>
+public record UserDeletedDto(List<PurgeJobDto> Purges);

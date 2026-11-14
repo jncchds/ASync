@@ -1,7 +1,9 @@
 using ASync.Api.Auth;
+using ASync.Api.Services;
 using ASync.Contracts;
 using ASync.Core.Interfaces;
 using ASync.Core.Models;
+using ASync.Core.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -64,6 +66,25 @@ public class UsersController : ControllerBase
         return ToDto(user);
     }
 
+    /// <summary>What deleting the user would remove, for the confirmation.</summary>
+    [HttpGet("{id:int}/deletion")]
+    public async Task<ActionResult<UserDeletionPreviewDto>> DeletionPreview(int id, [FromServices] AccountDeletionService deletion) =>
+        await deletion.PreviewAsync(id) is { } preview ? preview : NotFound();
+
+    /// <summary>
+    /// Deletes the account and everything that is theirs; their devices are revoked first, so running agents stop. Stored
+    /// data stays unless <paramref name="purge"/> is set with <paramref name="confirm"/> = the username: then each folder's
+    /// root is emptied in the background (the jobs are in the answer and on <c>GET /api/purges</c>).
+    /// </summary>
+    [HttpDelete("{id:int}")]
+    public async Task<ActionResult<UserDeletedDto>> Delete(int id, [FromQuery] bool purge, [FromQuery] string? confirm,
+        [FromServices] AccountDeletionService deletion)
+    {
+        var result = await deletion.DeleteAsync(User.UserId(), id, purge, confirm);
+        if (result.Success) return result.Value!;
+        return result.Error == AccountDeletionService.NotFound ? NotFound() : BadRequest(new { message = result.Error });
+    }
+
     internal static string? ValidateCredentials(string? username, string? password)
     {
         var name = username?.Trim();
@@ -71,8 +92,7 @@ public class UsersController : ControllerBase
         return ValidatePassword(password);
     }
 
-    internal static string? ValidatePassword(string? password) =>
-        password is null || password.Length < 8 ? "Passwords must be at least 8 characters long." : null;
+    internal static string? ValidatePassword(string? password) => AccountRules.ValidatePassword(password);
 
     private static AdminUserDto ToDto(AppUser u) =>
         new(u.Id, u.Username, u.DisplayName ?? u.Username, u.IsAdmin, u.PasswordHash is not null, u.OidcSubject is not null, u.CreatedAt);

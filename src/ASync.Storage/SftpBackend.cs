@@ -199,6 +199,15 @@ public sealed class SftpBackend : IStorageBackend
         }
     }
 
+    public Task DeleteDirectoryIfEmptyAsync(string path, CancellationToken ct = default) => RunAsync(() =>
+    {
+        var remote = Remote(path);
+        if (remote == _root || !_client.Exists(remote)) return;
+        if (_client.ListDirectory(remote).Any(e => e.Name is not ("." or ".."))) return;
+        try { _client.DeleteDirectory(remote); }
+        catch (SftpPathNotFoundException) { }
+    }, ct);
+
     private void EnsureDirectory(string directory)
     {
         if (directory.Length == 0 || directory == "/" || _client.Exists(directory)) return;

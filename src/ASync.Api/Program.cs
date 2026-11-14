@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Threading.RateLimiting;
 using ASync.Api;
 using ASync.Api.Auth;
@@ -58,6 +59,13 @@ builder.Services.AddSingleton<MaintenanceClaims>();
 builder.Services.AddScoped<FolderMaintenanceService>();
 builder.Services.AddHostedService<MaintenanceScheduler>();
 
+// ── Deleting folders and users (purging stored data in the background) ────────
+builder.Services.AddScoped<IPurgeJobRepository, PurgeJobRepository>();
+builder.Services.AddScoped<PurgeService>();
+builder.Services.AddScoped<AccountDeletionService>();
+builder.Services.AddSingleton<PurgeSignal>();
+builder.Services.AddHostedService<PurgeWorker>();
+
 // ── Alerts (overdue detection; webhook, ntfy, e-mail) and push mode ───────────
 // Alerts need no push: they work from what devices report. Push__Mode only has None until the mobile apps (M4).
 var pushSettings = PushSettings.FromConfiguration(builder.Configuration);
@@ -99,12 +107,19 @@ var auth = builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationSc
                     ctx.Token = token;
                 return Task.CompletedTask;
             },
-            // A revoked device's access token stops working at once, not when it expires.
+            // A revoked device's access token, and a deleted person's, stop working at once, not when they expire.
             OnTokenValidated = async ctx =>
             {
-                if (ctx.Principal?.DeviceId() is Guid deviceId
-                    && !await ctx.HttpContext.RequestServices.GetRequiredService<IDeviceRepository>().IsActiveAsync(deviceId))
-                    ctx.Fail("This device has been revoked.");
+                if (ctx.Principal?.DeviceId() is Guid deviceId)
+                {
+                    if (!await ctx.HttpContext.RequestServices.GetRequiredService<IDeviceRepository>().IsActiveAsync(deviceId))
+                        ctx.Fail("This device has been revoked.");
+                }
+                else if (ctx.Principal is { } person && int.TryParse(person.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+                         && !await ctx.HttpContext.RequestServices.GetRequiredService<IUserRepository>().ExistsAsync(userId))
+                {
+                    ctx.Fail("This account has been deleted.");
+                }
             },
         };
     });

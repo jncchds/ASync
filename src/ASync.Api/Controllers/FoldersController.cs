@@ -1,4 +1,5 @@
 using ASync.Api.Auth;
+using ASync.Api.HostedServices;
 using ASync.Api.Services;
 using ASync.Contracts;
 using ASync.Core.Interfaces;
@@ -86,14 +87,43 @@ public class FoldersController : ControllerBase
         return Outcome(result);
     }
 
-    /// <summary>Stops syncing the folder everywhere. The data on storage and on devices stays.</summary>
+    /// <summary>
+    /// Stops syncing the folder everywhere (204). The data on storage and on devices stays, unless <paramref name="purge"/>
+    /// is set with <paramref name="confirm"/> = the folder's name: then the folder's root on its storage is emptied by a
+    /// background job (202 with the job; follow it on <c>GET /api/purges/{id}</c>). Refused (409) while a device is
+    /// syncing it or its repository is locked, and when another folder's data lies in or around that directory.
+    /// </summary>
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, [FromQuery] bool purge, [FromQuery] string? confirm,
+        [FromServices] PurgeService purges, [FromServices] PurgeSignal signal, CancellationToken ct)
     {
         var folder = await _folders.GetAsync(id);
         if (folder is null || folder.UserId != User.UserId()) return NotFound();
-        await _service.DeleteAsync(folder);
-        return NoContent();
+        if (!purge)
+        {
+            await _service.DeleteAsync(folder);
+            return NoContent();
+        }
+
+        if (confirm?.Trim() != folder.Name)
+            return BadRequest(new { message = "Type the folder's name to confirm that its stored data should be deleted." });
+        var owner = await _users.GetByIdAsync(folder.UserId);
+        var job = purges.NewJob(folder, User.UserId(), owner?.Username);
+        if (await purges.OverlapAsync(job) is { } overlap) return Conflict(new { message = overlap });
+        try
+        {
+            await using var raw = purges.Open(job);
+            if (await purges.BusyAsync(job, raw, ct) is { } busy)
+                return Conflict(new { message = $"{busy} Try again when it has finished; nothing was deleted." });
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return BadRequest(new { message = $"Could not reach the storage, so nothing was deleted: {e.Message}" });
+        }
+
+        await _service.DeleteAsync(folder, job);
+        signal.Notify();
+        return Accepted($"/api/purges/{job.Id}", PurgeService.ToDto(job));
     }
 
     /// <summary>Adds a device to the folder, or changes its settings there.</summary>

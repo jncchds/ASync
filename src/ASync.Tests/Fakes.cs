@@ -90,6 +90,16 @@ internal sealed class FakeUserRepository : IUserRepository
     public Task<List<AppUser>> GetAllAsync() => Task.FromResult(Users.ToList());
     public Task<AppUser> AddAsync(AppUser user) { user.Id = Users.Count + 1; Users.Add(user); return Task.FromResult(user); }
     public Task UpdateAsync(AppUser user) => Task.CompletedTask;
+    public Task<bool> ExistsAsync(int id) => Task.FromResult(Users.Any(u => u.Id == id));
+    public Task<int> CountAdminsAsync() => Task.FromResult(Users.Count(u => u.IsAdmin));
+    public Task<UserFootprint> GetFootprintAsync(int userId, DateTime now) => Task.FromResult(new UserFootprint(0, 0, 0, 0, 0));
+    public readonly List<PurgeJob> Purges = [];
+    public Task DeleteAsync(AppUser user, IEnumerable<PurgeJob> purges)
+    {
+        Users.Remove(user);
+        Purges.AddRange(purges);
+        return Task.CompletedTask;
+    }
 }
 
 internal sealed class NoRefreshTokens : IRefreshTokenRepository
@@ -128,7 +138,14 @@ internal sealed class FakeFolderRepository : IFolderRepository
     public Task<List<Folder>> GetAllWithDevicesAsync() => Task.FromResult(Folders.ToList());
     public Task<Folder> AddAsync(Folder folder) { folder.Id = Folders.Count + 1; Folders.Add(folder); return Task.FromResult(folder); }
     public Task SaveAsync() { Saves++; return Task.CompletedTask; }
-    public Task DeleteAsync(Folder folder) { Folders.Remove(folder); return Task.CompletedTask; }
+    public Task<List<Folder>> GetAllWithBackendAsync() => Task.FromResult(Folders.ToList());
+    public readonly List<PurgeJob> Purges = [];
+    public Task DeleteAsync(Folder folder, PurgeJob? purge = null)
+    {
+        Folders.Remove(folder);
+        if (purge is not null) Purges.Add(purge);
+        return Task.CompletedTask;
+    }
     public Task RemoveDeviceAsync(FolderDevice membership) => Task.CompletedTask;
 }
 

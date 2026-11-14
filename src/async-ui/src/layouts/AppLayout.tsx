@@ -20,6 +20,7 @@ export default function AppLayout() {
             <span className="s-user-name">{user?.displayName}</span>
             {user?.isAdmin && <span className="pill pill-accent">admin</span>}
           </div>
+          <SidebarLink to="/account" icon="👤" label="Account" />
           <SidebarBtn icon="🚪" label="Sign out" title={`Sign out (${user?.username ?? '…'})`} onClick={signOut} />
         </>
       }>

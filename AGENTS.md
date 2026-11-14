@@ -129,6 +129,14 @@ Implemented (gap item 3, alerts), in `src/ASync.Core/Models/Alerts.cs`:
 - **AlertSettings** (key UserId, made on demand): GraceFactor, MinimumGraceHours, FailureThreshold,
   ReminderHours (each null = the server default), LastSentAt (reminders count from it), LastFailedAttemptAt.
 
+Implemented (gap item 4, deleting folders and users), in `src/ASync.Core/Models/PurgeJob.cs`:
+
+- **PurgeJob**: Id (Guid v7), RequestedByUserId (who sees it), OwnerUserId, OwnerName, FolderId, FolderName,
+  StorageBackendId, StorageType + ProtectedStorageSettings (a copy of the back-end's protected settings),
+  SharedStorage, RootPath, Mode, Status (`Pending`/`Waiting`/`Running`/`Done`/`Failed`), FilesDeleted,
+  BytesDeleted, FilesLeft, Message, CreatedAt, StartedAt, FinishedAt, UpdatedAt. No foreign keys: it outlives
+  the folder and, after an account deletion, the owner's back-ends. Finished jobs are deleted after 30 days.
+
 The server keeps no index of file contents: snapshots live in the repository on the back-end, and Mirror/TwoWay
 state lives in each device's `sync-state.json`.
 
@@ -142,8 +150,10 @@ Planned (none of this exists yet):
 ## Auth
 
 - **People** (web UI): copied from abook. A 15-minute JWT access token is kept in page memory. An httpOnly
-  refresh cookie scoped to `/api/auth` is rotated on each use, and reusing a revoked one signs the user out
-  everywhere. The signing key comes from `Jwt__SigningKey`, or is generated and stored in `ServerSecrets` (with
+  refresh cookie scoped to `/api/auth` is rotated on each use, and reusing a *rotated* one (past a 30-second
+  grace for parallel tabs) signs the user out everywhere. A cookie revoked by signing out or by a password change
+  is just refused: otherwise the first browser to come back after a password change would sign out the one that
+  changed it. The signing key comes from `Jwt__SigningKey`, or is generated and stored in `ServerSecrets` (with
   a warning and the `secrets show` command).
 - **Roles:** `Admin` and `User` for people, `Device` for devices. People's endpoints use
   `[Authorize(Roles = Roles.Users)]`, so a device token can never manage the account (users, devices,
@@ -158,8 +168,19 @@ Planned (none of this exists yet):
     on an empty server becomes admin.
   - Existing local accounts are **never** linked by username or e-mail, because that would let whoever
     controls the provider take them over.
-- **Rate limiting:** login, register and all `/api/device-auth/*` endpoints except poll and self allow 30
-  requests a minute per IP. Behind a reverse proxy, set `TrustForwardedHeaders=true`.
+- **Own password** (`POST /api/auth/password {currentPassword, newPassword}`, people only): the current password
+  is checked like sign-in, the new one follows the admin rule (`AccountRules.ValidatePassword`, 8 characters).
+  All the person's refresh tokens are revoked and this browser gets a new one, so every other browser is signed
+  out and this one stays (an open tab elsewhere keeps its access token until it expires, at most 15 minutes).
+  Devices are unaffected. Accounts without a password (single sign-on only) get 400: they have nothing to
+  re-authenticate with, and letting a browser session set a password would turn a stolen session into a
+  credential that outlives the provider's sign-in. An admin can still set one (`PUT /api/users/{id}/password`).
+  The UI is the *Account* page (sidebar).
+- **Deleted accounts:** `OnTokenValidated` also looks up the person behind every people's token
+  (`IUserRepository.ExistsAsync`), so a deleted account's access tokens stop at once, like a revoked device's.
+- **Rate limiting:** login, register, own password change, recovery-key issue and all `/api/device-auth/*`
+  endpoints except poll and self allow 30 requests a minute per IP. Behind a reverse proxy, set
+  `TrustForwardedHeaders=true`.
 
 ## Device provisioning
 
@@ -214,7 +235,12 @@ right after enrollment.
 ## Storage back-ends (M1)
 
 `IStorageBackend` (`src/ASync.Engine/Storage`) is the only thing the layouts need. It has six methods:
-Stat, List (flat or recursive), OpenRead (with a byte range), Write, Delete and Move.
+Stat, List (flat or recursive), OpenRead (with a byte range), Write, Delete and Move, plus an optional seventh,
+`DeleteDirectoryIfEmptyAsync` (a default no-op), used after deleting a tree of files so a purge leaves no empty
+directories behind: Local, SFTP and SMB remove the directory only if it is empty; WebDAV lists it first,
+because its DELETE on a collection is recursive; S3 deletes a leftover directory marker (SeaweedFS keeps
+"directories" visible otherwise). `StorageTree.DeleteAsync` deletes a whole tree (see "Deleting folders and
+users").
 - Paths are `/`-separated, relative to the back-end root, and normalized by `StoragePath`, which rejects
   `.` and `..`.
 - Directories are implicit: writing creates parents.
@@ -496,6 +522,62 @@ locked by a prune is not a failed run: the agent retries it after 30 seconds and
 - `state/<folder>/`: sync state.
 
 The apps will keep the same data in the OS keystore.
+
+## Deleting folders and users
+
+Gap item 4. Code: `Services/PurgeService.cs`, `Services/AccountDeletionService.cs`, `HostedServices/PurgeWorker.cs`,
+`Engine/Storage/StorageTree.cs`, `Core/Security/AccountRules.cs`.
+
+**Folders** (`DELETE /api/folders/{id}`, owner only; 404 for anyone else, 403 for device tokens):
+- Without options, as before: the row goes (with its memberships and alert incidents), devices get
+  `config.changed`, and the data on storage and devices stays (204). The UI says so and, for a Transport Backup
+  folder, that its recovery key is then the only way to open the data (or that there is none yet).
+- `?purge=true&confirm=<folder name>` also deletes the stored data (202 with a `PurgeJobDto`; the UI asks for
+  the name to be typed):
+  1. Refused up-front (409, nothing changed) while a device holds the folder's lease (Mirror/TwoWay) or the
+     repository has a live lock (Backup: a lock file under `locks/` modified less than 30 minutes ago, judged by
+     the storage's modification time, so encrypted lock files need no key), and when another folder's data
+     overlaps the root (below). Refusing is simpler to understand than waiting: the person tries again.
+  2. The job is saved in the same transaction that deletes the folder row, so there is never a deleted folder
+     whose purge was lost, nor a purge of a folder that still exists. Devices lose access with the row.
+  3. `PurgeWorker` (a hosted service, woken by `PurgeSignal`, otherwise every 30 seconds) runs jobs one at a
+     time. Before deleting anything it checks again for overlap and for a lease or live lock: while busy the job
+     is `Waiting` (retried every 30 seconds, failed after 45 minutes).
+  4. `StorageTree.DeleteAsync` lists the root recursively on the back-end opened for the owner (inside
+     `users/<id>/` on a shared back-end) and deletes each file **only if its path lies strictly inside the root**
+     (`root/…`; a sibling such as `root-old` is not inside, whatever the listing returns), then removes the
+     emptied directories deepest first. It refuses an empty root (the whole storage). Two passes, so files
+     written meanwhile are caught; what is still there is reported as `FilesLeft`.
+  5. Progress (files and bytes) is written every 2 seconds through a separate database scope; the result
+     (`Done`, or `Failed` with a message) is stored and sent as `purge.changed` to the requester. A restart
+     mid-way leaves the job `Running`; the worker resumes it (deleting is idempotent, counts add up).
+- **Why a background job:** a large repository on S3 or SFTP can take many minutes. An HTTP request would time
+  out in a proxy and leave the person not knowing what happened; the job has a status the Folders page polls
+  (`GET /api/purges`, `GET /api/purges/{id}`: the requester's jobs, finished ones for a week) and survives
+  restarts.
+- **Roots never overlap — checked physically.** Folder roots on one back-end row never overlap (creation rule),
+  but two back-end rows can point at the same place (two Local back-ends `/data` and `/data/a`, two S3 entries
+  for one bucket). `PurgeService.Location` turns settings + user area + root into a scope (local disk, S3
+  endpoint + bucket, WebDAV origin, SFTP host:port (+ user for relative paths), SMB host + share) and a path;
+  any other folder whose location contains or lies inside the purged one refuses the purge. Best effort by the
+  settings as typed (two host names for one server look different). Unreadable settings are skipped.
+- **No new folder on a root being purged:** `FolderService.CreateAsync` refuses a root that overlaps an
+  unfinished job on the same back-end (and, on a shared one, the same user).
+
+**Users** (`DELETE /api/users/{id}[?purge=true&confirm=<username>]`, admins only; `GET /api/users/{id}/deletion`
+lists what goes, for the confirmation):
+- `AccountRules.CanDelete`: not yourself, not the last admin (the UI hides the button for both).
+- The user's active devices are revoked first through the same path as removing one device (`RevokedAt`,
+  `device.revoked`, `DeviceConnections.Abort`), so running agents stop at once; the rows then go with the
+  account.
+- One transaction (`UserRepository.DeleteAsync`): the purge jobs are added, then the user's folders (cascading
+  memberships and incidents), their personal back-ends (with credentials), then the user (cascading devices,
+  enrollment codes, refresh tokens, alert channels, settings and incidents). Folders go first because they
+  restrict deleting the back-ends they use. Shared back-ends stay.
+- Stored data stays by default. With `purge`, one job per folder, as above but requested by the admin (who sees
+  them on the Users page). They work after the personal back-ends are gone (each job has its own copy of the
+  protected settings) and wait — rather than being refused — for the revoked devices' leases (2 minutes) and
+  locks (30 minutes) to run out. Overlap with a folder outside the account refuses the whole deletion (400).
 
 ## Web UI style
 
@@ -829,7 +911,7 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 3. **M2 — sync over the CLI (done).** The sync protocol (storage gateway, leases, live events) and `async-cli`
    (enroll, Backup, Mirror, TwoWay, end-to-end encryption, restore), the `async-cli` Docker image, the
    end-to-end test in CI, and the web UI for folders and for browsing and downloading snapshots.
-   **← current stage; next is "Before M3: gaps to close" (items 1–3 are done).**
+   **← current stage; next is "Before M3: gaps to close" (items 1–4 are done).**
 4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
    overdue devices.
@@ -855,13 +937,12 @@ app starts after them, because it would otherwise be built on the same holes.
    default) is a complete setup. See "Overdue detection and alerts" under "Background work and wake-ups".
    Left open: webhook/ntfy addresses can reach the server's own network (the SSRF gap of storage back-ends);
    no per-folder grace (per person only); devices are not woken up (M4).
-4. **Account and folder housekeeping.**
-   - *Own-password change:* `PATCH /api/auth/profile` changes only the display name. Passwords can only be
-     set by an admin (`PUT /api/users/{id}/password`).
-   - *User deletion:* there is no endpoint. `UsersController` lists, creates, sets passwords and roles.
-   - *Folder deletion with optional purge:* `DELETE /api/folders/{id}` removes the database row only. The
-     stored data stays on the back-end with no way to remove it from ASync (a Transport Backup folder's
-     recovery key still opens it, and a new folder can take it over).
+4. **Account and folder housekeeping. — Done.** Own-password change (`POST /api/auth/password`, the *Account*
+   page; other browsers signed out), user deletion by admins (devices revoked first, everything of theirs
+   removed in one transaction), and deleting a folder's stored data on request as a background job that never
+   leaves the folder's root (`PurgeJob`, `GET /api/purges`). See "Auth" and "Deleting folders and users". Left
+   open: other browsers' open tabs keep their access token for up to 15 minutes after a password change; the
+   physical-overlap check goes by settings as typed; the display name still has no UI.
 5. **Web UI for Mirror/TwoWay files, versions and trash.** `PlainStore` keeps versions and a trash and can
    restore both, but only the engine and its tests use that. The snapshot endpoints answer 400 for these
    folders, and there are no others.

@@ -17,6 +17,13 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 
 - **Accounts:** the first account becomes admin, and admins create the others. Optional single sign-on
   through any OpenID Connect provider (Authentik, Keycloak, Entra ID…).
+  - *Account* (in the sidebar) changes your own password: enter the current one, and every other browser
+    you are signed in with is signed out (this one stays; devices keep syncing). Accounts that only use single
+    sign-on have no password here: change it at your identity provider, or ask an admin to set one.
+  - Admins delete accounts on *Users*. The confirmation lists what goes with it: the person's devices (removed
+    at once, so their running agents stop), folders, personal storage, alert channels, enrollment codes and
+    browser sessions. Shared storage stays. The stored data of their folders stays too, unless you tick
+    *Also delete the stored data* and type the username. You cannot delete yourself or the last admin.
 - **Adding devices:**
   - **Phones and computers:** *Devices → Add device* shows a QR code and a short code. Scan it or type it in
     the app.
@@ -40,6 +47,11 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   - If someone else changed a folder while you were editing it, you are asked to reload instead of
     overwriting their change.
   - End-to-end encrypted folders show the command that sets them up on a device.
+  - *Delete* stops syncing a folder everywhere. Its stored data stays on the storage unless you tick *Also
+    delete the stored data* and type the folder's name: then the server empties the folder's directory (and
+    nothing outside it) in the background, and the page shows how many files and bytes it removed. That is
+    refused while a device is syncing the folder; try again a moment later. When a standard-encryption backup's
+    data is kept, its recovery key is then the only way to open it.
   - Backup folders show when their space was last freed and when they were last verified. A failed
     verification is shown in red with what was found.
 - **Recovery keys for standard-encryption backups:** a new Backup folder with standard encryption shows its
@@ -99,6 +111,12 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 - Devices that share a Backup folder need roughly correct clocks (within half an hour). A device whose clock
   is far off can take a running backup's lock for an abandoned one.
 - Mirror and two-way folders have no file, version or trash browser in the web UI yet.
+- Deleting stored data checks the storage settings of every other folder, so two storage entries pointing at the
+  same disk, bucket or share cannot lose each other's data. It goes by the settings as typed: an SFTP server
+  reached under two host names, or a path relative to two different users' home directories, looks like two
+  places.
+- After a password change, other browsers are signed out, but a page that is already open keeps working for up
+  to 15 minutes (its current access token).
 - Very large files in Mirror and two-way folders are uploaded in one piece, with no resume; on S3 storage
   files over 5 GB fail.
 

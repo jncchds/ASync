@@ -133,6 +133,34 @@ public abstract class BackendConformanceTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task DeleteTree_RemovesOnlyTheRoot_AndCanWriteThereAgain()
+    {
+        SkipIfMissing();
+        await Backend.WriteAsync("t/root/a.txt", Bytes("a"));
+        await Backend.WriteAsync("t/root/deep/er/b.txt", Bytes("bb"));
+        await Backend.WriteAsync("t/root-old/c.txt", Bytes("c"));
+        await Backend.WriteAsync("t/keep.txt", Bytes("k"));
+
+        // Not empty: left alone (WebDAV's DELETE on a collection would be recursive).
+        await Backend.DeleteDirectoryIfEmptyAsync("t/root");
+        Assert.NotNull(await Backend.StatAsync("t/root/a.txt"));
+
+        var result = await StorageTree.DeleteAsync(Backend, "t/root");
+        Assert.Equal(2, result.Files);
+        Assert.Equal(3, result.Bytes);
+        var left = new List<string>();
+        await foreach (var e in Backend.ListAsync("t", recursive: true)) left.Add(e.Path);
+        Assert.Equal(["t/keep.txt", "t/root-old/c.txt"], left.Order());
+        var names = new List<string>();
+        await foreach (var e in Backend.ListAsync("t")) names.Add(e.Name);
+        Assert.DoesNotContain("root", names);
+
+        // Parents forgotten by a back-end's directory cache come back on the next write.
+        await Backend.WriteAsync("t/root/deep/again.txt", Bytes("x"));
+        Assert.NotNull(await Backend.StatAsync("t/root/deep/again.txt"));
+    }
+
+    [SkippableFact]
     public async Task PathTraversal_IsRejected()
     {
         SkipIfMissing();

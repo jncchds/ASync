@@ -36,5 +36,8 @@ public sealed class PrefixedBackend(IStorageBackend inner, string prefix, bool o
 
     public Task MoveAsync(string from, string to, CancellationToken ct = default) => inner.MoveAsync(In(from), In(to), ct);
 
+    public Task DeleteDirectoryIfEmptyAsync(string path, CancellationToken ct = default) =>
+        In(path).Length == 0 ? Task.CompletedTask : inner.DeleteDirectoryIfEmptyAsync(In(path), ct);
+
     public ValueTask DisposeAsync() => ownsInner ? inner.DisposeAsync() : ValueTask.CompletedTask;
 }

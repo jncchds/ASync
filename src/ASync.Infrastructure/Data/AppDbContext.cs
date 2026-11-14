@@ -23,6 +23,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AlertIncident> AlertIncidents => Set<AlertIncident>();
     public DbSet<AlertChannel> AlertChannels => Set<AlertChannel>();
     public DbSet<AlertSettings> AlertSettings => Set<AlertSettings>();
+    public DbSet<PurgeJob> PurgeJobs => Set<PurgeJob>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -124,6 +125,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.HasKey(s => s.UserId);
             e.HasOne<AppUser>().WithOne().HasForeignKey<AlertSettings>(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // No foreign keys: the job outlives the folder, and a deleted owner's back-ends (it keeps a copy of the settings).
+        b.Entity<PurgeJob>(e =>
+        {
+            e.Property(j => j.OwnerName).HasMaxLength(100);
+            e.Property(j => j.FolderName).HasMaxLength(100);
+            e.Property(j => j.RootPath).HasMaxLength(500);
+            e.Property(j => j.StorageType).HasConversion<string>().HasMaxLength(20);
+            e.Property(j => j.Mode).HasConversion<string>().HasMaxLength(20);
+            e.Property(j => j.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(j => j.Message).HasMaxLength(1000);
+            e.HasIndex(j => j.RequestedByUserId);
+            e.HasIndex(j => j.Status);
         });
 
         b.Entity<PendingDeviceCode>(e =>
