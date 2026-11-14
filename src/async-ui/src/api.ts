@@ -184,6 +184,53 @@ export const createUser = (username: string, password: string, isAdmin: boolean)
 export const setUserPassword = (id: number, newPassword: string) => api.put(`/users/${id}/password`, { newPassword })
 export const setUserRole = (id: number, isAdmin: boolean) => api.put<AdminUser>(`/users/${id}/role`, { isAdmin }).then(r => r.data)
 
+/** What deleting a user removes, for the confirmation. */
+export interface UserDeletionPreview {
+  id: number
+  username: string
+  devices: number
+  sessions: number
+  enrollmentCodes: number
+  alertChannels: number
+  openIncidents: number
+  folders: string[]
+  storageBackends: string[]
+  foldersOnSharedStorage: number
+}
+
+export const getUserDeletionPreview = (id: number) => api.get<UserDeletionPreview>(`/users/${id}/deletion`).then(r => r.data)
+/** With `purge`, `confirm` must be the username; the answer lists the purges started for their folders. */
+export const deleteUser = (id: number, purge: boolean, confirm?: string) =>
+  api.delete<{ purges: PurgeJob[] }>(`/users/${id}`, { params: purge ? { purge: true, confirm } : {} }).then(r => r.data)
+
+// ── Own account ───────────────────────────────────────────────────────────────
+
+/** Signs out every other browser session; this one stays (the server sets a new refresh cookie). */
+export const changeOwnPassword = (currentPassword: string, newPassword: string) =>
+  api.post('/auth/password', { currentPassword, newPassword })
+
+// ── Purges of deleted folders' stored data ────────────────────────────────────
+
+export type PurgeStatus = 'Pending' | 'Waiting' | 'Running' | 'Done' | 'Failed'
+
+export interface PurgeJob {
+  id: string
+  folderId: number
+  folderName: string
+  ownerName: string | null
+  status: PurgeStatus
+  filesDeleted: number
+  bytesDeleted: number
+  filesLeft: number
+  message: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export const getPurges = () => api.get<PurgeJob[]>('/purges').then(r => r.data)
+export const isPurgeFinished = (j: PurgeJob) => j.status === 'Done' || j.status === 'Failed'
+
 // ── Storage back-ends ─────────────────────────────────────────────────────────
 
 export type StorageType = 'Local' | 'S3' | 'WebDav' | 'Sftp' | 'Smb'
@@ -329,7 +376,9 @@ export interface AttachDevice {
 export const getFolders = () => api.get<Folder[]>('/folders').then(r => r.data)
 export const createFolder = (req: SaveFolder) => api.post<Folder>('/folders', req).then(r => r.data)
 export const updateFolder = (id: number, req: SaveFolder) => api.put<Folder>(`/folders/${id}`, req).then(r => r.data)
-export const deleteFolder = (id: number) => api.delete(`/folders/${id}`)
+/** With `purge`, `confirm` must be the folder's name: the server answers 202 with the job that removes its stored data. */
+export const deleteFolder = (id: number, purge = false, confirm?: string) =>
+  api.delete<PurgeJob | ''>(`/folders/${id}`, { params: purge ? { purge: true, confirm } : {} }).then(r => r.data || null)
 /** Makes a new recovery key (the previous one stops working). Send the password, or `confirm` for single-sign-on accounts. */
 export const issueRecoveryKey = (id: number, req: { password?: string; confirm?: boolean }) =>
   api.post<RecoveryKey>(`/folders/${id}/recovery-key`, req).then(r => r.data)

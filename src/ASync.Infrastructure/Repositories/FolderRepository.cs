@@ -53,8 +53,13 @@ public class FolderRepository(AppDbContext db) : IFolderRepository
 
     public Task SaveAsync() => db.SaveChangesAsync();
 
-    public async Task DeleteAsync(Folder folder)
+    public Task<List<Folder>> GetAllWithBackendAsync() =>
+        db.Folders.Include(f => f.StorageBackend).OrderBy(f => f.Id).ToListAsync();
+
+    public async Task DeleteAsync(Folder folder, PurgeJob? purge = null)
     {
+        // One SaveChanges is one transaction: the job exists exactly when the folder is gone.
+        if (purge is not null) db.PurgeJobs.Add(purge);
         db.Folders.Remove(folder);
         await db.SaveChangesAsync();
     }

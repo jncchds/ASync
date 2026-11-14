@@ -29,7 +29,7 @@ namespace ASync.Api.Services;
 /// </summary>
 public class FolderService(
     IFolderRepository folders, IStorageBackendRepository backends, IDeviceRepository devices, FolderBackendCache backendCache, IDataProtectionProvider dataProtection, ISyncNotifier notifier, TimeProvider clock,
-    MaintenanceClaims claims, ILogger<FolderService> logger)
+    MaintenanceClaims claims, ILogger<FolderService> logger, IPurgeJobRepository? purges = null)
 {
     /// <summary>The Data Protection purpose of <see cref="Folder.ProtectedRepositoryKey"/>.</summary>
     public const string RepositoryKeyPurpose = "ASync.Folder.RepositoryKey.v1";
@@ -96,6 +96,9 @@ public class FolderService(
             if (Overlaps(other.RootPath, root))
                 return ServiceResult<CreatedFolder>.Fail($"\"{root}\" overlaps the folder \"{other.Name}\" ({other.RootPath}) on this storage.");
         }
+        // A deleted folder's data still being removed there would take the new folder's data with it.
+        if (purges is not null && PurgeService.BeingPurged(await purges.GetUnfinishedAsync(), backend, userId, root))
+            return ServiceResult<CreatedFolder>.Fail($"The data of a deleted folder in \"{root}\" is still being removed. Try again when that has finished.");
 
         var folder = new Folder
         {
@@ -268,10 +271,11 @@ public class FolderService(
 
     public const string Conflict = "Someone changed this folder in the meantime. Reload it and apply your change again.";
 
-    public async Task DeleteAsync(Folder folder)
+    /// <summary>Deletes the folder; with <paramref name="purge"/>, the job that removes its stored data is saved with it.</summary>
+    public async Task DeleteAsync(Folder folder, PurgeJob? purge = null)
     {
         var deviceIds = folder.Devices.Select(d => d.DeviceId).ToList();
-        await folders.DeleteAsync(folder);
+        await folders.DeleteAsync(folder, purge);
         await backendCache.ForgetAsync(folder.Id);
         await notifier.ToDevicesAsync(deviceIds, SyncEvents.ConfigChanged);
     }

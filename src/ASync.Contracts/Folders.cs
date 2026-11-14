@@ -126,4 +126,27 @@ public static class SyncEvents
     public const string DeviceRevoked = "device.revoked";
     /// <summary>No args. Alert incidents of the person opened, changed or closed: fetch <c>GET /api/alerts/incidents</c> again.</summary>
     public const string AlertsChanged = "alerts.changed";
+    /// <summary>Args: purge job id. A purge of deleted folder data started, progressed or finished (for web UIs).</summary>
+    public const string PurgeChanged = "purge.changed";
 }
+
+// ── Purging a deleted folder's stored data ───────────────────────────────────
+
+public enum PurgeStatus
+{
+    /// <summary>Queued: the worker picks it up within seconds.</summary>
+    Pending,
+    /// <summary>A device still holds the folder's lease or a live repository lock: tried again every 30 seconds.</summary>
+    Waiting,
+    Running,
+    Done,
+    Failed,
+}
+
+/// <summary>
+/// Removing a deleted folder's data from its storage (its root directory, nothing else), as a background job.
+/// <paramref name="FilesLeft"/>: files still there after the last pass (written while it ran, or not deletable).
+/// </summary>
+public record PurgeJobDto(
+    Guid Id, int FolderId, string FolderName, string? OwnerName, PurgeStatus Status, long FilesDeleted, long BytesDeleted,
+    long FilesLeft, string? Message, DateTime CreatedAt, DateTime? StartedAt, DateTime? FinishedAt);

@@ -35,6 +35,13 @@ public interface IStorageBackend : IAsyncDisposable
 
     /// <summary>Renames a file, replacing <paramref name="to"/> if it exists.</summary>
     Task MoveAsync(string from, string to, CancellationToken ct = default);
+
+    /// <summary>
+    /// Removes the directory at <paramref name="path"/> if it exists and is empty; anything else (missing, not empty,
+    /// the root itself) is left alone without an error. Back-ends without real directories (S3) need nothing here.
+    /// Used after deleting a tree of files (purging a folder), so it leaves no empty directories behind.
+    /// </summary>
+    Task DeleteDirectoryIfEmptyAsync(string path, CancellationToken ct = default) => Task.CompletedTask;
 }
 
 public record StorageEntry(string Path, bool IsDirectory, long Size, DateTimeOffset? LastModified)

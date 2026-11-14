@@ -3,6 +3,7 @@ using ASync.Api.Auth;
 using ASync.Contracts;
 using ASync.Core.Interfaces;
 using ASync.Core.Models;
+using ASync.Core.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -115,6 +116,35 @@ public class AuthController : ControllerBase
         user.DisplayName = string.IsNullOrEmpty(name) ? null : name;
         await _users.UpdateAsync(user);
         return ToDto(user);
+    }
+
+    /// <summary>
+    /// Changes the caller's own password (the current one is required). Every other browser session is signed out (their
+    /// refresh tokens are revoked; an open tab keeps its access token until it expires, at most 15 minutes); this browser
+    /// gets a new session. Devices are unaffected. Accounts that only use single sign-on cannot set a password here.
+    /// Rate-limited like sign-in, since it checks a password.
+    /// </summary>
+    [HttpPost("password")]
+    [Authorize(Roles = Roles.Users)]
+    [EnableRateLimiting(RateLimits.Auth)]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangeOwnPasswordRequest req, [FromServices] IRefreshTokenRepository refreshTokens)
+    {
+        var user = await _users.GetByIdAsync(User.UserId());
+        if (user is null) return Unauthorized();
+        var currentWrong = user.PasswordHash is not null
+                           && (string.IsNullOrEmpty(req.CurrentPassword)
+                               || _hasher.VerifyHashedPassword(user, user.PasswordHash, req.CurrentPassword) == PasswordVerificationResult.Failed)
+            ? "Your current password is not correct."
+            : null;
+        if (AccountRules.CanChangeOwnPassword(user, currentWrong, req.NewPassword) is { } refused) return BadRequest(new { message = refused });
+        if (req.NewPassword == req.CurrentPassword) return BadRequest(new { message = "Choose a password different from the current one." });
+
+        user.PasswordHash = _hasher.HashPassword(user, req.NewPassword);
+        await _users.UpdateAsync(user);
+        await refreshTokens.RevokeAllForUserAsync(user.Id);
+        await _tokens.IssueRefreshTokenAsync(user, HttpContext);
+        _logger.LogInformation("User {UserId} changed their password; their other sessions were signed out.", user.Id);
+        return NoContent();
     }
 
     // ── Single sign-on (OIDC) ─────────────────────────────────────────────────

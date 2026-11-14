@@ -151,6 +151,18 @@ public sealed class WebDavBackend : IStorageBackend
         await EnsureSuccessAsync(response, "MOVE", from);
     }
 
+    public async Task DeleteDirectoryIfEmptyAsync(string path, CancellationToken ct = default)
+    {
+        var normalized = StoragePath.Normalize(path);
+        if (normalized.Length == 0) return;
+        // DELETE on a collection is recursive in WebDAV: only send it when the listing shows nothing inside.
+        var entries = await PropfindAsync(normalized, 1, ct, asCollection: true);
+        if (entries is null || entries.Any(e => e.Path != normalized)) return;
+        using var response = await _http.SendAsync(new HttpRequestMessage(HttpMethod.Delete, UriOf(normalized, collection: true)), ct);
+        if (response.StatusCode != HttpStatusCode.NotFound) await EnsureSuccessAsync(response, "DELETE", normalized);
+        lock (_knownCollections) _knownCollections.RemoveWhere(c => c == normalized || c.StartsWith(normalized + "/", StringComparison.Ordinal));
+    }
+
     /// <summary>Creates a collection and its parents (MKCOL), remembering which exist.</summary>
     private async Task EnsureCollectionAsync(string directory, CancellationToken ct)
     {

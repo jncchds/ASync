@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  deleteFolder, detachFolderDevice, errorMessage, getAlertIncidents, getDevices, getFolders, getStorageBackends,
-  type AlertIncident, type Device, type Folder, type FolderDevice, type MaintenanceStatus, type StorageBackend,
+  detachFolderDevice, errorMessage, getAlertIncidents, getDevices, getFolders, getStorageBackends,
+  type AlertIncident, type Device, type PurgeJob, type Folder, type FolderDevice, type MaintenanceStatus, type StorageBackend,
 } from '../api'
 import FolderForm from '../components/FolderForm'
 import FolderDeviceForm from '../components/FolderDeviceForm'
 import SnapshotBrowser from '../components/SnapshotBrowser'
 import RecoveryKeyPanel from '../components/RecoveryKeyPanel'
+import DeleteFolderPanel from '../components/DeleteFolderPanel'
+import PurgeList from '../components/PurgeList'
 import { useSyncEvents, type SyncEvent } from '../hooks/useSyncEvents'
+import { useAuth } from '../hooks/useAuth'
 import { kindLabel, modeLabel } from '../utils/folders'
 import { ALERT_KIND_LABELS, openByDevice } from '../utils/alerts'
 import { formatDate, formatMinutes, relativeTime } from '../utils/format'
@@ -36,6 +39,7 @@ type DeviceEdit = { folderId: number; deviceId?: string }
 
 /** Synced and backed-up folders: what they are, where they are stored, and which devices sync them. */
 export default function Folders() {
+  const { user } = useAuth()
   const [folders, setFolders] = useState<Folder[] | null>(null)
   const [backends, setBackends] = useState<StorageBackend[]>([])
   const [devices, setDevices] = useState<Device[]>([])
@@ -51,6 +55,10 @@ export default function Folders() {
   /** Bumped when a device reports a sync, so an open snapshot list picks up new snapshots. */
   const [syncReports, setSyncReports] = useState(0)
   const [error, setError] = useState('')
+  /** The folder whose delete panel is open. */
+  const [deleting, setDeleting] = useState<number | null>(null)
+  /** Bumped when a purge of stored data starts, so the list of purges reloads. */
+  const [purges, setPurges] = useState(0)
 
   const load = useCallback(() => Promise.all([getFolders(), getStorageBackends(), getDevices()])
     .then(([f, b, d]) => {
@@ -79,13 +87,12 @@ export default function Folders() {
     setGeneration(g => g + 1)
   }
 
-  const remove = async (f: Folder) => {
-    if (!confirm(`Stop syncing "${f.name}" on every device? The files on your devices and on the storage stay where they are.`)) return
-    try {
-      await deleteFolder(f.id)
-      if (browsing === f.id) setBrowsing(null)
-      await load()
-    } catch (err) { setError(errorMessage(err)) }
+  const deleted = async (f: Folder, purge: PurgeJob | null) => {
+    setDeleting(null)
+    if (browsing === f.id) setBrowsing(null)
+    if (recoveryFor?.folderId === f.id) setRecoveryFor(null)
+    if (purge) setPurges(n => n + 1)
+    await load()
   }
 
   const detach = async (f: Folder, d: FolderDevice) => {
@@ -97,6 +104,7 @@ export default function Folders() {
   const editingFolder = typeof editing === 'number' ? current(editing) : undefined
   const browsingFolder = browsing !== null ? current(browsing) : undefined
   const recoveryFolder = recoveryFor !== null ? current(recoveryFor.folderId) : undefined
+  const deletingFolder = deleting !== null ? current(deleting) : undefined
   const deviceAlerts = openByDevice(incidents)
   const openCount = incidents.filter(i => !i.resolvedAt).length
 
@@ -142,6 +150,11 @@ export default function Folders() {
         <RecoveryKeyPanel key={recoveryFolder.id} folder={recoveryFolder} shown={recoveryFor.shown} onClose={() => setRecoveryFor(null)} />
       )}
 
+      {deletingFolder && (
+        <DeleteFolderPanel key={deletingFolder.id} folder={deletingFolder} onDeleted={job => deleted(deletingFolder, job)} onCancel={() => setDeleting(null)} />
+      )}
+      <PurgeList refresh={purges} owner={user?.username} />
+
       {browsingFolder && <SnapshotBrowser key={browsingFolder.id} folder={browsingFolder} refresh={syncReports} onClose={() => setBrowsing(null)} />}
 
       {folders === null ? <div className="loading">Loading…</div> : folders.length === 0 ? (
@@ -184,7 +197,7 @@ export default function Folders() {
                       <button className="secondary small" onClick={() => setRecoveryFor({ folderId: f.id })}>Recovery key</button>
                     )}
                     <button className="secondary small" onClick={() => setEditing(f.id)}>Edit</button>
-                    <button className="danger small" onClick={() => remove(f)}>Delete</button>
+                    <button className="danger small" onClick={() => setDeleting(f.id)}>Delete</button>
                   </div>
                 </div>
 

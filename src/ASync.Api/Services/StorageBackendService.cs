@@ -45,6 +45,10 @@ public class StorageBackendService(
         JsonSerializer.Deserialize<StorageSettings>(Protector.Unprotect(backend.ProtectedSettings), Json)
         ?? throw new InvalidOperationException($"Storage back-end {backend.Id} has no settings.");
 
+    /// <summary>Settings kept elsewhere in their protected form (a purge job's copy).</summary>
+    public StorageSettings SettingsOf(StorageBackendType type, string protectedSettings) =>
+        Settings(new StorageBackend { Type = type, ProtectedSettings = protectedSettings });
+
     private string Protect(StorageSettings settings) => Protector.Protect(JsonSerializer.Serialize(settings, Json));
 
     public static bool CanEdit(StorageBackend backend, int userId, bool isAdmin) =>

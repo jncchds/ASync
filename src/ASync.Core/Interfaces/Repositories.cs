@@ -11,6 +11,33 @@ public interface IUserRepository
     Task<List<AppUser>> GetAllAsync();
     Task<AppUser> AddAsync(AppUser user);
     Task UpdateAsync(AppUser user);
+    /// <summary>Checked on every request with a person's token, so a deleted account's tokens stop at once.</summary>
+    Task<bool> ExistsAsync(int id);
+    Task<int> CountAdminsAsync();
+    /// <summary>What deleting the user would remove (for the confirmation).</summary>
+    Task<UserFootprint> GetFootprintAsync(int userId, DateTime now);
+    /// <summary>
+    /// Deletes the user and everything that is theirs (folders, personal back-ends, devices, codes, sessions, alerts)
+    /// and adds <paramref name="purges"/>, in one transaction.
+    /// </summary>
+    Task DeleteAsync(AppUser user, IEnumerable<PurgeJob> purges);
+}
+
+/// <summary>Counts of what belongs to a user, for the deletion confirmation.</summary>
+public record UserFootprint(int Devices, int Sessions, int EnrollmentCodes, int AlertChannels, int OpenIncidents);
+
+public interface IPurgeJobRepository
+{
+    Task<PurgeJob?> GetAsync(Guid id);
+    /// <summary>Jobs the user asked for, newest first (finished ones for <paramref name="finishedSince"/>).</summary>
+    Task<List<PurgeJob>> GetForRequesterAsync(int userId, DateTime finishedSince);
+    /// <summary>Jobs not done or failed yet, oldest first.</summary>
+    Task<List<PurgeJob>> GetUnfinishedAsync();
+    Task SaveAsync();
+    /// <summary>Writes running totals straight to the row (from a context of its own, while the job runs).</summary>
+    Task UpdateProgressAsync(Guid id, long filesDeleted, long bytesDeleted);
+    /// <summary>Removes finished jobs older than <paramref name="olderThan"/>.</summary>
+    Task<int> DeleteFinishedAsync(DateTime olderThan);
 }
 
 public interface IRefreshTokenRepository
@@ -80,7 +107,10 @@ public interface IFolderRepository
     Task<List<Folder>> GetAllWithDevicesAsync();
     Task<Folder> AddAsync(Folder folder);
     Task SaveAsync();
-    Task DeleteAsync(Folder folder);
+    /// <summary>Every folder with its back-end (purges check that no other folder's data lies in the purged root).</summary>
+    Task<List<Folder>> GetAllWithBackendAsync();
+    /// <summary>Deletes the folder and, in the same transaction, adds the job that removes its stored data.</summary>
+    Task DeleteAsync(Folder folder, PurgeJob? purge = null);
     Task RemoveDeviceAsync(FolderDevice membership);
 }
 

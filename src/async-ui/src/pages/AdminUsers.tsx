@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { createUser, errorMessage, getUsers, setUserPassword, setUserRole, type AdminUser } from '../api'
 import { useAuth } from '../hooks/useAuth'
 import { formatDate } from '../utils/format'
+import DeleteUserPanel from '../components/DeleteUserPanel'
+import PurgeList from '../components/PurgeList'
 
 export default function AdminUsers() {
   const { user: me } = useAuth()
@@ -10,6 +12,10 @@ export default function AdminUsers() {
   const [password, setPassword] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
   const [error, setError] = useState('')
+  const [deleting, setDeleting] = useState<number | null>(null)
+  const [notice, setNotice] = useState('')
+  /** Bumped when a deletion started purges, so their list reloads. */
+  const [purges, setPurges] = useState(0)
 
   const load = useCallback(() => getUsers().then(setUsers).catch(err => setError(errorMessage(err))), [])
   useEffect(() => { load() }, [load])
@@ -38,10 +44,23 @@ export default function AdminUsers() {
     try { await setUserRole(u.id, !u.isAdmin); await load() } catch (err) { setError(errorMessage(err)) }
   }
 
+  const deletingUser = deleting !== null ? users?.find(u => u.id === deleting) : undefined
+  const adminCount = users?.filter(u => u.isAdmin).length ?? 0
+
   return (
     <>
       <div className="header"><h1>Users</h1></div>
       {error && <p className="error-msg">{error}</p>}
+      {notice && <p className="success-msg">{notice}</p>}
+
+      {deletingUser && (
+        <DeleteUserPanel key={deletingUser.id} user={deletingUser} onCancel={() => setDeleting(null)} onDeleted={async started => {
+          setNotice(`${deletingUser.username} was deleted.${started > 0 ? ' Their stored data is being removed (see below).' : ''}`)
+          setDeleting(null)
+          if (started > 0) setPurges(n => n + 1)
+          await load()
+        }} />
+      )}
 
       {users === null ? <div className="loading">Loading…</div> : (
         <div className="table-wrap">
@@ -67,6 +86,9 @@ export default function AdminUsers() {
                       {u.id !== me?.id && (
                         <button className="secondary small" onClick={() => toggleAdmin(u)}>{u.isAdmin ? 'Make user' : 'Make admin'}</button>
                       )}
+                      {u.id !== me?.id && !(u.isAdmin && adminCount <= 1) && (
+                        <button className="danger small" onClick={() => { setNotice(''); setDeleting(u.id) }}>Delete</button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -75,6 +97,8 @@ export default function AdminUsers() {
           </table>
         </div>
       )}
+
+      <PurgeList refresh={purges} />
 
       <section className="card section">
         <h2>New user</h2>

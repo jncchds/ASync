@@ -111,8 +111,14 @@ public class JwtTokenService(
             if (stored.ReplacedByHash is not null && now - revokedAt < RotationGrace)
                 return (stored.User, CreateAccessToken(stored.User));
 
-            logger.LogWarning("A revoked refresh token was presented for user {UserId}; signing them out everywhere.", stored.UserId);
-            await refreshTokens.RevokeAllForUserAsync(stored.UserId);
+            // Only a token that was rotated away is a theft signal (someone else holds its successor). One revoked by
+            // signing out or by a password change just ends here: treating it as theft would also sign out the
+            // browser that changed the password, the moment another browser came back with its old cookie.
+            if (stored.ReplacedByHash is not null)
+            {
+                logger.LogWarning("A rotated refresh token was presented again for user {UserId}; signing them out everywhere.", stored.UserId);
+                await refreshTokens.RevokeAllForUserAsync(stored.UserId);
+            }
             ClearCookie(http);
             return null;
         }

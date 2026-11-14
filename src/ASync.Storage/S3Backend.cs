@@ -169,6 +169,19 @@ public sealed class S3Backend : IStorageBackend
     }
 
 
+    /// <summary>
+    /// S3 has no directories, but some services (SeaweedFS) or tools keep a "directory" (marker object) after its last
+    /// file is gone: delete that marker once nothing else is under the prefix.
+    /// </summary>
+    public async Task DeleteDirectoryIfEmptyAsync(string path, CancellationToken ct = default)
+    {
+        var prefix = DirPrefix(path);
+        if (prefix.Length == 0) return;
+        var probe = await _client.ListObjectsV2Async(new ListObjectsV2Request { BucketName = _bucket, Prefix = prefix, MaxKeys = 2 }, ct);
+        if (probe.S3Objects?.Any(o => o.Key != prefix) == true) return;
+        await _client.DeleteObjectAsync(_bucket, prefix, ct);
+    }
+
     public ValueTask DisposeAsync()
     {
         _client.Dispose();

@@ -41,6 +41,9 @@ public class FolderLeaseService(TimeProvider clock)
         }
     }
 
+    /// <summary>Whether a device holds the folder's lease right now (a purge waits for it).</summary>
+    public bool IsHeld(int folderId) => _leases.TryGetValue(folderId, out var current) && current.ExpiresAt > Now;
+
     public LeaseDto? Renew(int folderId, string leaseId)
     {
         if (!_leases.TryGetValue(folderId, out var current) || current.Id != leaseId || current.ExpiresAt <= Now) return null;

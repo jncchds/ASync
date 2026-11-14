@@ -56,6 +56,23 @@
 - fix: **A removed device's running agent now stops within a second.** It is told directly instead of waiting
   to notice its closed connection, which sometimes took 30 seconds.
 
+- feat(ui): **Change your own password** on the new *Account* page (sidebar). The current password is required;
+  every other browser you are signed in with is signed out, this one stays, and devices keep syncing. Accounts
+  that only use single sign-on change their password at the identity provider.
+- feat: **Admins can delete accounts** (*Users → Delete*). The confirmation lists what goes with it: devices
+  (removed at once, so running agents stop), folders, personal storage, alert channels, codes and sessions.
+  Shared storage stays, and so does the stored data unless you also ask for it to be deleted (typing the
+  username). You cannot delete yourself or the last admin. A deleted account's sign-in stops working at once.
+- feat: **Deleting a folder can delete its stored data too.** Tick *Also delete the stored data* and type the
+  folder's name: the server empties the folder's directory on the storage, and nothing outside it, in the
+  background, and the Folders page shows the progress and how much was removed. It is refused while a device is
+  syncing the folder, and when another storage entry points into the same place. Without it, the data stays as
+  before; for standard-encryption backups the page now says that the recovery key is then the only way to open
+  them.
+- fix: **A browser coming back with a cookie from before a sign-out or password change no longer signs you out
+  everywhere.** Only a cookie that was already exchanged for a new one (a sign of theft) does that now.
+- Database migration `PurgeJobs` (applied at start).
+
 ## v0.1.3 — 2026-11-12
 
 - feat(ui): **New look, in the family style**: a collapsible sidebar (Folders, Devices, Storage, Users) with the
