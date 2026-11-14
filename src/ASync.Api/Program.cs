@@ -4,6 +4,7 @@ using ASync.Api.Auth;
 using ASync.Api.HostedServices;
 using ASync.Api.Hubs;
 using ASync.Api.Services;
+using ASync.Api.Services.Alerts;
 using ASync.Core.Interfaces;
 using ASync.Core.Models;
 using ASync.Infrastructure.Data;
@@ -56,6 +57,22 @@ builder.Services.AddHostedService<CleanupService>();
 builder.Services.AddSingleton<MaintenanceClaims>();
 builder.Services.AddScoped<FolderMaintenanceService>();
 builder.Services.AddHostedService<MaintenanceScheduler>();
+
+// ── Alerts (overdue detection; webhook, ntfy, e-mail) and push mode ───────────
+// Alerts need no push: they work from what devices report. Push__Mode only has None until the mobile apps (M4).
+var pushSettings = PushSettings.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(pushSettings);
+builder.Services.AddSingleton(AlertOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddSingleton(SmtpOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddSingleton(new ServerStarted(DateTime.UtcNow));
+// User-supplied addresses: short timeout, no redirects (and AlertSender only accepts http/https).
+builder.Services.AddHttpClient(AlertSender.HttpClientName, c => c.Timeout = AlertSender.Timeout)
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, ConnectTimeout = AlertSender.Timeout });
+builder.Services.AddScoped<IAlertRepository, AlertRepository>();
+builder.Services.AddScoped<IAlertSender, AlertSender>();
+builder.Services.AddScoped<AlertService>();
+builder.Services.AddScoped<AlertMonitor>();
+builder.Services.AddHostedService<AlertScheduler>();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 // People: a short-lived JWT access token in page memory, refreshed with an httpOnly cookie sent only to /api/auth
@@ -189,7 +206,8 @@ app.MapHealthChecks("/health").AllowAnonymous();
 // React SPA fallback — serve index.html for all non-API routes
 app.MapFallbackToFile("index.html");
 
-app.Logger.LogInformation("ASync server starting. Single sign-on is {Oidc}.", oidc.Enabled ? "on" : "off");
+app.Logger.LogInformation("ASync server starting. Single sign-on is {Oidc}. Push mode: {Push}.", oidc.Enabled ? "on" : "off", pushSettings.Mode);
+if (pushSettings.Warning is { } pushWarning) app.Logger.LogWarning("{Warning}", pushWarning);
 app.Run();
 return 0;
 

@@ -51,6 +51,12 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 - **Restoring from the browser:** for Backup folders with standard encryption, *Snapshots* lists every
   backup. Walk through its folders and download single files or whole folders as a ZIP. End-to-end encrypted
   backups can only be read on your devices: restore them with `async-cli restore`.
+- **Alerts when something stops:** the server notices on its own when a device has not synced or backed up a
+  folder for too long, when its runs keep failing, or when a backup's verification or space freeing failed. It
+  tells you by [ntfy](https://ntfy.sh), a webhook or e-mail (see [Alerts](#alerts)): once per problem, again
+  when it is fixed, and as a daily reminder while it lasts. The *Folders* page marks such devices *Overdue* or
+  *Failing*, and the *Alerts* page lists the open problems. Nothing is needed on the devices, and no push
+  service.
 - **Web UI:** a sidebar layout with light, dark and system themes, usable on phones too.
   [More screenshots](docs/screenshots/): [snapshot browser](docs/screenshots/light-03-snapshots.png),
   [devices](docs/screenshots/light-06-add-device-qr.png), [storage](docs/screenshots/dark-08-storage.png),
@@ -79,15 +85,19 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 - Taking backups over on a new server needs the folder's directory at the same place relative to the
   storage. On *shared* storage each user's area is `users/<id>/`, and a new server may give the person a
   different id: move the directory into their new area first.
-- A failed verification is shown on the *Folders* page only: nobody is notified. Look there from time to
-  time, or run `async-cli check` from a scheduled job and use its exit code.
+- Alerts only know what devices report. A device that is switched off and one that cannot reach the server
+  look the same (both are *Overdue*), and a device is never woken up to catch up: push wake-ups come with the
+  mobile apps.
+- Webhook and ntfy addresses are typed in by users, and the server sends to them as given (only http and https,
+  no redirects, 10-second timeout). Like storage back-ends, they can point at machines on the server's own
+  network. That is fine when you trust your users; don't offer ASync to strangers without a firewall rule for
+  the server's outgoing traffic.
 - A scheduled verification reads back only a sample of the data. `async-cli check --read-data 100` reads
   all of it.
 - End-to-end encrypted folders are only pruned and verified while one of their devices runs `async-cli run`
   with the folder unlocked.
 - Devices that share a Backup folder need roughly correct clocks (within half an hour). A device whose clock
   is far off can take a running backup's lock for an abandoned one.
-- Nobody is told when a device stops backing up.
 - Mirror and two-way folders have no file, version or trash browser in the web UI yet.
 - Very large files in Mirror and two-way folders are uploaded in one piece, with no resume; on S3 storage
   files over 5 GB fail.
@@ -114,6 +124,11 @@ Open http://localhost:5100 and create the admin account. Settings are environmen
 | `Storage__LocalRoots` | Where admins may create back-ends on the server's own disk (default `/data`, the `async_data` volume). Comma-separated. |
 | `Maintenance__PollSeconds` | How often the server looks for Backup folders due for pruning or verifying (default 900). |
 | `Maintenance__Enabled` | `false` stops the server from pruning and verifying on its own. |
+| `Alerts__MinimumGraceMinutes`, `Alerts__GraceFactor` | A device is overdue after the longer of these minutes (default 240) and its folder's interval times the factor (default 3) without a successful run. People can change both for themselves. |
+| `Alerts__FailureThreshold`, `Alerts__ReminderHours` | Failed runs in a row before a device counts as failing (default 3); how often open problems are repeated (default 24, 0 = never). Also per person. |
+| `Alerts__PollSeconds`, `Alerts__Enabled` | How often the server looks for problems (default 300); `false` turns alerts off. `Alerts__RetryMinutes` (15): wait after a message no channel took. |
+| `Smtp__Host`, `Smtp__Port`, `Smtp__Username`, `Smtp__Password`, `Smtp__From`, `Smtp__Security` | The mail account for e-mail alerts. Without `Smtp__Host` and `Smtp__From`, e-mail is not offered. Port 465 uses TLS on connect, others STARTTLS; `Smtp__Security=None` for a local relay. |
+| `Push__Mode` | How the server wakes devices. Only `None` (the default) exists so far; alerts and every device's own schedule work without push. |
 
 To move a generated signing key into the environment:
 
@@ -133,6 +148,58 @@ created later are not in it: export again from time to time. People's own recove
 
 Always put the server behind HTTPS (a reverse proxy such as Caddy or Traefik) before devices connect over
 the internet.
+
+## Alerts
+
+The server checks every few minutes whether each device keeps up with each of its folders. Problems:
+
+- **Overdue:** no successful sync or backup for longer than the grace: 4 hours, or 3 times the folder's
+  interval if that is longer (a daily backup is overdue after 3 days). A device that never synced counts from
+  when it was attached, a resumed one from when it was resumed. Paused and removed devices are not watched.
+- **Failing:** the last 3 runs failed, or it has been failing for longer than the grace.
+- **Verification failed / freeing space failed** for a Backup folder.
+
+Each problem is announced once and again when it is fixed ("back to normal"); while problems stay open they are
+repeated once a day. One message covers all your folders. After a server restart, new *Overdue* alerts wait a
+grace period, because devices could not sync while the server was down. Change the rules for yourself on the
+*Alerts* page; the defaults are the `Alerts__*` settings above.
+
+Add channels on the *Alerts* page, each with a *Send test* button:
+
+- **ntfy:** a server (`https://ntfy.sh` or your own) and a topic, plus an access token for protected topics.
+  Install the ntfy app and subscribe to the topic. On ntfy.sh, pick a topic name nobody can guess.
+- **Webhook:** any http(s) URL, with an optional `Authorization` header value (e.g. `Bearer …`).
+- **E-mail:** your address. The server needs the `Smtp__*` settings.
+
+Tokens and headers are stored encrypted and never shown again. A webhook receives a JSON `POST`:
+
+```json
+{
+  "version": 1,
+  "event": "alert",
+  "title": "ASync: 1 new problem, 1 back to normal",
+  "text": "New problem:\n• \"photos\" on laptop is overdue. No successful run since 2026-11-12 08:00 UTC (expected at least every 4 h).\n\n…",
+  "server": "https://sync.example.com",
+  "user": "alice",
+  "sentAt": "2026-11-14T08:05:00Z",
+  "reminder": false,
+  "opened":   [ { "id": 7, "kind": "overdue", "folderId": 3, "folderName": "photos", "deviceId": "0196…", "deviceName": "laptop",
+                "detail": "No successful run since …", "openedAt": "2026-11-14T08:05:00Z", "resolvedAt": null } ],
+  "resolved": [ { "id": 5, "kind": "checkFailed", "folderId": 4, "folderName": "documents", "deviceId": null, "deviceName": null,
+                "detail": "The integrity check … found problems: …", "openedAt": "…", "resolvedAt": "2026-11-14T08:05:00Z" } ],
+  "open":     [ "…every problem still open, the new ones included…" ]
+}
+```
+
+- `event` is `alert`, or `test` for *Send test* (with empty lists).
+- `kind` is `overdue`, `failing`, `checkFailed` or `pruneFailed`. `deviceId` and `deviceName` are null for
+  folder problems.
+- `reminder` is true when the message only repeats what is still open.
+- `server` is `PublicUrl`, or null when that is not set (then messages carry no link).
+- Any 2xx answer counts as delivered. Redirects are not followed, and the server waits at most 10 seconds.
+  When no channel takes a message, it is tried again after 15 minutes.
+
+ntfy gets the same title and text, with high priority for new problems.
 
 ## Run an agent
 

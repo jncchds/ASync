@@ -41,6 +41,9 @@ public class FolderRepository(AppDbContext db) : IFolderRepository
             .Where(f => f.Mode == SyncMode.Backup && f.Encryption == FolderEncryption.Transport && f.ProtectedRepositoryKey != null)
             .OrderBy(f => f.Id).ToListAsync();
 
+    public Task<List<Folder>> GetAllWithDevicesAsync() =>
+        db.Folders.Include(f => f.Devices).ThenInclude(d => d.Device).OrderBy(f => f.Id).AsSplitQuery().ToListAsync();
+
     public async Task<Folder> AddAsync(Folder folder)
     {
         db.Folders.Add(folder);

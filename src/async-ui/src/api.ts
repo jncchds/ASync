@@ -387,3 +387,68 @@ export async function downloadFromSnapshot(folderId: number, snapshotId: string,
   a.click()
   a.remove()
 }
+
+// ── Alerts ────────────────────────────────────────────────────────────────────
+
+export type AlertKind = 'Overdue' | 'Failing' | 'CheckFailed' | 'PruneFailed'
+export type AlertChannelType = 'Webhook' | 'Ntfy' | 'Email'
+
+export type AlertChannelSettings = { type: AlertChannelType } & Record<string, string | null | undefined>
+
+export interface AlertChannel {
+  id: number
+  name: string
+  type: AlertChannelType
+  enabled: boolean
+  /** Secrets come back as null; `secretsSet` names the ones that are stored. */
+  settings: AlertChannelSettings
+  secretsSet: string[]
+  description: string
+  createdAt: string
+  lastSentAt: string | null
+  lastOk: boolean | null
+  lastError: string | null
+}
+
+export interface SaveAlertChannel { name: string; settings: AlertChannelSettings; enabled: boolean }
+
+export interface AlertTestResult { ok: boolean; error: string | null }
+
+export interface AlertDefaults { graceFactor: number; minimumGraceHours: number; failureThreshold: number; reminderHours: number }
+
+/** Null fields use the server's default. */
+export interface AlertSettings {
+  graceFactor: number | null
+  minimumGraceHours: number | null
+  failureThreshold: number | null
+  reminderHours: number | null
+  defaults: AlertDefaults
+  emailAvailable: boolean
+  pushMode: string
+}
+
+export type SaveAlertSettings = Pick<AlertSettings, 'graceFactor' | 'minimumGraceHours' | 'failureThreshold' | 'reminderHours'>
+
+export interface AlertIncident {
+  id: number
+  kind: AlertKind
+  folderId: number
+  folderName: string
+  deviceId: string | null
+  deviceName: string | null
+  detail: string
+  openedAt: string
+  resolvedAt: string | null
+  notifiedAt: string | null
+}
+
+export const getAlertSettings = () => api.get<AlertSettings>('/alerts/settings').then(r => r.data)
+export const saveAlertSettings = (req: SaveAlertSettings) => api.put<AlertSettings>('/alerts/settings', req).then(r => r.data)
+export const getAlertIncidents = (days = 7) => api.get<AlertIncident[]>('/alerts/incidents', { params: { days } }).then(r => r.data)
+export const getAlertChannels = () => api.get<AlertChannel[]>('/alerts/channels').then(r => r.data)
+export const createAlertChannel = (req: SaveAlertChannel) => api.post<AlertChannel>('/alerts/channels', req).then(r => r.data)
+export const updateAlertChannel = (id: number, req: SaveAlertChannel) => api.put<AlertChannel>(`/alerts/channels/${id}`, req).then(r => r.data)
+export const deleteAlertChannel = (id: number) => api.delete(`/alerts/channels/${id}`)
+export const testAlertSettings = (settings: AlertChannelSettings, channelId?: number) =>
+  api.post<AlertTestResult>('/alerts/channels/test', { settings, channelId }).then(r => r.data)
+export const testAlertChannel = (id: number) => api.post<AlertTestResult>(`/alerts/channels/${id}/test`).then(r => r.data)

@@ -35,6 +35,25 @@ services:
       # folder form). This is how often it looks for folders that are due; Maintenance__Enabled=false turns it off.
       - Maintenance__PollSeconds=${ASYNC_MAINTENANCE_POLL_SECONDS:-900}
       # - Maintenance__Enabled=true
+      # ── Alerts: overdue or failing devices, failed checks (README "Alerts") ───
+      # People choose where alerts go (ntfy, webhook, e-mail) on the Alerts page. These are the server's defaults:
+      # a device is overdue after max(MinimumGraceMinutes, folder interval × GraceFactor) without a successful run.
+      - Alerts__PollSeconds=${ASYNC_ALERTS_POLL_SECONDS:-300}
+      - Alerts__MinimumGraceMinutes=${ASYNC_ALERTS_MINIMUM_GRACE_MINUTES:-240}
+      - Alerts__GraceFactor=${ASYNC_ALERTS_GRACE_FACTOR:-3}
+      # - Alerts__FailureThreshold=3            # failed runs in a row before a device counts as failing
+      # - Alerts__ReminderHours=24              # repeat open problems this often (0 = never)
+      # - Alerts__Enabled=true
+      # E-mail alerts (optional): the server's SMTP account. Port 465 uses TLS on connect, others STARTTLS.
+      # - Smtp__Host=smtp.example.com
+      # - Smtp__Port=587
+      # - Smtp__Username=
+      # - Smtp__Password=
+      # - Smtp__From=ASync <async@example.com>
+      # - Smtp__Security=StartTls               # StartTls, SslOnConnect or None
+      # ── Push (wake-ups for mobile devices; comes with the mobile apps) ────────
+      # Only None exists so far. Alerts and every device's own schedule work without push.
+      # - Push__Mode=None
     volumes:
       - async_data:/data                      # or a host path, e.g. /mnt/backups:/data
     depends_on:

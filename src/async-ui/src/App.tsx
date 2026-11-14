@@ -7,6 +7,7 @@ import ApproveDevice from './pages/ApproveDevice'
 import AdminUsers from './pages/AdminUsers'
 import Storage from './pages/Storage'
 import Folders from './pages/Folders'
+import Alerts from './pages/Alerts'
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth()
@@ -24,6 +25,7 @@ function ProtectedRoutes() {
         <Route path="/devices" element={<Devices />} />
         <Route path="/devices/approve" element={<ApproveDevice />} />
         <Route path="/storage" element={<Storage />} />
+        <Route path="/alerts" element={<Alerts />} />
         {user.isAdmin && <Route path="/admin/users" element={<AdminUsers />} />}
         <Route path="*" element={<Navigate to="/folders" replace />} />
       </Route>

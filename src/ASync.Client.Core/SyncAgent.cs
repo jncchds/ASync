@@ -284,6 +284,10 @@ public sealed class SyncAgent : IAsyncDisposable
         {
             switch (e.Name)
             {
+                case SyncEvents.DeviceRevoked:
+                    // Only a sign-in proves it (and gives the explanation): a refused one stops the agent via Observe.
+                    await _api.GetTokenAsync(ct, forceRefresh: true);
+                    break;
                 case SyncEvents.ConfigChanged:
                     await ReloadAsync(ct);
                     break;
@@ -297,7 +301,7 @@ public sealed class SyncAgent : IAsyncDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Observe(ex);
-            _logger.LogWarning("Handling {Event} failed: {Message}", e.Name, ex.Message);
+            if (_revoked is null) _logger.LogWarning("Handling {Event} failed: {Message}", e.Name, ex.Message);
         }
     }
 

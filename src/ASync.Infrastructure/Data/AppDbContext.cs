@@ -20,6 +20,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<StorageBackend> StorageBackends => Set<StorageBackend>();
     public DbSet<Folder> Folders => Set<Folder>();
     public DbSet<FolderDevice> FolderDevices => Set<FolderDevice>();
+    public DbSet<AlertIncident> AlertIncidents => Set<AlertIncident>();
+    public DbSet<AlertChannel> AlertChannels => Set<AlertChannel>();
+    public DbSet<AlertSettings> AlertSettings => Set<AlertSettings>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -91,8 +94,36 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(d => d.LocalPath).HasMaxLength(1000);
             e.Property(d => d.Direction).HasConversion<string>().HasMaxLength(20);
             e.Property(d => d.LastSyncMessage).HasMaxLength(1000);
+            // Memberships from before overdue detection count from the migration.
+            e.Property(d => d.AttachedAt).HasDefaultValueSql("now()");
             e.HasOne(d => d.Folder).WithMany(f => f.Devices).HasForeignKey(d => d.FolderId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(d => d.Device).WithMany().HasForeignKey(d => d.DeviceId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<AlertIncident>(e =>
+        {
+            e.Property(i => i.Kind).HasConversion<string>().HasMaxLength(20);
+            e.Property(i => i.FolderName).HasMaxLength(100);
+            e.Property(i => i.DeviceName).HasMaxLength(100);
+            e.Property(i => i.Detail).HasMaxLength(1000);
+            e.HasIndex(i => new { i.UserId, i.ResolvedAt });
+            e.HasOne(i => i.Folder).WithMany().HasForeignKey(i => i.FolderId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(i => i.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<AlertChannel>(e =>
+        {
+            e.Property(c => c.Name).HasMaxLength(100);
+            e.Property(c => c.Type).HasConversion<string>().HasMaxLength(20);
+            e.Property(c => c.LastError).HasMaxLength(1000);
+            e.HasIndex(c => c.UserId);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<AlertSettings>(e =>
+        {
+            e.HasKey(s => s.UserId);
+            e.HasOne<AppUser>().WithOne().HasForeignKey<AlertSettings>(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<PendingDeviceCode>(e =>

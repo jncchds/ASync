@@ -42,6 +42,20 @@
 - feat(admin): **`secrets export-folder-keys`** prints the server's key for every standard-encryption folder,
   for disaster recovery. The output opens all of those backups: keep it like the backups.
 
+- feat: **You are told when a device stops syncing or backing up, or when something fails.** The server notices
+  on its own when a device has gone too long without a successful run (by default 4 hours, or 3 times the
+  folder's interval if longer), when its runs keep failing, or when a backup's verification or space freeing
+  failed. Each problem is announced once, again when it is fixed, and once a day while it lasts; one message
+  covers all folders, and a server restart raises no false alarms. No push service and nothing on the devices
+  is needed (`Push__Mode=None`, the only mode so far).
+- feat(ui): **New Alerts page**: where alerts go (ntfy, webhook with a documented JSON payload, or e-mail), each
+  with *Send test*; the open problems and recently fixed ones; and your own rules. The Folders page marks devices
+  *Overdue* or *Failing* and links there. ntfy tokens and webhook headers are stored encrypted and never shown.
+- New server settings: `Alerts__*` (defaults for the rules, how often to look), `Smtp__*` (mail account for
+  e-mail alerts) and `Push__Mode` (only `None` for now).
+- fix: **A removed device's running agent now stops within a second.** It is told directly instead of waiting
+  to notice its closed connection, which sometimes took 30 seconds.
+
 ## v0.1.3 — 2026-11-12
 
 - feat(ui): **New look, in the family style**: a collapsible sidebar (Folders, Devices, Storage, Users) with the

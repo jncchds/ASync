@@ -76,8 +76,29 @@ public interface IFolderRepository
     Task<List<Folder>> GetOnBackendAsync(int storageBackendId);
     /// <summary>Backup folders whose repository the server can open (Transport encryption), with their back-end.</summary>
     Task<List<Folder>> GetServerMaintainedAsync();
+    /// <summary>Every folder with its devices (each with its <c>Device</c>), for overdue detection.</summary>
+    Task<List<Folder>> GetAllWithDevicesAsync();
     Task<Folder> AddAsync(Folder folder);
     Task SaveAsync();
     Task DeleteAsync(Folder folder);
     Task RemoveDeviceAsync(FolderDevice membership);
+}
+
+public interface IAlertRepository
+{
+    Task<AlertSettings?> GetSettingsAsync(int userId);
+    /// <summary>The user's row, added (unsaved until <see cref="SaveAsync"/>) when there is none.</summary>
+    Task<AlertSettings> GetOrAddSettingsAsync(int userId);
+    Task<List<AlertChannel>> GetChannelsAsync(int userId);
+    Task<AlertChannel?> GetChannelAsync(int id);
+    Task<AlertChannel> AddChannelAsync(AlertChannel channel);
+    Task DeleteChannelAsync(AlertChannel channel);
+    /// <summary>Open incidents of every user, plus resolved ones whose "back to normal" message is still to send.</summary>
+    Task<List<AlertIncident>> GetActiveAsync();
+    /// <summary>The user's open incidents and those resolved after <paramref name="resolvedSince"/>, newest first.</summary>
+    Task<List<AlertIncident>> GetForUserAsync(int userId, DateTime resolvedSince);
+    void AddIncidents(IEnumerable<AlertIncident> incidents);
+    /// <summary>Removes resolved incidents older than <paramref name="olderThan"/>.</summary>
+    Task<int> DeleteResolvedAsync(DateTime olderThan);
+    Task SaveAsync();
 }

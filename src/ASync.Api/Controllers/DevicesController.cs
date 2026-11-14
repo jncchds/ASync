@@ -47,13 +47,16 @@ public class DevicesController : ControllerBase
     /// The row stays so the device list shows what happened; enrolling again creates a new device.
     /// </summary>
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Revoke(Guid id, [FromServices] DeviceConnections connections)
+    public async Task<IActionResult> Revoke(Guid id, [FromServices] DeviceConnections connections, [FromServices] ISyncNotifier notifier)
     {
         var device = await _devices.GetAsync(id);
         if (device is null || device.UserId != User.UserId()) return NotFound();
         device.RevokedAt ??= DateTime.UtcNow;
         await _devices.UpdateAsync(device);
-        connections.Abort(id); // its live-updates connection outlives the token check
+        // Its live-updates connection outlives the token check. Tell the agent first: an aborted connection is not
+        // always noticed at once (then only after the client's 30-second server timeout).
+        await notifier.ToDevicesAsync([id], SyncEvents.DeviceRevoked);
+        connections.Abort(id);
         return NoContent();
     }
 

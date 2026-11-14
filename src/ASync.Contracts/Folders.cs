@@ -122,4 +122,8 @@ public static class SyncEvents
     public const string FolderChanged = "folder.changed";
     /// <summary>Args: folderId, deviceId (absent for server maintenance). A sync, prune or check finished (for web UIs).</summary>
     public const string FolderStatus = "folder.status";
+    /// <summary>No args. Sent to a device as it is removed from the account: it should check its sign-in and stop.</summary>
+    public const string DeviceRevoked = "device.revoked";
+    /// <summary>No args. Alert incidents of the person opened, changed or closed: fetch <c>GET /api/alerts/incidents</c> again.</summary>
+    public const string AlertsChanged = "alerts.changed";
 }
