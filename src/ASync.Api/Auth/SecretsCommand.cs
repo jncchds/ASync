@@ -1,25 +1,46 @@
+using ASync.Api.Services;
+using ASync.Contracts;
+using ASync.Engine.Crypto;
 using ASync.Infrastructure.Data;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 
 namespace ASync.Api.Auth;
 
 /// <summary>
-/// <c>dotnet ASync.Api.dll secrets show</c> — prints the secrets the server generated and stored in the database
-/// as ready-to-paste environment variables, so they can be moved into the deployment's configuration.
-/// In Docker: <c>docker compose exec async-server dotnet ASync.Api.dll secrets show</c>.
+/// Admin commands on the secrets kept in the database, run as <c>dotnet ASync.Api.dll secrets …</c>
+/// (in Docker: <c>docker compose exec async-server dotnet ASync.Api.dll secrets …</c>):
+/// <list type="bullet">
+/// <item><c>show</c> prints the secrets the server generated (the JWT signing key) as ready-to-paste environment
+///   variables, so they can be moved into the deployment's configuration.</item>
+/// <item><c>export-folder-keys</c> prints every standard-encryption Backup folder's server key, written like a
+///   recovery key, with where its repository is. Each one opens that folder's repository without the server
+///   (<c>async-cli restore --repo … </c>), so the output is as sensitive as all those backups together: it is disaster
+///   recovery for the admin, next to the recovery keys people hold themselves.</item>
+/// </list>
 /// </summary>
 public static class SecretsCommand
 {
+    private const string Usage = "Usage: dotnet ASync.Api.dll secrets show | export-folder-keys";
+
     public static bool Matches(string[] args) => args.Length > 0 && args[0] == "secrets";
 
     public static async Task<int> RunAsync(string[] args, string connectionString, IConfiguration configuration)
     {
-        if (args.Length < 2 || args[1] != "show")
+        switch (args.Length < 2 ? "" : args[1])
         {
-            Console.Error.WriteLine("Usage: dotnet ASync.Api.dll secrets show");
-            return 2;
+            case "show":
+                return await ShowAsync(connectionString, configuration);
+            case "export-folder-keys":
+                return await ExportFolderKeysAsync(connectionString, configuration);
+            default:
+                Console.Error.WriteLine(Usage);
+                return 2;
         }
+    }
 
+    private static async Task<int> ShowAsync(string connectionString, IConfiguration configuration)
+    {
         var options = new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(connectionString).Options;
         await using var db = new AppDbContext(options);
 
@@ -39,5 +60,49 @@ public static class SecretsCommand
             Console.WriteLine($"{envName}={secret.Value}{inUse}");
         }
         return 0;
+    }
+
+    private static async Task<int> ExportFolderKeysAsync(string connectionString, IConfiguration configuration)
+    {
+        // The same Data Protection set-up as the server (Program.cs): the key ring is in the database.
+        await using var services = new ServiceCollection()
+            .AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString))
+            .AddDataProtection().SetApplicationName("ASync").PersistKeysToDbContext<AppDbContext>().Services
+            .BuildServiceProvider();
+        var dataProtection = services.GetRequiredService<IDataProtectionProvider>();
+        var protector = dataProtection.CreateProtector(FolderService.RepositoryKeyPurpose);
+        var storage = new StorageBackendService(null!, dataProtection, configuration, TimeProvider.System);
+
+        await using var scope = services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var folders = await db.Folders.AsNoTracking().Include(f => f.User).Include(f => f.StorageBackend)
+            .Where(f => f.Mode == SyncMode.Backup && f.Encryption == FolderEncryption.Transport && f.ProtectedRepositoryKey != null)
+            .OrderBy(f => f.Id).ToListAsync();
+
+        Console.WriteLine("# ASync folder keys. Each key below opens one standard-encryption Backup folder's repository");
+        Console.WriteLine("# without this server:  async-cli restore --repo <directory> --target <dir>  (asks for the key).");
+        Console.WriteLine("# Anyone holding this text can read all of these backups: keep it like the backups themselves.");
+        if (folders.Count == 0) Console.WriteLine("# There are no standard-encryption Backup folders.");
+        var failed = 0;
+        foreach (var f in folders)
+        {
+            string where;
+            try { where = f.StorageBackend is { } b ? $"{b.Name}: {storage.Settings(b).Describe()}" : "?"; }
+            catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or InvalidOperationException) { where = f.StorageBackend?.Name ?? "?"; }
+            Console.WriteLine();
+            Console.WriteLine($"# Folder {f.Id} \"{f.Name}\" of {f.User?.Username ?? $"user {f.UserId}"}");
+            Console.WriteLine($"#   storage   {where}");
+            Console.WriteLine($"#   directory {FolderService.StorageLocation(f)}");
+            try
+            {
+                Console.WriteLine($"folder-{f.Id}={RecoveryKey.Format(Convert.FromBase64String(protector.Unprotect(f.ProtectedRepositoryKey!)))}");
+            }
+            catch (System.Security.Cryptography.CryptographicException e)
+            {
+                failed++;
+                Console.WriteLine($"# cannot decrypt this folder's key: {e.Message}");
+            }
+        }
+        return failed == 0 ? 0 : 1;
     }
 }

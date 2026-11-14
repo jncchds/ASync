@@ -2,7 +2,8 @@ namespace ASync.Contracts;
 
 public record LoginRequest(string Username, string Password);
 
-public record UserDto(int Id, string Username, string DisplayName, bool IsAdmin);
+/// <summary><paramref name="HasPassword"/>: false for accounts that only sign in with single sign-on.</summary>
+public record UserDto(int Id, string Username, string DisplayName, bool IsAdmin, bool HasPassword = false);
 
 public record SessionDto(UserDto User, string AccessToken, DateTime AccessTokenExpiresAt, string[] ServerWarnings);
 

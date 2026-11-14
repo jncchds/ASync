@@ -176,7 +176,7 @@ public class AuthController : ControllerBase
         return user;
     }
 
-    private static UserDto ToDto(AppUser u) => new(u.Id, u.Username, u.DisplayName ?? u.Username, u.IsAdmin);
+    private static UserDto ToDto(AppUser u) => new(u.Id, u.Username, u.DisplayName ?? u.Username, u.IsAdmin, u.PasswordHash is not null);
 
     private SessionDto Session(AppUser user, AccessToken accessToken) => new(
         ToDto(user), accessToken.Token, accessToken.ExpiresAt,

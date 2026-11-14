@@ -7,6 +7,7 @@ import {
 import FolderForm from '../components/FolderForm'
 import FolderDeviceForm from '../components/FolderDeviceForm'
 import SnapshotBrowser from '../components/SnapshotBrowser'
+import RecoveryKeyPanel from '../components/RecoveryKeyPanel'
 import { useSyncEvents, type SyncEvent } from '../hooks/useSyncEvents'
 import { kindLabel, modeLabel } from '../utils/folders'
 import { formatDate, formatMinutes, relativeTime } from '../utils/format'
@@ -40,6 +41,8 @@ export default function Folders() {
   const [editing, setEditing] = useState<number | 'new' | null>(null)
   const [deviceEdit, setDeviceEdit] = useState<DeviceEdit | null>(null)
   const [browsing, setBrowsing] = useState<number | null>(null)
+  /** The recovery-key panel: a new folder's key to show once, or asking for a new key. */
+  const [recoveryFor, setRecoveryFor] = useState<{ folderId: number; shown?: string } | null>(null)
   /** Bumped to re-create open forms from the latest data (after a conflict). */
   const [generation, setGeneration] = useState(0)
   /** Bumped when a device reports a sync, so an open snapshot list picks up new snapshots. */
@@ -86,6 +89,7 @@ export default function Folders() {
   const current = (id: number) => folders?.find(f => f.id === id)
   const editingFolder = typeof editing === 'number' ? current(editing) : undefined
   const browsingFolder = browsing !== null ? current(browsing) : undefined
+  const recoveryFolder = recoveryFor !== null ? current(recoveryFor.folderId) : undefined
 
   return (
     <>
@@ -109,10 +113,18 @@ export default function Folders() {
           key={`${editing}-${generation}`}
           backends={backends}
           existing={editingFolder}
-          onSaved={() => { setEditing(null); load() }}
+          onSaved={saved => {
+            setEditing(null)
+            if (saved.recoveryKey) setRecoveryFor({ folderId: saved.id, shown: saved.recoveryKey })
+            load()
+          }}
           onCancel={() => setEditing(null)}
           onReload={reload}
         />
+      )}
+
+      {recoveryFor && recoveryFolder && (
+        <RecoveryKeyPanel key={recoveryFolder.id} folder={recoveryFolder} shown={recoveryFor.shown} onClose={() => setRecoveryFor(null)} />
       )}
 
       {browsingFolder && <SnapshotBrowser key={browsingFolder.id} folder={browsingFolder} refresh={syncReports} onClose={() => setBrowsing(null)} />}
@@ -153,6 +165,9 @@ export default function Folders() {
                   </div>
                   <div className="row-actions">
                     {browsable && <button className="secondary small" onClick={() => setBrowsing(browsing === f.id ? null : f.id)}>Snapshots</button>}
+                    {browsable && recoveryFor?.folderId !== f.id && (
+                      <button className="secondary small" onClick={() => setRecoveryFor({ folderId: f.id })}>Recovery key</button>
+                    )}
                     <button className="secondary small" onClick={() => setEditing(f.id)}>Edit</button>
                     <button className="danger small" onClick={() => remove(f)}>Delete</button>
                   </div>
@@ -169,6 +184,13 @@ export default function Folders() {
                   <div className="notice">
                     Freeing space failed {relativeTime(f.lastPrune.at)}{f.lastPrune.by ? ` (by ${f.lastPrune.by})` : ''}: {f.lastPrune.message}{' '}
                     Nothing was lost; it is tried again within a day.
+                  </div>
+                )}
+                {browsable && f.recoveryKeyCreatedAt === null && (
+                  <div className="notice">
+                    <strong>No recovery key yet.</strong> This folder's backups can only be read with a key kept in this server's
+                    database. <button className="secondary small" onClick={() => setRecoveryFor({ folderId: f.id })}>Make a recovery key</button>{' '}
+                    so they can be restored without the server too.
                   </div>
                 )}
                 {f.mode === 'Backup' && f.encryption === 'EndToEnd' && !f.repositoryReady && (

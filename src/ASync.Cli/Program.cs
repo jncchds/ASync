@@ -218,30 +218,77 @@ Define("unlock", "Unlock an end-to-end encrypted folder on this device (passphra
 }, folderOption, passphraseFileOption);
 
 // ── snapshots / restore ───────────────────────────────────────────────────────
-Define("snapshots", "List a Backup folder's snapshots.", async (ctx, p, ct) =>
+// Through the server (--folder, an enrolled device) or offline, straight from the storage (--repo; see Offline).
+var sourceFolderOption = new Option<int?>("--folder", "-f") { Description = "Folder id (see `folders`), through the server. Or use --repo." };
+var repoOption = new Option<string?>("--repo")
 {
-    var folder = await ctx.FolderAsync(p.GetValue(folderOption), ct);
-    var repo = await RepositoryAccess.OpenAsync(ctx.Api, ctx.Store, folder, new RemoteStorageBackend(ctx.Api, folder.FolderId), ct);
+    Description = "Offline, without the server: the folder's repository directory (a local path, or a path on --storage).",
+};
+var storageOption = new Option<string?>("--storage")
+{
+    Description = "With --repo: a JSON file with the connection settings of an S3, WebDAV, SFTP or SMB storage (as the server's API takes them).",
+};
+var keyFileOption = new Option<string?>("--key-file")
+{
+    Description = "With --repo: read the recovery key (or end-to-end passphrase) from this file (else ASYNC_RECOVERY_KEY, else ask).",
+};
+
+// The repository a snapshots/restore command works on, and this device's id when it went through the server.
+async Task<(Repository Repo, string? DeviceSource, IAsyncDisposable? Storage)> OpenSourceAsync(CliContext ctx, ParseResult p, CancellationToken ct)
+{
+    var folderId = p.GetValue(sourceFolderOption);
+    var repoPath = p.GetValue(repoOption);
+    if (folderId is null == repoPath is null)
+        throw new CliException("Give either --folder (through the server) or --repo (offline, straight from the storage).");
+    if (repoPath is null && (p.GetValue(storageOption) ?? p.GetValue(keyFileOption)) is not null)
+        throw new CliException("--storage and --key-file go with --repo.");
+    if (folderId is int id)
+    {
+        var folder = await ctx.FolderAsync(id, ct);
+        var repo = await RepositoryAccess.OpenAsync(ctx.Api, ctx.Store, folder, new RemoteStorageBackend(ctx.Api, folder.FolderId), ct);
+        return (repo, ctx.Identity.DeviceId.ToString("N"), null);
+    }
+    var storage = Offline.OpenStorage(repoPath!, p.GetValue(storageOption));
+    try
+    {
+        var secret = Prompt.Secret("recovery key", "ASYNC_RECOVERY_KEY", p.GetValue(keyFileOption));
+        return (await Offline.OpenAsync(storage, secret, ct), null, storage);
+    }
+    catch
+    {
+        await storage.DisposeAsync();
+        throw;
+    }
+}
+
+Define("snapshots", "List a Backup folder's snapshots (through the server, or offline from its storage with --repo).", async (ctx, p, ct) =>
+{
+    var (repo, deviceSource, storage) = await OpenSourceAsync(ctx, p, ct);
+    await using var _ = storage;
     var snapshots = await repo.ListSnapshotsAsync(ct);
     if (snapshots.Count == 0) Console.WriteLine("No snapshots yet.");
     foreach (var s in snapshots)
         Console.WriteLine($"  {Repository.ShortSnapshotId(s.Id)}  {s.Time.ToLocalTime():yyyy-MM-dd HH:mm}  {s.Hostname,-16} {s.Stats.FilesNew + s.Stats.FilesChanged + s.Stats.FilesUnmodified} files" +
-                          $"{(s.Source == ctx.Identity.DeviceId.ToString("N") ? "  (this device)" : "")}");
+                          $"{(s.Source == deviceSource ? "  (this device)" : "")}");
     return 0;
-}, folderOption);
+}, sourceFolderOption, repoOption, storageOption, keyFileOption);
 
-var snapshotOption = new Option<string>("--snapshot") { Description = "Snapshot id (its start, or its last digits as `snapshots` shows them), or `latest` (this device's newest).", DefaultValueFactory = _ => "latest" };
+var snapshotOption = new Option<string>("--snapshot")
+{
+    Description = "Snapshot id (its start, or its last digits as `snapshots` shows them), or `latest` (this device's newest; offline, the newest).",
+    DefaultValueFactory = _ => "latest",
+};
 var targetOption = new Option<string>("--target", "-t") { Description = "Directory to restore into.", Required = true };
 var subPathOption = new Option<string?>("--path") { Description = "Only this file or directory of the snapshot." };
-Define("restore", "Restore a snapshot (or part of it) into a directory.", async (ctx, p, ct) =>
+Define("restore", "Restore a snapshot (or part of it) into a directory (through the server, or offline from its storage with --repo).", async (ctx, p, ct) =>
 {
-    var folder = await ctx.FolderAsync(p.GetValue(folderOption), ct);
-    var repo = await RepositoryAccess.OpenAsync(ctx.Api, ctx.Store, folder, new RemoteStorageBackend(ctx.Api, folder.FolderId), ct);
+    var (repo, deviceSource, storage) = await OpenSourceAsync(ctx, p, ct);
+    await using var _ = storage;
     var snapshots = await repo.ListSnapshotsAsync(ct);
     var wanted = p.GetValue(snapshotOption)!;
     Snapshot? snapshot;
     if (wanted == "latest")
-        snapshot = snapshots.LastOrDefault(s => s.Source == ctx.Identity.DeviceId.ToString("N")) ?? snapshots.LastOrDefault();
+        snapshot = snapshots.LastOrDefault(s => s.Source == deviceSource) ?? snapshots.LastOrDefault();
     else
     {
         var matches = Repository.FindSnapshots(snapshots, wanted);
@@ -255,7 +302,7 @@ Define("restore", "Restore a snapshot (or part of it) into a directory.", async 
                       $"{(result.FilesSkipped > 0 ? $", {result.FilesSkipped} already up to date" : "")}.");
     foreach (var e in result.Errors.Take(20)) Console.Error.WriteLine($"  {e}");
     return result.Errors.Count == 0 ? 0 : 1;
-}, folderOption, snapshotOption, targetOption, subPathOption);
+}, sourceFolderOption, repoOption, storageOption, keyFileOption, snapshotOption, targetOption, subPathOption);
 
 // ── prune / check ─────────────────────────────────────────────────────────────
 var readDataOption = new Option<double>("--read-data")

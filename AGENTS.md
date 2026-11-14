@@ -28,7 +28,7 @@ published apps, so mobile push goes through a relay that we host.
 | App identifiers | `ua.pp.chds.async`: the Android application id and the iOS bundle id |
 | Packages | Central versions in `Directory.Packages.props` with transitive pinning |
 | Engine crypto | BCL only, so it runs unchanged on iOS/Android: AES-256-GCM with per-object HKDF subkeys, HMAC-SHA256 blob ids, PBKDF2-SHA256 (600k) for passphrases. Not BLAKE3/XChaCha20 (not in the BCL) |
-| Repository encryption | Always on. Transport folders' repository key is wrapped by a server-held key (the storage provider sees ciphertext; the server can still browse) that exists only in the server's database — see the known gap under "Repository layout"; E2E folders' only by the user's passphrase and recovery key |
+| Repository encryption | Always on. Transport folders' repository key is wrapped by a server-held key (the storage provider sees ciphertext; the server can still browse) and by a recovery key the person holds, so they survive losing the server's database (see "Recovery of Transport folders"); E2E folders' only by the user's passphrase and recovery key |
 
 ## Architecture overview
 
@@ -60,7 +60,8 @@ src/
   ASync.Tests/            xUnit, hand-written fakes
   ASync.Client.Core/      device side: identity/store, API client, RemoteStorageBackend, FolderSyncer, BackupJob, SyncAgent
   ASync.Cli/              async-cli (System.CommandLine): enroll, status, folders, sync, run, set-path, pause/resume,
-                          init-encryption, unlock, snapshots, restore, prune, check, forget
+                          init-encryption, unlock, snapshots, restore (also offline: --repo), prune, check, forget.
+                          References ASync.Storage for offline restores from remote storage
   ASync.App/              (later) Avalonia shared UI (CommunityToolkit.Mvvm)
   ASync.App.Desktop/      (later) Win/Linux/macOS head: tray + background service host
   ASync.App.iOS/          (later) PhotoKit, Contacts, EventKit, BGTaskScheduler, APNs, background URLSession
@@ -101,7 +102,9 @@ Implemented (M2), both in `src/ASync.Core/Models/Folder.cs`:
   IntervalMinutes, Excludes (gitignore-style patterns), RetentionJson (a `RetentionDto`), VersionsKeepDays,
   TrashKeepDays, Revision (grows with every change to the folder or its device settings), RepositoryReady
   (false until a device has initialised an end-to-end repository), ProtectedRepositoryKey (Transport Backup
-  folders only: the server key, Data Protection purpose `ASync.Folder.RepositoryKey.v1`), CreatedAt, UpdatedAt.
+  folders only: the server key, Data Protection purpose `ASync.Folder.RepositoryKey.v1`), RecoveryKeyCreatedAt
+  (Transport Backup folders: when the person's current recovery key was made; null = none yet; the key itself
+  is never stored), CreatedAt, UpdatedAt.
   - Maintenance schedule (Backup folders): PruneIntervalDays (default 7), CheckIntervalDays (default 30),
     CheckReadDataPercent (default 10). 0 days = off. The defaults are database defaults too, so folders from
     before the migration `FolderMaintenance` have them.
@@ -227,16 +230,15 @@ Stat, List (flat or recursive), OpenRead (with a byte range), Write, Delete and 
 ## Repository layout (M1, Backup and E2E folders)
 
 A self-contained, encrypted, deduplicated store (`src/ASync.Engine/Repository`). All the data and the wrapped
-repository keys are on the back-end. Whether that is enough to restore without the server depends on the
-folder's encryption:
+repository keys are on the back-end, so with the storage and a key the person holds, any repository can be
+restored without the server and its database:
 
-- **End-to-end folders survive losing the server and its database.** Their key files are wrapped by the
-  passphrase and the recovery key, which the person holds.
-- **Known gap: Transport folders do not.** Their only key file is wrapped by a random server key
-  (`KeyFile.ForServerKey`) that exists in one place: `Folder.ProtectedRepositoryKey`, encrypted with Data
-  Protection, whose key ring is itself in PostgreSQL (`DataProtectionKeys`). Lose the database and every
-  Transport repository is unreadable ciphertext, even though the storage is intact. Until key recovery exists
-  (see "Before M3: gaps to close"), a database backup is part of the backup.
+- **End-to-end folders:** their key files are wrapped by the passphrase and the recovery key.
+- **Transport folders:** a key file wrapped by a random server key (`KeyFile.ForServerKey`; the key is in
+  `Folder.ProtectedRepositoryKey`, encrypted with Data Protection, whose key ring is in PostgreSQL), plus one
+  wrapped by a recovery key that is shown to the person once. See "Recovery of Transport folders" below.
+  Folders created before recovery keys (v0.1.4) have only the server key file until their owner makes a
+  recovery key; until then they depend on the database.
 
 ```
 config               plaintext JSON: format version, id, chunker parameters
@@ -296,6 +298,57 @@ locks/<id>           encrypted lock files: shared (backup, restore) or exclusive
 - **Key files:** they can be added and removed, but never the last one. Changing a passphrase writes a new
   key file and re-encrypts nothing.
 
+### Recovery of Transport folders
+
+The repository format is unchanged: a Transport repository simply gets a second key file, of the existing
+`Recovery` kind (`KeyFile.ForRecoveryKey`, a 256-bit key written as 13 Base32 groups, `RecoveryKey`).
+
+- **At creation** (`FolderService.CreateAsync` → `CreateOrAdoptRepositoryAsync`) the repository is made with a
+  server key file and a recovery key file. `POST /api/folders` returns the key once, in `FolderDto.RecoveryKey`
+  (`Cache-Control: no-store`); every other answer leaves it null. The server keeps only
+  `Folder.RecoveryKeyCreatedAt`. The web UI shows it in `RecoveryKeyPanel` with a Copy button and the offline
+  restore command, and asks before the panel is closed.
+- **Later** (`POST /api/folders/{id}/recovery-key {password | confirm}` → `FolderService.IssueRecoveryKeyAsync`):
+  the server cannot show the old key (it never had it), so it makes a new one. It opens the repository with
+  its server key, adds the new recovery key file, then deletes the previous recovery key files, so exactly one
+  recovery key works. Folders from before v0.1.4 get their first key the same way, and the Folders page shows
+  them a "No recovery key yet" notice.
+  - Owner only (404 for anyone else); `[Authorize(Roles = Roles.Users)]`, so a device token gets 403.
+  - People with a password must send it (checked like sign-in, under the `Auth` rate limit); accounts that only
+    use single sign-on cannot re-authenticate here and send `confirm: true` instead. `UserDto.HasPassword`
+    tells the UI which.
+  - The answer carries `storagePath`: the repository's directory relative to the back-end's root (inside
+    `users/<id>/` on a shared back-end), which is what an offline restore opens.
+  - Replacing a key does not change the repository keys themselves: whoever used an old key to open the
+    repository could have kept them. Rotating those would mean re-encrypting everything, which no key file
+    change can do.
+- **Offline** (`Repository.OpenWithSecretAsync`): tries the secret on passphrase and recovery key files and,
+  if it parses as a recovery-key-shaped 256-bit key, on server key files too (what `secrets export-folder-keys`
+  prints). `async-cli snapshots|restore --repo <dir>` opens a local directory with it; with
+  `--storage <settings.json>` (a `StorageSettings` JSON, as the API takes it) `--repo` is a path on an S3,
+  WebDAV, SFTP or SMB back-end, opened with `StorageBackendFactory` (`src/ASync.Cli/Offline.cs`). No identity,
+  config directory or server is involved. The secret comes from `--key-file`, `ASYNC_RECOVERY_KEY` or a prompt,
+  never from the command line.
+- **Taking a repository over** (`SaveFolderRequest.RecoveryKey`, creating a Transport Backup folder): a
+  directory that already holds a repository is refused without a key ("already a backup repository … enter its
+  recovery key"). With one, the server opens the repository through its recovery key files, refuses an
+  end-to-end repository (one with a passphrase key file: it must not become server-readable), adds a server key
+  file for a new server key, and deletes the other server key files: the previous server's key went with its
+  database, and a stray copy of that database must not keep working. Snapshots, packs and the recovery key stay
+  as they are, and devices' next backups use their old snapshots as parents. A key with no repository there is
+  refused too. Creating an **end-to-end** Backup folder on a directory that holds a repository marks it ready at
+  once (`RepositoryReady`), so its devices `unlock` it instead of running `init-encryption`.
+- **Admin export** (`secrets export-folder-keys`, `Auth/SecretsCommand.cs`): prints, for each Transport Backup
+  folder, its owner, storage, directory and server key as `folder-<id>=<key>`, using the same Data Protection
+  set-up as the server. Trade-off: it is cheap and gives an admin disaster recovery without asking every user,
+  and whoever can run it already holds the database and its key ring, so it grants nothing new on that
+  machine; but its output is a long-lived secret that opens every Transport folder, it does not cover folders
+  created afterwards, and adopting a repository on a new server deletes the exported key's key file. Exporting
+  the Data Protection key ring itself was rejected: it is useless without the database rows it decrypts, and a
+  database backup already contains it.
+- **Logging:** keys are never logged; the server logs only that a key was made or a repository taken over.
+  `scripts/e2e-sync.cs` checks the server's log for the keys it saw.
+
 ## Plain layout (M1, Mirror/TwoWay without E2E)
 
 `PlainStore` (`src/ASync.Engine/Plain`) keeps real files on the back-end, so a Nextcloud, SMB share or bucket
@@ -342,7 +395,9 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
   - End-to-end encryption, and the Photos, Contacts and Calendars kinds, are Backup-only for now.
   - A back-end that holds folders cannot be deleted.
 - **Transport Backup repositories** are created at folder creation with a random server key, kept protected
-  in `Folder.ProtectedRepositoryKey`. Devices fetch it from `GET .../repository-key`.
+  in `Folder.ProtectedRepositoryKey`, and a recovery key shown to the person once (see "Recovery of Transport
+  folders"). Devices fetch the server key from `GET .../repository-key`. Given the recovery key, creating the
+  folder takes over a repository that is already in the directory instead.
 - **End-to-end Backup repositories** are created by the first device with `async-cli init-encryption`, using
   a passphrase plus a printed recovery key. The device then calls `POST .../repository-ready`. Other devices
   run `unlock`. Unlocked keys are kept on each device so backups run unattended.
@@ -458,6 +513,10 @@ The UI belongs to the owner's app family (abook, nopds, …): same layout and co
   the form from the latest folder.
 - Devices are attached, edited and detached with `FolderDeviceForm`, which uses the same revision check.
 - End-to-end folders whose repository is not ready show the `async-cli init-encryption --folder N` hint.
+- Transport Backup folders have a *Recovery key* button (`RecoveryKeyPanel`: password or SSO confirm, then the
+  key once with Copy and the offline restore command); a new folder's key opens the same panel right after
+  creation. Folders without a key (`recoveryKeyCreatedAt` null) show a notice. `FolderForm` offers "take them
+  over" with a recovery-key field when creating a Transport Backup folder.
 - Backup folders show two pills for the last prune and the last check (`MaintenancePill`): green with the
   relative time, red when it failed, grey when it has not run or is switched off. The tooltip has the time,
   who ran it, the message and the schedule. A failed check also gets a red notice (`.notice.danger`) with the
@@ -556,6 +615,13 @@ a random id in a container.
   - Pause and resume, set-path, the mass-deletion guard and a missing local folder.
   - Mirror Upload and Download.
   - Transport Backup with a byte-identical full and partial restore.
+  - Transport recovery key: shown at creation and never again; a device token gets 403 and a wrong password
+    400 when asking for a new one; with the new key, `snapshots` and `restore --repo` on a `docker cp` of the
+    storage (an agent that never enrolled) are byte-identical, and the replaced key fails. The folder is
+    deleted and created again on the same directory: refused without a key and with a wrong one, taken over
+    with the right one, the web UI lists the old snapshots and the next backup continues from them; the
+    repository then has two key files. `secrets export-folder-keys` prints a key that opens it offline, and
+    the server log holds no recovery key.
   - Prune and check: the server prunes and checks a new Transport folder by itself (the stack polls every
     5 seconds, `ASYNC_MAINTENANCE_POLL_SECONDS`); after two snapshots are forgotten, `prune` reclaims the
     space on the storage (measured with `du`) and a restore is still byte-identical; `check --read-data 100`
@@ -698,7 +764,7 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 3. **M2 — sync over the CLI (done).** The sync protocol (storage gateway, leases, live events) and `async-cli`
    (enroll, Backup, Mirror, TwoWay, end-to-end encryption, restore), the `async-cli` Docker image, the
    end-to-end test in CI, and the web UI for folders and for browsing and downloading snapshots.
-   **← current stage; next is "Before M3: gaps to close" (item 1 is done).**
+   **← current stage; next is "Before M3: gaps to close" (items 1 and 2 are done).**
 4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
    overdue devices.
@@ -713,9 +779,11 @@ app starts after them, because it would otherwise be built on the same holes.
 1. **Prune and check never run. — Done.** `async-cli prune` and `check`, a per-folder schedule run by the
    server (Transport) or a device's agent (end-to-end), and the last results on the Folders page. See "Prune
    and check" under "Sync". Left for item 3: telling the person about a failed check (today it is only shown).
-2. **Transport repository key recovery.** A Transport folder's key exists only in
-   `Folder.ProtectedRepositoryKey` (see the known gap under "Repository layout"). Needed: a way to get the
-   key out of the database and back in, such as a recovery key shown at folder creation or an export.
+2. **Transport repository key recovery. — Done.** A recovery key per Transport Backup folder (shown at
+   creation, re-issued by the owner after re-entering their password), offline `snapshots`/`restore --repo`,
+   taking a repository over on a new server with its recovery key, and `secrets export-folder-keys` for
+   admins. See "Recovery of Transport folders" under "Repository layout". Left open: folders created before
+   v0.1.4 stay database-dependent until their owner makes a key (the Folders page asks them to).
 3. **Server-side overdue detection and alerts.** The server stores `FolderDevice.LastSyncAt` and
    `LastSyncOk` but nothing looks at them: no scheduler, no notification of any kind. Needed: a hosted
    service that finds overdue and failing devices and tells the person by webhook, ntfy or e-mail. It must
@@ -725,8 +793,8 @@ app starts after them, because it would otherwise be built on the same holes.
      set by an admin (`PUT /api/users/{id}/password`).
    - *User deletion:* there is no endpoint. `UsersController` lists, creates, sets passwords and roles.
    - *Folder deletion with optional purge:* `DELETE /api/folders/{id}` removes the database row only. The
-     stored data stays on the back-end with no way to remove it from ASync, and for a Transport Backup
-     folder the row held the only copy of the key, so what stays is unreadable.
+     stored data stays on the back-end with no way to remove it from ASync (a Transport Backup folder's
+     recovery key still opens it, and a new folder can take it over).
 5. **Web UI for Mirror/TwoWay files, versions and trash.** `PlainStore` keeps versions and a trash and can
    restore both, but only the engine and its tests use that. The snapshot endpoints answer 400 for these
    folders, and there are no others.

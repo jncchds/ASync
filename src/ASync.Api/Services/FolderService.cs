@@ -18,8 +18,11 @@ namespace ASync.Api.Services;
 /// <item>Mode, encryption, kind, back-end and root path are fixed once created (the data on storage depends on them).</item>
 /// <item>End-to-end encryption, and the Photos/Contacts/Calendars kinds, are Backup-only for now.</item>
 /// <item>Two folders never overlap on one back-end (neither root contains the other).</item>
-/// <item>A Transport Backup folder gets its repository at creation, with a server-held key. An end-to-end one waits
-///   for its first device to create it with the user's passphrase (<see cref="Folder.RepositoryReady"/>).</item>
+/// <item>A Transport Backup folder gets its repository at creation, with a server-held key and a recovery key that is
+///   shown to the person once (so the backups survive losing this server's database). An end-to-end one waits for its
+///   first device to create it with the user's passphrase (<see cref="Folder.RepositoryReady"/>).</item>
+/// <item>A Backup folder created on a directory that already holds a repository takes it over, snapshots included:
+///   a Transport one given that repository's recovery key, an end-to-end one as it is (its devices unlock it).</item>
 /// <item>Every change bumps <see cref="Folder.Revision"/> and tells the folder's devices (<c>config.changed</c>).
 ///   Edits may send the revision they started from; a mismatch is a conflict (409).</item>
 /// </list>
@@ -28,7 +31,10 @@ public class FolderService(
     IFolderRepository folders, IStorageBackendRepository backends, IDeviceRepository devices, FolderBackendCache backendCache, IDataProtectionProvider dataProtection, ISyncNotifier notifier, TimeProvider clock,
     MaintenanceClaims claims, ILogger<FolderService> logger)
 {
-    private IDataProtector Protector => dataProtection.CreateProtector("ASync.Folder.RepositoryKey.v1");
+    /// <summary>The Data Protection purpose of <see cref="Folder.ProtectedRepositoryKey"/>.</summary>
+    public const string RepositoryKeyPurpose = "ASync.Folder.RepositoryKey.v1";
+
+    private IDataProtector Protector => dataProtection.CreateProtector(RepositoryKeyPurpose);
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
     // ── Views ─────────────────────────────────────────────────────────────────
@@ -50,7 +56,8 @@ public class FolderService(
             d.LastSyncAt, d.LastSyncOk, d.LastSyncMessage))],
         f.CreatedAt, f.PruneIntervalDays, f.CheckIntervalDays, f.CheckReadDataPercent,
         f.LastPruneAt is { } pruned ? new MaintenanceStatusDto(pruned, f.LastPruneOk == true, f.LastPruneMessage, f.LastPruneBy) : null,
-        f.LastCheckAt is { } checkedAt ? new MaintenanceStatusDto(checkedAt, f.LastCheckOk == true, f.LastCheckMessage, f.LastCheckBy) : null);
+        f.LastCheckAt is { } checkedAt ? new MaintenanceStatusDto(checkedAt, f.LastCheckOk == true, f.LastCheckMessage, f.LastCheckBy) : null,
+        f.RecoveryKeyCreatedAt);
 
     public static DeviceFolderDto ToDeviceDto(Folder f, FolderDevice m) => new(
         f.Id, f.Name, f.Mode, f.Encryption, f.Kind, f.IntervalMinutes, f.Excludes, Retention(f), f.VersionsKeepDays, f.TrashKeepDays,
@@ -58,28 +65,36 @@ public class FolderService(
 
     // ── Create, update, delete ────────────────────────────────────────────────
 
-    public async Task<ServiceResult<Folder>> CreateAsync(int userId, SaveFolderRequest req, CancellationToken ct)
+    /// <summary>A new folder, and the recovery key of the repository made for it (shown to the person once; null when none was made).</summary>
+    public record CreatedFolder(Folder Folder, string? RecoveryKey);
+
+    public async Task<ServiceResult<CreatedFolder>> CreateAsync(int userId, SaveFolderRequest req, CancellationToken ct)
     {
         var backend = await backends.GetAsync(req.StorageBackendId);
         if (backend is null || !StorageBackendService.CanUse(backend, userId))
-            return ServiceResult<Folder>.Fail("Choose one of your storage back-ends.");
+            return ServiceResult<CreatedFolder>.Fail("Choose one of your storage back-ends.");
         string root;
         try { root = StoragePath.Normalize(req.RootPath ?? ""); }
-        catch (ArgumentException e) { return ServiceResult<Folder>.Fail(e.Message); }
-        if (root.Length == 0) return ServiceResult<Folder>.Fail("Choose a directory on the storage for this folder, e.g. \"photos\".");
-        if (root.Split('/')[0] == ".async") return ServiceResult<Folder>.Fail("That directory name is reserved.");
-        if (ValidateCommon(req) is { } invalid) return ServiceResult<Folder>.Fail(invalid);
+        catch (ArgumentException e) { return ServiceResult<CreatedFolder>.Fail(e.Message); }
+        if (root.Length == 0) return ServiceResult<CreatedFolder>.Fail("Choose a directory on the storage for this folder, e.g. \"photos\".");
+        if (root.Split('/')[0] == ".async") return ServiceResult<CreatedFolder>.Fail("That directory name is reserved.");
+        if (ValidateCommon(req) is { } invalid) return ServiceResult<CreatedFolder>.Fail(invalid);
         if (req.Encryption == FolderEncryption.EndToEnd && req.Mode != SyncMode.Backup)
-            return ServiceResult<Folder>.Fail("End-to-end encryption is available for Backup folders for now.");
+            return ServiceResult<CreatedFolder>.Fail("End-to-end encryption is available for Backup folders for now.");
         if (req.Kind != FolderKind.Files && req.Mode != SyncMode.Backup)
-            return ServiceResult<Folder>.Fail("Photos, contacts and calendars are backed up (Backup mode).");
+            return ServiceResult<CreatedFolder>.Fail("Photos, contacts and calendars are backed up (Backup mode).");
+        var adoptWith = string.IsNullOrWhiteSpace(req.RecoveryKey) ? null : req.RecoveryKey.Trim();
+        if (adoptWith is not null && (req.Mode != SyncMode.Backup || req.Encryption != FolderEncryption.Transport))
+            return ServiceResult<CreatedFolder>.Fail(req.Encryption == FolderEncryption.EndToEnd
+                ? "An end-to-end folder needs no recovery key here: create it, and its devices unlock the existing repository with `async-cli unlock`."
+                : "Only Backup folders have a repository to take over.");
 
         // Folders of this user on this back-end (on a shared back-end, other users have their own areas).
         foreach (var other in await folders.GetOnBackendAsync(backend.Id))
         {
             if (backend.IsShared && other.UserId != userId) continue;
             if (Overlaps(other.RootPath, root))
-                return ServiceResult<Folder>.Fail($"\"{root}\" overlaps the folder \"{other.Name}\" ({other.RootPath}) on this storage.");
+                return ServiceResult<CreatedFolder>.Fail($"\"{root}\" overlaps the folder \"{other.Name}\" ({other.RootPath}) on this storage.");
         }
 
         var folder = new Folder
@@ -98,38 +113,138 @@ public class FolderService(
         };
         Apply(folder, req);
 
+        string? recoveryKey = null;
         if (folder.Mode == SyncMode.Backup && folder.Encryption == FolderEncryption.Transport)
         {
-            try { folder.ProtectedRepositoryKey = await CreateRepositoryAsync(folder, ct); }
+            try
+            {
+                (folder.ProtectedRepositoryKey, recoveryKey, folder.RecoveryKeyCreatedAt) = await CreateOrAdoptRepositoryAsync(folder, adoptWith, ct);
+            }
+            catch (RepositorySetupException e)
+            {
+                return ServiceResult<CreatedFolder>.Fail(e.Message);
+            }
             // Any storage failure (SDK exceptions such as AmazonS3Exception included) is a message for the user, not a 500.
             catch (Exception e) when (e is not OperationCanceledException)
             {
-                return ServiceResult<Folder>.Fail($"Could not create the backup repository on the storage: {e.Message}");
+                return ServiceResult<CreatedFolder>.Fail($"Could not create the backup repository on the storage: {e.Message}");
             }
             folder.RepositoryReady = true;
         }
+        else if (folder.Mode == SyncMode.Backup)
+        {
+            // End-to-end: a device creates the repository, unless one is already there (a folder re-created after
+            // losing the server's database): then its devices unlock it with the passphrase or recovery key.
+            folder.RepositoryReady = await RepositoryExistsAsync(folder, ct);
+        }
         else
         {
-            folder.RepositoryReady = folder.Mode != SyncMode.Backup; // E2E: a device creates it
+            folder.RepositoryReady = true;
         }
 
         await folders.AddAsync(folder);
-        return ServiceResult<Folder>.Ok(folder);
+        if (adoptWith is not null)
+            logger.LogInformation("Folder {FolderId} took over the existing repository at {Root} on back-end {BackendId}.",
+                folder.Id, folder.RootPath, folder.StorageBackendId);
+        return ServiceResult<CreatedFolder>.Ok(new CreatedFolder(folder, recoveryKey));
     }
 
-    /// <summary>Creates a repository opened by a random server key; returns that key, protected.</summary>
-    private async Task<string> CreateRepositoryAsync(Folder folder, CancellationToken ct)
+    /// <summary>A problem with what the person asked for (wrong key, nothing to take over…), shown as it is.</summary>
+    private sealed class RepositorySetupException(string message) : Exception(message);
+
+    /// <summary>
+    /// Creates a repository opened by a random server key and by a new recovery key, or, given
+    /// <paramref name="adoptWith"/>, takes over the one already there. Returns the server key (protected), the new
+    /// recovery key (null when adopting: the person already has theirs) and when the recovery key was made.
+    /// </summary>
+    private async Task<(string ProtectedKey, string? RecoveryKey, DateTime RecoveryKeyCreatedAt)> CreateOrAdoptRepositoryAsync(
+        Folder folder, string? adoptWith, CancellationToken ct)
     {
         // Not the cached connection: the cache is keyed by folder id, and a folder being created has none yet (0),
         // so a second new folder would get the first one's directory.
         await using var backend = await backendCache.OpenDedicatedAsync(folder);
-        if (await Repo.ExistsAsync(backend, ct))
-            throw new InvalidOperationException("there is already a backup repository in that directory. Choose another directory.");
-        var keys = RepositoryKeys.Generate();
         var serverKey = RandomNumberGenerator.GetBytes(RepositoryKeys.KeySize);
-        await Repo.InitAsync(backend, keys, [KeyFile.ForServerKey(keys, serverKey)], ct: ct);
-        return Protector.Protect(Convert.ToBase64String(serverKey));
+        var protectedKey = Protector.Protect(Convert.ToBase64String(serverKey));
+
+        if (await Repo.ExistsAsync(backend, ct))
+        {
+            if (adoptWith is null)
+                throw new RepositorySetupException("There is already a backup repository in that directory. To take it over with its snapshots, " +
+                                                   "enter its recovery key; otherwise choose another directory.");
+            var keyFiles = await Repo.ListKeyFilesAsync(backend, ct);
+            if (keyFiles.Any(k => k.File.Kind == KeyKind.Passphrase))
+                throw new RepositorySetupException("That directory holds an end-to-end encrypted repository. Create an end-to-end folder on it " +
+                                                   "instead; its devices unlock it with `async-cli unlock`.");
+            var opened = keyFiles.Where(k => k.File.Kind == KeyKind.Recovery)
+                .Select(k => (k.File, Keys: k.File.TryOpen(adoptWith))).FirstOrDefault(k => k.Keys is not null);
+            if (opened.Keys is null) throw new RepositorySetupException("That recovery key does not open the repository in that directory.");
+            await Repo.OpenWithKeysAsync(backend, opened.Keys, ct); // reads the config: refuses a format this version cannot read
+
+            await Repo.AddKeyFileAsync(backend, KeyFile.ForServerKey(opened.Keys, serverKey), ct);
+            // The previous server's key files: that key went with its database, and a stray copy of that database
+            // must not keep opening the repository.
+            foreach (var (id, _) in keyFiles.Where(k => k.File.Kind == KeyKind.Server)) await backend.DeleteAsync($"keys/{id}", ct);
+            return (protectedKey, null, opened.File.Created.UtcDateTime);
+        }
+
+        if (adoptWith is not null)
+            throw new RepositorySetupException("There is no backup repository in that directory to take over. Check the storage and the directory, " +
+                                               "or leave the recovery key empty to start a new one.");
+        var keys = RepositoryKeys.Generate();
+        var recoveryKey = RecoveryKey.Generate();
+        await Repo.InitAsync(backend, keys, [KeyFile.ForServerKey(keys, serverKey), KeyFile.ForRecoveryKey(keys, recoveryKey)], ct: ct);
+        return (protectedKey, recoveryKey, Now);
     }
+
+    private async Task<bool> RepositoryExistsAsync(Folder folder, CancellationToken ct)
+    {
+        try
+        {
+            await using var backend = await backendCache.OpenDedicatedAsync(folder);
+            return await Repo.ExistsAsync(backend, ct);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // Not fatal: the first device then finds out (init-encryption refuses an existing repository).
+            logger.LogWarning("Could not look for an existing repository for folder \"{Name}\": {Message}", folder.Name, e.Message);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Makes a new recovery key for a Transport Backup folder: adds its key file to the repository, then removes the
+    /// previous recovery key files, so only the newest key works. Folders from before recovery keys get their first
+    /// one this way. The key is returned to be shown once and is never stored or logged.
+    /// </summary>
+    public async Task<ServiceResult<RecoveryKeyDto>> IssueRecoveryKeyAsync(Folder folder, CancellationToken ct)
+    {
+        if (folder.Mode != SyncMode.Backup || folder.Encryption != FolderEncryption.Transport || folder.ProtectedRepositoryKey is null)
+            return ServiceResult<RecoveryKeyDto>.Fail(folder.Encryption == FolderEncryption.EndToEnd
+                ? "End-to-end folders have the recovery key that `async-cli init-encryption` printed; the server cannot make one."
+                : "Only standard-encryption Backup folders have a recovery key.");
+        var recoveryKey = RecoveryKey.Generate();
+        try
+        {
+            await using var backend = await backendCache.OpenDedicatedAsync(folder);
+            var repo = await Repo.OpenAsync(backend, ServerKey(folder), ct);
+            var previous = await Repo.ListKeyFilesAsync(backend, ct);
+            await repo.AddKeyFileAsync(KeyFile.ForRecoveryKey(repo.Keys, recoveryKey), ct);
+            foreach (var (id, _) in previous.Where(k => k.File.Kind == KeyKind.Recovery)) await backend.DeleteAsync($"keys/{id}", ct);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return ServiceResult<RecoveryKeyDto>.Fail($"Could not add the recovery key to the repository: {e.Message}");
+        }
+        folder.RecoveryKeyCreatedAt = Now;
+        await folders.SaveAsync();
+        logger.LogInformation("A new recovery key was made for folder {FolderId}.", folder.Id);
+        await notifier.ToUserAsync(folder.UserId, SyncEvents.FolderStatus, folder.Id);
+        return ServiceResult<RecoveryKeyDto>.Ok(new RecoveryKeyDto(recoveryKey, folder.RecoveryKeyCreatedAt.Value, StorageLocation(folder)));
+    }
+
+    /// <summary>Where the folder's data is, relative to its back-end's root (shared back-ends keep each user in <c>users/&lt;id&gt;/</c>).</summary>
+    public static string StorageLocation(Folder folder) =>
+        (folder.StorageBackend?.IsShared == true ? $"users/{folder.UserId}/" : "") + folder.RootPath;
 
     public byte[] ServerKey(Folder folder) =>
         folder.ProtectedRepositoryKey is { } p

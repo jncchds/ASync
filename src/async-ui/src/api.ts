@@ -12,6 +12,8 @@ export interface AppUser {
   username: string
   displayName: string
   isAdmin: boolean
+  /** False for accounts that only sign in with single sign-on. */
+  hasPassword: boolean
 }
 
 export interface Session {
@@ -275,6 +277,17 @@ export interface Folder {
   checkReadDataPercent: number
   lastPrune: MaintenanceStatus | null
   lastCheck: MaintenanceStatus | null
+  /** Standard-encryption Backup folders: when the current recovery key was made (null = none yet). */
+  recoveryKeyCreatedAt: string | null
+  /** Only in the answer that created the folder: its recovery key, shown once. */
+  recoveryKey?: string | null
+}
+
+/** A new recovery key, shown once, and where the repository is on the folder's storage (for an offline restore). */
+export interface RecoveryKey {
+  recoveryKey: string
+  createdAt: string
+  storagePath: string
 }
 
 /** The last prune or check of a Backup folder; `by` is "server" or a device's name. */
@@ -301,6 +314,8 @@ export interface SaveFolder {
   checkIntervalDays: number
   checkReadDataPercent: number
   expectedRevision?: number
+  /** Creating a standard-encryption Backup folder: take over the repository already in the directory. */
+  recoveryKey?: string
 }
 
 export interface AttachDevice {
@@ -315,6 +330,9 @@ export const getFolders = () => api.get<Folder[]>('/folders').then(r => r.data)
 export const createFolder = (req: SaveFolder) => api.post<Folder>('/folders', req).then(r => r.data)
 export const updateFolder = (id: number, req: SaveFolder) => api.put<Folder>(`/folders/${id}`, req).then(r => r.data)
 export const deleteFolder = (id: number) => api.delete(`/folders/${id}`)
+/** Makes a new recovery key (the previous one stops working). Send the password, or `confirm` for single-sign-on accounts. */
+export const issueRecoveryKey = (id: number, req: { password?: string; confirm?: boolean }) =>
+  api.post<RecoveryKey>(`/folders/${id}/recovery-key`, req).then(r => r.data)
 export const attachFolderDevice = (id: number, req: AttachDevice) => api.put<Folder>(`/folders/${id}/devices`, req).then(r => r.data)
 export const detachFolderDevice = (id: number, deviceId: string) => api.delete<Folder>(`/folders/${id}/devices/${deviceId}`).then(r => r.data)
 

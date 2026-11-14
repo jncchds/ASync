@@ -74,7 +74,7 @@ public class FolderMaintenanceTests : IAsyncLifetime
         var result = await _folderService.CreateAsync(Alice, new SaveFolderRequest(name, SyncMode.Backup, encryption, FolderKind.Files, _backend.Id, name,
             PruneIntervalDays: pruneDays, CheckIntervalDays: checkDays, CheckReadDataPercent: readPercent), default);
         Assert.True(result.Success, result.Error);
-        return result.Value!;
+        return result.Value!.Folder;
     }
 
     private string RepositoryPath(Folder folder) => Path.Combine(_store.Path, folder.RootPath);
@@ -385,7 +385,7 @@ public class FolderMaintenanceTests : IAsyncLifetime
         Assert.False(_folderService.ClaimMaintenance(Attach(e2e, "paused", paused: true)).Check);
         Assert.Equal(new MaintenanceClaimDto(false, true, 100), _folderService.ClaimMaintenance(Attach(e2e, "nas"))); // prune is off
 
-        var mirror = (await _folderService.CreateAsync(Alice, new SaveFolderRequest("docs", SyncMode.Mirror, FolderEncryption.Transport, FolderKind.Files, _backend.Id, "docs"), default)).Value!;
+        var mirror = (await _folderService.CreateAsync(Alice, new SaveFolderRequest("docs", SyncMode.Mirror, FolderEncryption.Transport, FolderKind.Files, _backend.Id, "docs"), default)).Value!.Folder;
         var mirrored = Attach(mirror, "laptop");
         Assert.Equal(new MaintenanceClaimDto(false, false, 10), _folderService.ClaimMaintenance(mirrored));
         Assert.False((await _folderService.ReportMaintenanceAsync(mirrored, new MaintenanceReportRequest(MaintenanceKind.Prune, true, "x"), "laptop")).Success);

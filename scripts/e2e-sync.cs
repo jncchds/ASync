@@ -251,6 +251,109 @@ async Task<int> RunAsync()
     Check(partial.Exit == 0 && File.Exists(Path.Combine(part, "notes", "today.txt")) && !File.Exists(Path.Combine(part, "photo.raw")),
         "a partial restore (--path notes) restores only that directory", partial.Output);
 
+    // ── Recovery key of a Transport folder: restore without the server, take the repository over ──
+    Section("Transport recovery key");
+    var recoverNew = await Send(HttpMethod.Post, "/api/folders", new
+    {
+        name = "recover", mode = "Backup", encryption = "Transport", kind = "Files", storageBackendId = backendId, rootPath = "recover",
+        intervalMinutes = 60, retention = new { last = 10 },
+    }, token);
+    var recoverFolder = recoverNew.Body?["id"]?.GetValue<int>() ?? 0;
+    var firstKey = recoverNew.Body?["recoveryKey"]?.GetValue<string>() ?? "";
+    Check(recoverNew.Status == HttpStatusCode.OK && firstKey.Length == 64, "creating a Transport Backup folder shows its recovery key", recoverNew.Raw);
+    var recoverInfo = (await Send(HttpMethod.Get, $"/api/folders/{recoverFolder}", token: token)).Body;
+    Check(recoverInfo?["recoveryKey"] is null && recoverInfo?["recoveryKeyCreatedAt"] is not null,
+        "the folder afterwards says when its key was made, never the key", recoverInfo?.ToJsonString());
+    Directory.CreateDirectory(a.Path("recover"));
+    await Send(HttpMethod.Put, $"/api/folders/{recoverFolder}/devices", new { deviceId = a.Id, localPath = a.Path("recover") }, token);
+    Write(a.Path("recover", "album/one.jpg"), RandomBytes(2 * 1024 * 1024));
+    Write(a.Path("recover", "letter.txt"), "first draft");
+    await Sync(a, recoverFolder, "A backs up the folder");
+    Write(a.Path("recover", "letter.txt"), "second draft");
+    await Sync(a, recoverFolder, "A backs it up again");
+
+    var deviceTokenJson = JsonNode.Parse(File.ReadAllText(Path.Combine(a.Config, "token.json")));
+    var deviceToken = (deviceTokenJson?["accessToken"] ?? deviceTokenJson?["AccessToken"])?.GetValue<string>();
+    var byDevice = await Send(HttpMethod.Post, $"/api/folders/{recoverFolder}/recovery-key", new { password = adminPassword }, deviceToken);
+    Check(byDevice.Status == HttpStatusCode.Forbidden, $"a device token cannot get a recovery key → {byDevice.Status}", byDevice.Raw);
+    var noPassword = await Send(HttpMethod.Post, $"/api/folders/{recoverFolder}/recovery-key", new { confirm = true }, token);
+    var badPassword = await Send(HttpMethod.Post, $"/api/folders/{recoverFolder}/recovery-key", new { password = "not the password" }, token);
+    Check(noPassword.Status == HttpStatusCode.BadRequest && badPassword.Status == HttpStatusCode.BadRequest,
+        "a new recovery key needs the owner's password", noPassword.Raw + badPassword.Raw);
+    var reissued = await Send(HttpMethod.Post, $"/api/folders/{recoverFolder}/recovery-key", new { password = adminPassword }, token);
+    var recoverKey = reissued.Body?["recoveryKey"]?.GetValue<string>() ?? "";
+    Check(reissued.Status == HttpStatusCode.OK && recoverKey.Length == 64 && recoverKey != firstKey
+          && reissued.Body?["storagePath"]?.GetValue<string>() == "recover", "the owner gets a new recovery key with the password", reissued.Raw);
+
+    if (serverContainer is not null)
+    {
+        // Only the storage's contents and the key: a copy of the directory, and an agent that was never enrolled.
+        var copy = Path.Combine(work, "recover-storage");
+        var copied = await Docker(["cp", $"{serverContainer}:{storageRoot}/recover", copy]);
+        Check(copied.Exit == 0 && File.Exists(Path.Combine(copy, "config")), "copy the folder's directory off the storage", copied.Output);
+        var offline = new Agent("offline", Path.Combine(work, "offline"));
+        var offlineKey = Path.Combine(work, "recover-key.txt");
+        File.WriteAllText(offlineKey, recoverKey + "\n");
+        var offlineSnaps = await Cli(offline, ["snapshots", "--repo", copy, "--key-file", offlineKey]);
+        Check(offlineSnaps.Exit == 0 && offlineSnaps.Output.Split('\n').Count(l => l.Contains("e2e-A")) == 2,
+            "offline: `snapshots --repo` lists both snapshots with the recovery key", offlineSnaps.Output);
+        var offlineTarget = Path.Combine(work, "restore-offline");
+        var offlineRestore = await Cli(offline, ["restore", "--repo", copy, "--target", offlineTarget], new() { ["ASYNC_RECOVERY_KEY"] = recoverKey });
+        Check(offlineRestore.Exit == 0 && Same(a.Path("recover"), offlineTarget, "album/one.jpg", "letter.txt"),
+            "offline: `restore --repo` is byte-identical, with no server and no enrolled device", offlineRestore.Output);
+        Check(!File.Exists(Path.Combine(offline.Config, "identity.json")), "the offline agent has no identity (it never talked to a server)");
+        var oldKey = await Cli(offline, ["snapshots", "--repo", copy], new() { ["ASYNC_RECOVERY_KEY"] = firstKey });
+        Check(oldKey.Exit == 1 && oldKey.Output.Contains("does not open"), "the replaced recovery key no longer opens it", oldKey.Output);
+        var both = await Cli(offline, ["snapshots", "--repo", copy, "--folder", $"{recoverFolder}"]);
+        Check(both.Exit == 1 && both.Output.Contains("either --folder"), "`--repo` and `--folder` together are refused", both.Output);
+    }
+
+    // A new server (or the same one after losing the folder's row): the folder is created again on the repository.
+    var gone = await Send(HttpMethod.Delete, $"/api/folders/{recoverFolder}", token: token);
+    Check(gone.Status == HttpStatusCode.NoContent, "delete the folder (its row and server key; the storage stays)", gone.Raw);
+    object Recreate(string? key) => new
+    {
+        name = "recovered", mode = "Backup", encryption = "Transport", kind = "Files", storageBackendId = backendId, rootPath = "recover",
+        intervalMinutes = 60, retention = new { last = 10 }, recoveryKey = key,
+    };
+    var occupied = await Send(HttpMethod.Post, "/api/folders", Recreate(null), token);
+    Check(occupied.Status == HttpStatusCode.BadRequest && occupied.Raw.Contains("already a backup repository"),
+        "a new folder on the existing repository without its key is refused", occupied.Raw);
+    var wrongKey = await Send(HttpMethod.Post, "/api/folders", Recreate(firstKey), token);
+    Check(wrongKey.Status == HttpStatusCode.BadRequest && wrongKey.Raw.Contains("does not open"), "…and with a wrong key", wrongKey.Raw);
+    var adopted = await Send(HttpMethod.Post, "/api/folders", Recreate(recoverKey), token);
+    var recovered = adopted.Body?["id"]?.GetValue<int>() ?? 0;
+    Check(adopted.Status == HttpStatusCode.OK && adopted.Body?["recoveryKey"] is null, "with its recovery key, the new folder takes the repository over", adopted.Raw);
+    var adoptedSnaps = await Send(HttpMethod.Get, $"/api/folders/{recovered}/snapshots", token: token);
+    Check(adoptedSnaps.Body?.AsArray().Count == 2, "the web UI lists the old snapshots of the taken-over folder", adoptedSnaps.Raw);
+    await Send(HttpMethod.Put, $"/api/folders/{recovered}/devices", new { deviceId = a.Id, localPath = a.Path("recover") }, token);
+    Write(a.Path("recover", "letter.txt"), "third draft");
+    var continued = await Sync(a, recovered, "A backs up into the taken-over folder");
+    Check(continued.Output.Contains("1 changed") && continued.Output.Contains("1 unchanged"),
+        "the backup continues from the old snapshots (unchanged files reused)", continued.Output);
+    var history = await Cli(a, ["snapshots", "--folder", $"{recovered}"]);
+    Check(history.Exit == 0 && history.Output.Split('\n').Count(l => l.Contains("e2e-A")) == 3, "the history is intact: 3 snapshots", history.Output);
+    if (serverContainer is not null)
+    {
+        var keyFiles = await Docker(["exec", serverContainer, "ls", $"{storageRoot}/recover/keys"]);
+        Check(keyFiles.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == 2,
+            "the repository has two key files: the new server key and the recovery key (the old server key is removed)", keyFiles.Output);
+
+        // The admin's disaster recovery: the server's own keys, exported.
+        var export = await Docker(["exec", serverContainer, "dotnet", "ASync.Api.dll", "secrets", "export-folder-keys"]);
+        var exported = export.Output.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.StartsWith($"folder-{recovered}="))?.Split('=')[1] ?? "";
+        Check(export.Exit == 0 && exported.Length == 64, "`secrets export-folder-keys` prints the folder's server key", export.Output);
+        await Docker(["cp", $"{serverContainer}:{storageRoot}/recover", Path.Combine(work, "recover-storage-2")]);
+        var withExport = await Cli(new Agent("offline", Path.Combine(work, "offline")),
+            ["snapshots", "--repo", Path.Combine(work, "recover-storage-2")], new() { ["ASYNC_RECOVERY_KEY"] = exported });
+        Check(withExport.Exit == 0 && withExport.Output.Split('\n').Count(l => l.Contains("e2e-A")) == 3,
+            "offline: the exported server key opens the repository too", withExport.Output);
+
+        var serverLog = await Docker(["logs", serverContainer]);
+        Check(!serverLog.Output.Contains(recoverKey) && !serverLog.Output.Contains(firstKey) && !serverLog.Output.Contains(recoverKey.Replace("-", "")),
+            "the server's log holds no recovery key");
+    }
+
     // ── prune and check ───────────────────────────────────────────────────────
     Section("prune");
     async Task<long> StoredBytes(string folderName)
@@ -481,6 +584,7 @@ async Task<(int Exit, string Output)> Exec(string file, string[] execArgs, Dicti
     var psi = new ProcessStartInfo(file) { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
     foreach (var a in execArgs) psi.ArgumentList.Add(a);
     psi.Environment.Remove("ASYNC_PASSPHRASE");
+    psi.Environment.Remove("ASYNC_RECOVERY_KEY");
     foreach (var (k, v) in env ?? []) psi.Environment[k] = v;
     using var p = Process.Start(psi)!;
     p.StandardInput.Close();

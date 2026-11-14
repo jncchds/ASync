@@ -232,6 +232,9 @@ namespace ASync.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(7);
 
+                    b.Property<DateTime?>("RecoveryKeyCreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<bool>("RepositoryReady")
                         .HasColumnType("boolean");
 

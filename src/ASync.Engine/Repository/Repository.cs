@@ -72,6 +72,18 @@ public sealed class Repository
         OpenAsync(backend, kf => kf.Kind == KeyKind.Server ? kf.TryOpen(serverKey) : null, ct);
 
     /// <summary>
+    /// Opens with whatever secret a person has without a server: a passphrase, a recovery key, or a server key written
+    /// like a recovery key (what the server's <c>secrets export-folder-keys</c> prints). Used to restore offline.
+    /// </summary>
+    public static Task<Repository> OpenWithSecretAsync(IStorageBackend backend, string secret, CancellationToken ct = default)
+    {
+        byte[]? asKey;
+        try { asKey = RecoveryKey.Parse(secret); }
+        catch (FormatException) { asKey = null; }
+        return OpenAsync(backend, kf => kf.Kind == KeyKind.Server ? (asKey is null ? null : kf.TryOpen(asKey)) : kf.TryOpen(secret), ct);
+    }
+
+    /// <summary>
     /// Opens with keys unlocked earlier (a device keeps them so backups run unattended). Wrong keys show up as a
     /// <see cref="CryptographicException"/> on the first read.
     /// </summary>

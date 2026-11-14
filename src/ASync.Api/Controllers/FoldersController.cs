@@ -2,8 +2,11 @@ using ASync.Api.Auth;
 using ASync.Api.Services;
 using ASync.Contracts;
 using ASync.Core.Interfaces;
+using ASync.Core.Models;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace ASync.Api.Controllers;
 
@@ -15,11 +18,15 @@ public class FoldersController : ControllerBase
 {
     private readonly IFolderRepository _folders;
     private readonly FolderService _service;
+    private readonly IUserRepository _users;
+    private readonly IPasswordHasher<AppUser> _hasher;
 
-    public FoldersController(IFolderRepository folders, FolderService service)
+    public FoldersController(IFolderRepository folders, FolderService service, IUserRepository users, IPasswordHasher<AppUser> hasher)
     {
         _folders = folders;
         _service = service;
+        _users = users;
+        _hasher = hasher;
     }
 
     [HttpGet]
@@ -34,7 +41,40 @@ public class FoldersController : ControllerBase
     public async Task<ActionResult<FolderDto>> Create([FromBody] SaveFolderRequest req, CancellationToken ct)
     {
         var result = await _service.CreateAsync(User.UserId(), req, ct);
-        return result.Success ? FolderService.ToDto(result.Value!) : BadRequest(new { message = result.Error });
+        if (!result.Success) return BadRequest(new { message = result.Error });
+        var (folder, recoveryKey) = result.Value!;
+        if (recoveryKey is not null) Response.Headers.CacheControl = "no-store";
+        return FolderService.ToDto(folder) with { RecoveryKey = recoveryKey };
+    }
+
+    /// <summary>
+    /// A new recovery key for a Transport Backup folder (it replaces the previous one), shown once. The owner only,
+    /// after re-entering their password (or confirming, for accounts without one). Rate-limited like sign-in, since
+    /// it checks a password.
+    /// </summary>
+    [HttpPost("{id:int}/recovery-key")]
+    [EnableRateLimiting(RateLimits.Auth)]
+    public async Task<ActionResult<RecoveryKeyDto>> IssueRecoveryKey(int id, [FromBody] IssueRecoveryKeyRequest req, CancellationToken ct)
+    {
+        var folder = await _folders.GetAsync(id);
+        if (folder is null || folder.UserId != User.UserId()) return NotFound();
+        var user = await _users.GetByIdAsync(folder.UserId);
+        if (user is null) return NotFound();
+        if (user.PasswordHash is not null)
+        {
+            if (string.IsNullOrEmpty(req.Password)
+                || _hasher.VerifyHashedPassword(user, user.PasswordHash, req.Password) == PasswordVerificationResult.Failed)
+                return BadRequest(new { message = "Enter your current password to make a recovery key." });
+        }
+        else if (!req.Confirm)
+        {
+            return BadRequest(new { message = "Confirm that you want a new recovery key (the previous one stops working)." });
+        }
+
+        var result = await _service.IssueRecoveryKeyAsync(folder, ct);
+        if (!result.Success) return BadRequest(new { message = result.Error });
+        Response.Headers.CacheControl = "no-store";
+        return result.Value!;
     }
 
     [HttpPut("{id:int}")]
