@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=ASync
+GenericName=File sync and backup
+Comment=Sync and back up folders through your ASync server
+Exec=/opt/async-desktop/async-desktop
+Icon=ua.pp.chds.async
+Terminal=false
+Categories=Network;FileTransfer;Utility;
+Keywords=sync;backup;files;
+StartupNotify=true

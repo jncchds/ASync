@@ -1,0 +1,18 @@
+# The ASync agent as a systemd user service, installed by the async-desktop package. It is not enabled for anyone by
+# installing the package: the app's "Install and start the agent" enables it for its user (or: systemctl --user enable
+# --now async-agent.service). It uses the default config directory (~/.config/async); for another one the app writes
+# its own unit to ~/.config/systemd/user, which takes precedence over this one.
+[Unit]
+Description=ASync sync agent
+Documentation=https://github.com/jncchds/ASync
+
+[Service]
+Type=notify
+ExecStart=/opt/async-desktop/async-desktop service run
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+Environment=DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+[Install]
+WantedBy=default.target

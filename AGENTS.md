@@ -1168,7 +1168,8 @@ window closed or the app ended, and the CLI and the app always see the same agen
 - `ASync.App.Desktop` (`async-desktop`): `Program` (arguments; `service run` → `AgentHost.RunServiceAsync`, exactly
   what `async-cli service run` does), `DesktopApp` (window, tray, lifetime), `DesktopPlatform`, `DesktopAgentService`
   (`ServiceInstaller` with this program: the unit/plist/task runs `async-desktop --config <dir> service run`),
-  `StartAtLogin`, `SingleInstance`, `TrayIcons`, `TraySupport`, `Automation`.
+  `StartAtLogin`, `SingleInstance`, `TrayIcons`, `TraySupport`, `Automation`, and since M3-3 `VelopackUpdates`
+  (`IUpdateService`) and `Uninstaller` (see "Installers and updates (M3-3)").
 
 **Pages** (`ShellViewModel` routes the agent's status to one):
 - *No agent* → `ServiceSetupViewModel`: "Install and start the agent" (per-user service, same code as `async-cli service
@@ -1186,7 +1187,8 @@ window closed or the app ended, and the CLI and the app always see the same agen
   and Sync now, Pause/Resume, Open folder, Change folder… (native folder picker → `set-path`), Unlock….
 - `UnlockViewModel` (a dialog): passphrase or recovery key in a masked text box; the secret goes only to the agent's
   `unlock`, the field is cleared as soon as it is sent, and nothing logs it.
-- `SettingsViewModel` (over the page): start at login, notifications, theme (light/dark/system, applied at once),
+- `UpdatesViewModel` (M3-3): the update banner over the page and the Updates card of the settings.
+- `SettingsViewModel` (over the page): start at login, notifications, updates, theme (light/dark/system, applied at once),
   open the web UI, versions of the app and the agent, and *Sign out of this device* (a confirmation, then `forget`).
 - The shell reconnects when the agent goes away ("The agent stopped", tray: problem) and refreshes "5 min ago" every
   30 seconds. All state changes happen on the UI thread (the loop is started there and awaits continue there).
@@ -1201,7 +1203,8 @@ agent.
 **Notifications** (`ShellViewModel.OnRunFinished`, setting *Notify me…*): when a folder starts failing (once per
 failure streak, not on every retry), when it works again, and when a run made conflict copies (the agent now counts
 them: `FolderRunResult.Conflicts`). Linux: `notify-send`; macOS: `osascript`; Windows: a WinRT toast through
-PowerShell (shown under PowerShell's name until the M3-3 installer registers an app id).
+PowerShell, sent with the app id Setup.exe gave the Start-menu shortcut (`ua.pp.chds.async`, read from Velopack's
+locator), so it shows under "ASync"; a copy not installed by Setup.exe falls back to PowerShell's id.
 
 **Single instance** (`SingleInstance`): `app.lock` in the config directory (`FileShare.None`, dropped by the OS with
 the process); a second start sends `show` to the first over `app-<hash>.sock` next to the agent's socket (0600, in the
@@ -1238,6 +1241,116 @@ notification, unlock an end-to-end folder set up by an `async-cli` device (a wro
 no log), open folder and web UI, start at login, close to tray, one instance, Quit leaving the agent running, sign out,
 then a device-code enrollment approved through the API. `SCREENSHOTS=docs/screenshots` also saves every screen in light
 and dark (`desktop-*.png`).
+
+## Installers and updates (M3-3)
+
+Every version tag builds the desktop app (`async-desktop`, which is also the agent service) and `async-cli` for
+Windows x64/ARM64, macOS ARM64 and Linux x64/ARM64 into a draft GitHub Release. One script does a target:
+`scripts/package.sh <rid>` (bash; Git Bash on Windows), driven by CI's `package` matrix (see "Packaging and CI").
+
+**Publishing:** self-contained, ReadyToRun, not trimmed. ReadyToRun precompiles: an `async-cli` command starts in
+~70 ms instead of ~110 ms and the app's window comes up sooner, for 15–30 % more size (desktop 107 → 124 MB unpacked,
+the CLI file 82 → 113 MB; the archives and packages are ~50–57 MB). Trimming is off: only the control protocol and the
+app's settings use JSON source generation; the client library (identity, sync state, the server API) and the engine
+still serialize by reflection (34 trim warnings when the CLI was trimmed), and Avalonia's XAML loading needs care too,
+so a trimmed build could break at run time in ways only the platforms we cannot test would show. `async-cli` is one
+single file (`PublishSingleFile`, not compressed: decompressing would cost every start); the desktop app is a folder
+(Velopack's deltas work per file, and Avalonia's native libraries sit next to it). No `.pdb` files are shipped.
+
+**What each OS gets** (Velopack 1.2.161: `Velopack` package in the app, `vpk` as a local dotnet tool in
+`.config/dotnet-tools.json`; nfpm for .deb/.rpm):
+
+| | installer (updates itself) | also |
+|---|---|---|
+| Windows | `ASync.Desktop-<rid>-Setup.exe`: per user, `%LocalAppData%\ASync.Desktop\current\`, Start-menu and desktop shortcuts with the app id `ua.pp.chds.async` (`vpk --aumid`; toasts show under ASync); `-Portable.zip` | — |
+| macOS | `ASync-<version>-osx-arm64.dmg` (the .app and an Applications link), `ASync.Desktop-osx-arm64-Setup.pkg` (to /Applications or ~/Applications) | `-Portable.zip` |
+| Linux | `ASync.Desktop-<rid>.AppImage` | `async-desktop` .deb/.rpm (no self-update) |
+| all | — | `async-cli-<version>-<rid>.tar.gz`/`.zip`; on Linux `async-cli` .deb/.rpm |
+
+The pack id is `ASync.Desktop` (not `ASync`: Velopack's Windows install folder would be `%LocalAppData%\ASync`, where the
+agent's log folder already lives). Each target is its own Velopack channel named after the rid (`linux-x64`, …), built
+into the package, so an installed app reads only its own `releases.<rid>.json`.
+
+**macOS bundle** (`packaging/macos`): `package.sh` builds `ASync.app` itself (publish output in `Contents/MacOS`, the
+icon in `Contents/Resources`, `Info.plist` with `CFBundleIdentifier` `ua.pp.chds.async` and the version) and hands the
+.app to `vpk pack`, which adds its updater. `LSUIElement`: ASync is a menu-bar app (the tray icon) without a Dock icon or
+app menu, like other sync clients; the window opens from the menu bar. The agent's LaunchAgent (`ua.pp.chds.async.agent`)
+and start at login (`ua.pp.chds.async.app`) run `/Applications/ASync.app/Contents/MacOS/async-desktop`, which stays the
+same path across updates. `entitlements.plist` (JIT, unsigned executable memory, library validation off) is for the
+hardened runtime once it is signed.
+
+**Linux packages** (`packaging/linux`): the .deb/.rpm install `/opt/async-desktop/` (`/usr/bin/async-desktop` links to
+it), the desktop entry `ua.pp.chds.async.desktop`, hicolor icons, and the user unit `/usr/lib/systemd/user/
+async-agent.service` (`ExecStart=/opt/async-desktop/async-desktop service run`, otherwise the unit `ServiceInstaller`
+writes). Installing enables it for nobody. The app's per-user install enables the packaged unit instead of writing its
+own when it would say the same (this program, the default config directory, no extra options:
+`ServiceInstaller.UsesPackagedUnit`), so the package owns the file. `async-cli` is `/usr/bin/async-cli`. Both packages
+share two maintainer scripts (the program path filled in by `package.sh`):
+- `postinstall.sh`: refreshes menus and icons; for every logged-in user whose `async-agent.service` runs this program,
+  `systemctl --user -M <user>@ daemon-reload` and `try-restart`, so an upgrade restarts running agents on the new version.
+- `preremove.sh` (only on removal, not on upgrade): stops and disables that service for logged-in users, then in every
+  home removes the user unit that runs this program, the dangling or packaged-unit enablement links and the app's
+  autostart entry. Config directories stay.
+Dependencies: ICU (`libicuNN` alternatives on Debian, `libicu` on RPM systems) and fontconfig for the app.
+
+**AppImage and the agent service:** a process in an AppImage runs from a temporary mount (`/tmp/.mount_…`), gone when
+it exits. `ServiceInstaller.CurrentProgram()` returns `$APPIMAGE` when the process lives under `$APPDIR`, so the unit,
+start at login and the update's restart all run the AppImage file, which Velopack replaces in place.
+
+**Update flow** (`IUpdateService` in `ASync.App`, `VelopackUpdates` in the desktop head; `UpdatesViewModel`):
+1. `Program.Main` runs `VelopackApp.Build()` first (not for `service run`): Velopack's install/update/uninstall hooks run
+   there and exit; `SetAutoApplyOnStartup(false)`, so a downloaded update is never applied by itself.
+2. The feed: `ASYNC_UPDATE_URL`, else `updateFeed` in `app-settings.json`, else `https://github.com/jncchds/ASync`
+   (Velopack's `GithubSource`, published releases only, no token: 60 requests an hour per IP is plenty for a daily
+   check). A GitHub repository URL uses that source, another URL `SimpleWebSource`, a folder `SimpleFileSource` (the
+   smoke test). A copy Velopack did not install (a .deb/.rpm in `/opt/async-desktop`, a development build) has no self-
+   update; Settings says why.
+3. The app checks 5 s after start and every 24 h (`AppSettings.CheckForUpdates`, *Settings → Updates*, on by default;
+   *Check now* works when it is off). A newer version: a banner over the page, *Update to ASync X…* in the tray menu
+   (opens the window), the tray tooltip, a notification once per version, and the Updates card in Settings. *Later*
+   hides the banner for that version until the next start.
+4. *Install and restart* (the person's consent; nothing else installs): download (progress bar), then wait while any
+   folder is syncing, backing up or in maintenance ("Waiting for Docs to finish syncing…", with *Don't wait*), then stop
+   the agent service (`IAgentServiceManager.StopAsync`: `systemctl --user stop`, `launchctl bootout`, `schtasks /End`)
+   and wait up to 30 s for its control channel to close, then `UpdateManager.WaitExitThenApplyUpdates(…, restart: true,
+   ["--config", dir, "--after-update"])` and exit. Velopack replaces the program (Windows locks running files, hence the
+   stop) and starts the app again.
+5. The restarted app finds the service installed but stopped and starts it (the existing start-once rule), so the agent
+   runs the new binary; with `--after-update` it says "ASync was updated to X; the agent runs it too" (or names the
+   other version, when the agent is another program such as an `async-cli` service). A failure before the stop leaves
+   the agent alone; after it, the app starts the agent again and offers to retry.
+A stopped agent cancels a running transfer; uploads and downloads resume from their parts on the next start.
+
+**Uninstall** (`Uninstaller`): removes the agent service only when its definition runs this program
+(`ServiceInstaller.DefinitionAsync` + `Runs`), and start at login; with `--remove-data` it first signs the device out
+through the agent (which alone can delete its Keychain items and DPAPI blobs), then deletes the config directory and the
+agent's log folder. Windows runs it from Velopack's uninstall hook (`OnBeforeUninstallFastCallback`, data kept). macOS and
+the AppImage have no uninstaller: `async-desktop uninstall [--remove-data]`, then delete the app (README). The .deb/.rpm
+use `preremove.sh`.
+
+**async-cli updates:** no `async-cli update`. The CLI is updated by what installed it: the package manager (.deb/.rpm,
+whose post-install restarts its services), the Docker image, or by hand for the archive (replace the file, `service
+install` again restarts the service). A self-updating CLI would need its own download, verification and replace-while-
+running code for the archive case only; headless machines usually have a package manager or Docker.
+
+**Signing** (off until the secrets exist; the builds are unsigned now): Windows Authenticode through `vpk --signParams`
+(signtool, a .pfx from `WINDOWS_CERTIFICATE`); macOS Developer ID (`--signAppIdentity` with the entitlements,
+`--signInstallIdentity` for the .pkg) and notarization (`--notaryProfile`, a `notarytool` profile made from `APPLE_ID`,
+`APPLE_TEAM_ID`, `APPLE_APP_PASSWORD`) in a temporary keychain; the .dmg is signed, notarized and stapled too.
+
+**Icons:** `packaging/icons` (PNG 16–1024, `async.ico`, `async.icns`), drawn by `scripts/render-icons.cs` (SkiaSharp)
+from the same logo as `TrayIcons`; `async.ico` is also the Windows exe's icon.
+
+**Tests:** `PackagingTests` (the AppImage program, the packaged unit against `packaging/linux/async-agent.service`,
+`Runs`), `UpdatesTests` (check, notify once, off/on, unavailable, install with and without waiting for a sync, failures,
+*Later*, the after-update message, the feed choice, arguments, the toast's app id) and a headless view test of the
+banner and the Settings card at 360 px. On Linux: `scripts/smoke-packages.sh` installs the .deb on Debian 13 and the
+.rpm on Fedora 43 in containers (files, links, `desktop-file-validate`, `systemd-analyze verify --user`, the agent
+starts and stops cleanly, reinstall keeps users' setups, removal cleans two users' units, links and autostart entries
+and keeps their config); CI runs it for linux-x64. `scripts/smoke-update.sh` builds versions A and B, runs A's AppImage
+under Xvfb with B's release folder as the feed, installs the agent from the app (the unit runs the AppImage file), finds
+B (banner, tray, Settings), installs it, and checks the app and the agent both run B (a new agent process), then
+`uninstall` and `uninstall --remove-data`.
 
 ## Background work and wake-ups (M3–M4)
 
@@ -1404,7 +1517,8 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 - **Docker** `async-server` and `async-cli` (`Dockerfile.cli`): built for linux/amd64 and arm64
   (`.github/workflows/docker-publish.yml`).
   - **Publishing is triggered by pushing a version tag:** `git tag v<VERSION> && git push origin v<VERSION>`.
-    The tag must equal `v` + the `VERSION` file, or the build fails.
+    The tag must equal `v` + the `VERSION` file, or the build fails. The same tag makes the draft GitHub Release with
+    the desktop and CLI packages (below); publishing that draft is the last, manual step of a release.
   - Image tags are `latest`, the `VERSION` value and `sha-…`.
   - Pushes to branches publish nothing. Pull requests run the tests and the end-to-end test, and a manual run
     (`workflow_dispatch`) builds the chosen ref.
@@ -1438,9 +1552,21 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 - **App tests** (`src/ASync.App.Tests`) run on xunit v3 (Avalonia.Headless.XUnit 12 needs it), apart from
   `ASync.Tests` (xunit v2); the `test` job runs them too, with a TRX (the GitHubActions logger clashes with v3's test
   platform).
-- **Windows x64/ARM64:** MSIX, or Velopack with auto-update, plus winget.
-- **macOS ARM64:** a signed and notarized dmg, with Velopack updates.
-- **Linux x64/ARM64:** AppImage, deb and rpm, with a systemd unit for the agent.
+- **Desktop packages and the GitHub Release** (jobs `package` and `release`; details in "Installers and updates (M3-3)"):
+  - `package` (pull requests, tags and manual runs): a matrix of the five targets on their own OS (linux-x64 on
+    `ubuntu-24.04`, linux-arm64 on `ubuntu-24.04-arm`, win-x64 and win-arm64 on `windows-2025`, osx-arm64 on
+    `macos-15`) runs `scripts/package.sh <rid>` (vpk from `dotnet tool restore`, nfpm downloaded on Linux) and uploads
+    `packages-<rid>`. On a tag it first downloads the channel's latest published release (`vpk download github`) so
+    vpk makes a delta package. Signing steps run only when their secrets exist (`HAS_*` job variables, since `if:`
+    cannot read secrets): Windows imports a .pfx and passes signtool parameters, macOS builds a temporary keychain
+    with the Developer ID identities and a `notarytool` profile. linux-x64 also runs `scripts/smoke-packages.sh`.
+  - `release` (tags only; needs `test`, `e2e`, `agent-desktop` and `package`): collects every target's files, only this
+    release's Velopack files (by `assets.<rid>.json`, with `releases.<rid>.json` and `RELEASES-<rid>` filtered to them),
+    writes `SHA256SUMS`, and creates a **draft** GitHub Release for the tag with the version's release notes plus a
+    download table (`gh release create --draft --verify-tag`; a re-run uploads with `--clobber`). Installed apps only
+    see published releases, so a person reviews and publishes it.
+  - Docker images are published as before; the workflow is validated with `actionlint` (and shellcheck).
+- **Not yet:** winget/Homebrew/Flathub listings, an apt/dnf repository (the .deb/.rpm are downloads), MSIX.
 - **iOS:** TestFlight and the App Store.
 - **Android:** a Play AAB, plus an APK/F-Droid flavor that uses UnifiedPush.
 
@@ -1469,7 +1595,13 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
      Verified on Linux: view-model and headless view tests, and `scripts/smoke-desktop.sh` (the real app under Xvfb with
      the real user service and server). On Windows and macOS compiled in CI, where the view-model and headless tests
      also run; the tray, notifications, start at login, the folder picker and the service install there were never run.
-   - M3-3 (next): installers (MSIX/Velopack, dmg, AppImage/deb/rpm) and auto-update.
+   - **M3-3 installers and auto-update (done):** `scripts/package.sh` (Velopack Setup.exe, .pkg/.dmg, AppImage; nfpm
+     .deb/.rpm for the app and the CLI; CLI archives), the app's update check and consented install with the agent
+     restart, uninstall of the agent service with the app, the Windows toast app id, the CI `package`/`release` jobs
+     (draft release), unsigned builds with signing that turns on with secrets. Verified on Linux: the .deb and .rpm in
+     Debian/Fedora containers, the AppImage under Xvfb including an update A → B with the agent service restarted. Windows
+     and macOS packages are only built in CI, never installed or run (Setup.exe, the uninstall hook, toasts under the app
+     id, the .pkg/.dmg, `LSUIElement`, their updates). Left open: signing certificates, store/repository listings.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
    overdue devices.
 6. **M5 — hardening:** OpenTelemetry, and whatever is left of the gap list below. Later: Google Drive,

@@ -111,6 +111,15 @@ internal static class Automation
         ["device"] = shell.Status?.Device?.DeviceName,
         ["enrollError"] = shell.Enroll.Error,
         ["userCode"] = shell.Enroll.Pending?.UserCode,
+        ["appVersion"] = shell.AppVersion,
+        ["agentVersion"] = shell.Status?.AgentVersion,
+        ["agentPid"] = shell.Status?.ProcessId,
+        ["update"] = new JsonObject
+        {
+            ["state"] = shell.Updates.State.ToString(), ["available"] = shell.Updates.AvailableVersion,
+            ["banner"] = shell.Updates.ShowBanner ? shell.Updates.BannerText : null, ["status"] = shell.Updates.StatusText,
+        },
+        ["trayItems"] = new JsonArray([.. (Application.Current as DesktopApp)?.TrayItems().Where(i => i.IsVisible).Select(i => (JsonNode?)i.Header) ?? []]),
         ["folders"] = new JsonArray([.. shell.Dashboard.Folders.Select(f => (JsonNode)new JsonObject
         {
             ["id"] = f.Id, ["name"] = f.Name, ["state"] = f.State.Text, ["localPath"] = f.HasLocalPath ? f.LocalPath : null,

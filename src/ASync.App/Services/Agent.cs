@@ -79,4 +79,6 @@ public interface IAgentServiceManager
     /// <summary>Installs the per-user service and starts it; returns what happened, for people.</summary>
     Task<string> InstallAndStartAsync(CancellationToken ct);
     Task<string> StartAsync(CancellationToken ct);
+    /// <summary>Stops the service (before an update replaces its program); it stays installed.</summary>
+    Task<string> StopAsync(CancellationToken ct);
 }

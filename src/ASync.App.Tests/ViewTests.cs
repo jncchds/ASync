@@ -168,4 +168,32 @@ public class ViewTests
         Assert.Equal(ThemeChoice.Light, f.Platform.Themes[^1]);
         Assert.Equal(ThemeChoice.Light, f.Settings.Settings.Theme);
     }
+
+    [AvaloniaFact]
+    public async Task UpdateBanner_InstallButton_AndTheSettingsCard_FitAPhone()
+    {
+        var updates = new FakeUpdates();
+        await using var f = new ShellFixture { Updates = updates };
+        f.Start(Statuses.Connected());
+        var window = new Window { Width = 360, Height = 720, Content = new ShellView { DataContext = f.Shell } };
+        window.Show();
+        await Pump(() => f.Shell.Updates.ShowBanner);
+
+        Assert.Contains("ASync 2.0.0 is available", Named<TextBlock>(window, "UpdateText").Text);
+        var install = Named<Button>(window, "InstallUpdate");
+        Assert.Same(f.Shell.Updates.InstallCommand, install.Command);
+        Assert.Same(f.Shell.Updates.LaterCommand, Named<Button>(window, "UpdateLater").Command);
+        var banner = Named<Border>(window, "UpdateBanner");
+        Assert.True(banner.Bounds.Width <= 360.5, $"the banner is {banner.Bounds.Width} px wide");
+
+        f.Shell.OpenSettingsCommand.Execute(null);
+        await Pump(() => All<SettingsView>(window).Any(v => v.IsEffectivelyVisible));
+        Assert.True(Named<CheckBox>(window, "CheckForUpdates").IsChecked);
+        Assert.Same(f.Shell.Updates.CheckNowCommand, Named<Button>(window, "CheckUpdatesNow").Command);
+        Assert.Same(f.Shell.Updates.InstallCommand, Named<Button>(window, "InstallUpdateFromSettings").Command);
+        Assert.Contains("2.0.0", Named<TextBlock>(window, "UpdateStatus").Text);
+
+        Named<Button>(window, "UpdateLater").Command!.Execute(null);
+        await Pump(() => !banner.IsVisible);
+    }
 }

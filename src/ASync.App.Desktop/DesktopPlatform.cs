@@ -58,20 +58,33 @@ internal sealed class DesktopPlatform(Func<TopLevel?> topLevel, DesktopOptions o
     {
         if (OperatingSystem.IsLinux()) Start("notify-send", "--app-name=ASync", "--icon=folder-sync", title, message);
         else if (OperatingSystem.IsMacOS()) Start("osascript", "-e", $"display notification {AppleScriptString(message)} with title {AppleScriptString(title)}");
-        else if (OperatingSystem.IsWindows()) Start("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", WindowsToast(title, message));
+        else if (OperatingSystem.IsWindows()) Start("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", WindowsToast(title, message, AppUserModelId()));
     }
 
     private static string AppleScriptString(string s) => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
-    /// <summary>A toast through the WinRT API from PowerShell (no extra package; shown under PowerShell's name until M3-3 registers an app id).</summary>
-    internal static string WindowsToast(string title, string message)
+    /// <summary>PowerShell's own app id: the toast shows under PowerShell's name (a copy not installed by Setup.exe).</summary>
+    internal const string PowerShellAppId = @"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe";
+
+    /// <summary>
+    /// The app id Setup.exe gave the Start-menu shortcut (<c>vpk pack --aumid ua.pp.chds.async</c>): a toast sent with it
+    /// shows under "ASync" with its icon. Null when not installed by Setup.exe.
+    /// </summary>
+    private static string? AppUserModelId()
+    {
+        try { return Velopack.Locators.VelopackLocator.IsCurrentSet ? Velopack.Locators.VelopackLocator.Current.AppUserModelId : null; }
+        catch (Exception e) when (e is not OutOfMemoryException) { return null; }
+    }
+
+    /// <summary>A toast through the WinRT API from PowerShell (no extra package), under the installed app's id when there is one.</summary>
+    internal static string WindowsToast(string title, string message, string? appId = null)
     {
         static string Ps(string s) => "'" + SecurityElement.Escape(s).Replace("'", "''") + "'";
         return "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null;" +
                "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null;" +
                "$x = New-Object Windows.Data.Xml.Dom.XmlDocument;" +
                $"$x.LoadXml('<toast><visual><binding template=\"ToastGeneric\"><text>' + {Ps(title)} + '</text><text>' + {Ps(message)} + '</text></binding></visual></toast>');" +
-               "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe')" +
+               $"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier({Ps(appId ?? PowerShellAppId)})" +
                ".Show([Windows.UI.Notifications.ToastNotification]::new($x))";
     }
 

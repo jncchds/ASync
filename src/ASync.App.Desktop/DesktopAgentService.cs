@@ -29,6 +29,13 @@ internal sealed class DesktopAgentService(DesktopOptions options) : IAgentServic
         return "The ASync agent is installed and runs in the background.";
     }
 
+    public async Task<string> StopAsync(CancellationToken ct)
+    {
+        var result = await ServiceInstaller.StopAsync(system: false, ct);
+        if (!result.Ok) throw new ServiceCommandException(result.Message);
+        return result.Message;
+    }
+
     public async Task<string> StartAsync(CancellationToken ct)
     {
         var result = await ServiceInstaller.StartAsync(system: false, ct);

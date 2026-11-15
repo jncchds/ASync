@@ -24,9 +24,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private TaskCompletionSource _retry = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task _loop = Task.CompletedTask;
     private bool _triedToStartService;
+    private bool _reportedAgentVersion;
 
     public ShellViewModel(IAgentConnector connector, IAgentServiceManager service, IPlatformServices platform, ISettingsStore settings,
-        TimeProvider? time = null)
+        TimeProvider? time = null, IUpdateService? updates = null)
     {
         _connector = connector;
         _service = service;
@@ -37,6 +38,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Dashboard = new DashboardViewModel(this);
         Enroll = new EnrollViewModel(this);
         ServiceSetup = new ServiceSetupViewModel(this, service);
+        Updates = new UpdatesViewModel(this, updates ?? new NoUpdates("This version of ASync does not update itself."));
         Page = new ConnectingViewModel("Looking for the ASync agent…", null);
         TrayToolTip = "ASync";
         platform.ApplyTheme(Settings.Theme);
@@ -47,6 +49,18 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public DashboardViewModel Dashboard { get; }
     public EnrollViewModel Enroll { get; }
     public ServiceSetupViewModel ServiceSetup { get; }
+    public UpdatesViewModel Updates { get; }
+
+    /// <summary>The agent's service, for the update (stopped before the program is replaced).</summary>
+    internal IAgentServiceManager ServiceManager => _service;
+
+    /// <summary>This run is the first after an update (the updater restarted the app with <c>--after-update</c>).</summary>
+    public bool StartedAfterUpdate { get; init; }
+
+    /// <summary>The app should exit now (the updater waits for it). The head ends its lifetime.</summary>
+    public event Action? ExitRequested;
+
+    internal void RequestExit() => ExitRequested?.Invoke();
 
     /// <summary>How long to wait before looking for the agent again.</summary>
     public TimeSpan RetryInterval { get; init; } = TimeSpan.FromSeconds(3);
@@ -99,7 +113,11 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
 
     // ── Connection loop ───────────────────────────────────────────────────────
 
-    public void Start() => _loop = Task.WhenAll(RunAsync(_stop.Token), TickAsync(_stop.Token));
+    public void Start()
+    {
+        if (StartedAfterUpdate) ShowMessage($"ASync was updated to {AppVersion}.");
+        _loop = Task.WhenAll(RunAsync(_stop.Token), TickAsync(_stop.Token), Updates.RunAsync(_stop.Token));
+    }
 
     /// <summary>Keeps "5 min ago" and "in 10 min" current.</summary>
     private async Task TickAsync(CancellationToken ct)
@@ -110,6 +128,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             {
                 await Task.Delay(TimeSpan.FromSeconds(30), Time, ct);
                 Dashboard.Tick();
+                Updates.Tick();
             }
         }
         catch (OperationCanceledException) { }
@@ -137,6 +156,13 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
 
             Session = session;
             _triedToStartService = false;
+            if (StartedAfterUpdate && !_reportedAgentVersion)
+            {
+                _reportedAgentVersion = true;
+                var agent = session.Hello.AgentVersion;
+                ShowMessage(agent == AppVersion ? $"ASync was updated to {AppVersion}; the agent runs it too."
+                    : $"ASync was updated to {AppVersion}, but the agent runs version {agent} (another program, such as async-cli, runs it).");
+            }
             try
             {
                 await foreach (var e in session.SubscribeAsync(ct)) Apply(e);

@@ -31,6 +31,8 @@
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.6" />
     <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.1.6" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- Installers and self-update of the desktop app (Setup.exe, the macOS package, the AppImage); vpk 1.2.161 in .config/dotnet-tools.json -->
+    <PackageVersion Include="Velopack" Version="1.2.161" />
     <!-- Storage back-ends -->
     <PackageVersion Include="AWSSDK.S3" Version="4.0.104.12" />
     <PackageVersion Include="SSH.NET" Version="2026.0.0" />

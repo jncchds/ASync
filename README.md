@@ -5,7 +5,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 
 > **Status: early development.** The server, the web UI (folders, devices, storage, snapshot and file browsing), the
 > headless CLI agent and the desktop app (Linux; built for Windows and macOS, not tried there yet) work: devices sync
-> and back up folders through the server today. Desktop installers, then the mobile apps, are next. The current version is in [VERSION](VERSION), changes are in
+> and back up folders through the server today. Desktop installers with self-update are built for every release (tried
+> on Linux; not code-signed yet); the mobile apps are next. The current version is in [VERSION](VERSION), changes are in
 > [RELEASE_NOTES.md](RELEASE_NOTES.md), and the design, roadmap and known gaps are in [AGENTS.md](AGENTS.md).
 
 <p>
@@ -160,6 +161,9 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 - The agent's background service was tried for real on Linux (systemd) only. On Windows and macOS the service,
   the named pipe, DPAPI and the Keychain have CI jobs that build them and run their unit tests, but installing and running the service
   there has not been tried by hand yet.
+- The installers: on Linux the AppImage (with its self-update and the agent restart), the .deb and the .rpm were
+  tried; Setup.exe, the macOS .pkg/.dmg and their updates are built in CI but not tried on a real machine yet. The
+  builds are not code-signed (see "Installing the desktop app").
 
 What comes next is listed in [AGENTS.md](AGENTS.md) under "Milestones and current stage" (the desktop app).
 
@@ -334,10 +338,65 @@ same one as `async-cli service install`), so it carries on with the window close
   versions, and *Sign out of this device* (it stops syncing and forgets the identity here; your files stay; remove the
   device in the web UI too).
 
-Build it with the .NET 10 SDK: `dotnet publish src/ASync.App.Desktop -c Release -o ~/async-desktop` and run
-`~/async-desktop/async-desktop` (installers come next). It uses the same config directory as `async-cli`
-(`~/.config/async`, `ASYNC_CONFIG_DIR` or `--config`), so an agent set up with the CLI shows up in the app and the other
-way round. Only one app runs per config directory; starting it again brings its window up.
+- **Updates:** the app looks for a new version after it starts and once a day (*Settings → Updates*: turn it off, or
+  *Check now*). A new version shows at the top of the window and in the tray menu; nothing is installed until you press
+  *Install and restart*. The app then downloads it, waits for a running sync to finish (or not, if you say so), stops
+  the agent, installs the update and starts again, and the agent restarts on the new version too.
+
+<p>
+  <img src="docs/screenshots/desktop-update-available-light.png" alt="A new version is available: Install and restart, or Later" width="46%">
+  <img src="docs/screenshots/desktop-update-settings-dark.png" alt="Settings: the Updates card, dark" width="40%">
+</p>
+
+It uses the same config directory as `async-cli` (`~/.config/async`, `ASYNC_CONFIG_DIR` or `--config`), so an agent set
+up with the CLI shows up in the app and the other way round. Only one app runs per config directory; starting it again
+brings its window up.
+
+### Installing the desktop app
+
+Download it from the [releases](https://github.com/jncchds/ASync/releases) page. The builds are **not code-signed yet**,
+so Windows and macOS warn about them the first time; the steps below get past that.
+
+| OS | Download | Updates |
+|---|---|---|
+| Windows 10/11 (x64, ARM64) | `ASync.Desktop-win-x64-Setup.exe` (or `-win-arm64-`): installs for your user, no administrator needed, adds ASync to the Start menu and the desktop | by the app |
+| macOS 12+ (Apple silicon) | `ASync-<version>-osx-arm64.dmg`: drag ASync to Applications. Or `ASync.Desktop-osx-arm64-Setup.pkg` | by the app |
+| Linux (x64, ARM64) | `ASync.Desktop-linux-x64.AppImage` (or `-arm64`): make it executable and run it, from where you want to keep it | by the app |
+| Debian, Ubuntu | `async-desktop_<version>_amd64.deb` (or `arm64`): `sudo apt install ./async-desktop_*.deb` | by `apt` |
+| Fedora, openSUSE, RHEL | `async-desktop-<version>-1.x86_64.rpm` (or `aarch64`): `sudo dnf install ./async-desktop-*.rpm` | by `dnf`/`zypper` |
+
+- **Windows (unsigned):** SmartScreen says "Windows protected your PC". Choose **More info → Run anyway**. The app is
+  installed to `%LocalAppData%\ASync.Desktop`; the agent runs as the logon task "ASync Agent". Notifications show under
+  "ASync".
+- **macOS (unsigned):** macOS refuses to open it the first time ("cannot verify that it is free of malware" or "is
+  damaged"). Right-click (Control-click) ASync in Applications → **Open** → **Open**; on macOS 15 and later, if there is
+  no Open button, go to **System Settings → Privacy & Security** and press **Open Anyway**. Or, in Terminal:
+  `xattr -dr com.apple.quarantine /Applications/ASync.app`. ASync lives in the menu bar (no Dock icon); the agent runs as
+  the LaunchAgent `ua.pp.chds.async.agent`.
+- **AppImage:** `chmod +x ASync.Desktop-linux-x64.AppImage` and run it. It needs FUSE (`libfuse2` or `fuse3`, present on
+  most desktops). The agent service it installs runs the AppImage file itself, so keep it where it is (or install the
+  agent again from the app after moving it); updates replace the file in place.
+- **.deb / .rpm:** installs `/opt/async-desktop` (with `async-desktop` in `/usr/bin`), a menu entry and the systemd user
+  unit `async-agent.service`, which nobody runs until they press *Install and start the agent* in the app (or
+  `systemctl --user enable --now async-agent`). The app does not update itself; the package manager does, and an
+  upgrade restarts running agents on the new version.
+
+**Uninstalling.** The agent service goes with the app; your device's identity, keys and settings (the config directory:
+`~/.config/async` on Linux and macOS, `%AppData%\async` on Windows) stay, so a reinstall picks up where you
+left off. Delete that folder (or run the uninstall command below with `--remove-data`) to remove them too, and remove
+the device in the web UI.
+- **Windows:** *Settings → Apps → ASync → Uninstall*. It stops and removes the agent's logon task and start at login.
+- **macOS:** run `/Applications/ASync.app/Contents/MacOS/async-desktop uninstall` (removes the LaunchAgents of the agent
+  and of start at login; add `--remove-data` for the config too), then move ASync to the Trash.
+- **AppImage:** `./ASync.Desktop-linux-x64.AppImage uninstall [--remove-data]`, then delete the file.
+- **.deb / .rpm:** `sudo apt remove async-desktop` / `sudo dnf remove async-desktop` stops and disables the agent of every
+  user that runs it and removes their start-at-login entries.
+
+`uninstall` leaves an agent service that runs another program (one set up with `async-cli service install`) alone.
+
+To build it yourself: `dotnet publish src/ASync.App.Desktop -c Release -o ~/async-desktop` (.NET 10 SDK), then run
+`~/async-desktop/async-desktop`; such a copy does not update itself. `scripts/package.sh <rid>` builds the installers
+(see "Development").
 
 ## Run an agent
 
@@ -370,8 +429,14 @@ device in the web UI, with local paths as the container sees them (`/data/photos
 
 ### Without Docker
 
-Build it with the .NET 10 SDK (`dotnet publish src/ASync.Cli -c Release -o ~/async-cli`) and run
-`~/async-cli/async-cli`. Its identity lives in `~/.config/async`, or in `ASYNC_CONFIG_DIR`, or in `--config <dir>`.
+Each [release](https://github.com/jncchds/ASync/releases) has `async-cli` as one self-contained file (no .NET needed) for
+Linux, Windows and macOS: `async-cli-<version>-<rid>.tar.gz` (`.zip` on Windows; rid `linux-x64`, `linux-arm64`,
+`win-x64`, `win-arm64`, `osx-arm64`), and as `async-cli_<version>_amd64.deb` / `async-cli-<version>-1.x86_64.rpm` (and
+arm64) with `/usr/bin/async-cli`. The packages are updated by the package manager, which also restarts a running
+`async-cli` service on the new version and, on removal, removes the services that run it. The archive is updated by
+hand: replace the file and run `async-cli service install` again (it restarts the service on the new version); there
+is no `async-cli update`. Or build it with the .NET 10 SDK (`dotnet publish src/ASync.Cli -c Release -o ~/async-cli`).
+Its identity lives in `~/.config/async`, or in `ASYNC_CONFIG_DIR`, or in `--config <dir>`.
 
 ```bash
 async-cli enroll --server https://sync.example.com --code K7QD-M2XP-9RWA   # or without --code: approve a link
@@ -476,6 +541,10 @@ data); they need the PostgreSQL of `docker-compose.test.yml` and are skipped wit
 The desktop app's tests are in `src/ASync.App.Tests` (view models and headless views, `dotnet test`); on Linux
 `scripts/smoke-desktop.sh` runs the real app on a virtual display (Xvfb) with the real agent service against a
 throw-away stack, and `SCREENSHOTS=docs/screenshots scripts/smoke-desktop.sh` refreshes the app's screenshots.
+`scripts/package.sh <rid>` builds the installers and packages of one target (Velopack via `dotnet tool restore`, nfpm
+for the .deb/.rpm); `scripts/smoke-packages.sh` installs and removes the .deb and .rpm in Debian and Fedora containers,
+and `scripts/smoke-update.sh` runs an AppImage under Xvfb and updates it from one local build to the next, agent
+service included.
 
 ## License
 

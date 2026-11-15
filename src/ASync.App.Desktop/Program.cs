@@ -2,6 +2,7 @@ using System.Reflection;
 using ASync.Agent;
 using ASync.Client.Core;
 using Avalonia;
+using Velopack;
 
 namespace ASync.App.Desktop;
 
@@ -16,6 +17,12 @@ internal sealed record DesktopOptions
     public bool System { get; init; }
     /// <summary><c>service run</c>: be the agent service instead of the app.</summary>
     public bool ServiceRun { get; init; }
+    /// <summary><c>uninstall</c>: remove the agent service and start at login (see <see cref="Uninstaller"/>).</summary>
+    public bool Uninstall { get; init; }
+    /// <summary><c>uninstall --remove-data</c>: also the identity, keys, settings and logs.</summary>
+    public bool RemoveData { get; init; }
+    /// <summary>The updater restarted the app after installing a new version.</summary>
+    public bool AfterUpdate { get; init; }
 
     public static string Version =>
         typeof(DesktopOptions).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
@@ -39,6 +46,9 @@ internal sealed record DesktopOptions
                 "--system" => o with { System = true },
                 "service" when i + 1 < args.Length && args[i + 1] == "run" => o with { ServiceRun = true },
                 "run" when o.ServiceRun => o,
+                "uninstall" => o with { Uninstall = true },
+                "--remove-data" => o with { RemoveData = true },
+                "--after-update" => o with { AfterUpdate = true },
                 _ => o, // unknown arguments (from a newer installer, or the OS) are ignored
             };
         }
@@ -61,6 +71,14 @@ internal static class Program
                 LogFile = options.LogFile, SystemService = options.System,
             }).GetAwaiter().GetResult();
         }
+
+        // Velopack's hooks (install, update, uninstall: it starts this program with --veloapp-* and exits it here). Updates are
+        // only applied when the person says so (UpdatesViewModel), never by themselves on start.
+        var velopack = VelopackApp.Build().SetAutoApplyOnStartup(false);
+        // Windows' uninstaller (Apps → ASync → Uninstall) calls this first: the agent service goes with the app.
+        if (OperatingSystem.IsWindows()) velopack = velopack.OnBeforeUninstallFastCallback(_ => Uninstaller.RunHook(options));
+        velopack.Run();
+        if (options.Uninstall) return Uninstaller.RunAsync(options, Console.Out, CancellationToken.None).GetAwaiter().GetResult();
 
         Directory.CreateDirectory(options.ConfigDirectory);
         using var instance = SingleInstance.TryAcquire(options.ConfigDirectory);
