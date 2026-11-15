@@ -113,6 +113,9 @@
   restore on its next run.
 - fix(test): `SameFileTwiceFromTheTrash_TheSecondGetsANewName` failed about half the time: both deletions could
   get the same millisecond trash stamp, and their order then came down to the random suffix.
+- docs: **ASync is MIT-licensed** (`LICENSE`).
+- chore: the version check-bump rule in `CLAUDE.md` looks for the release tag `v<VERSION>`, not for `VERSION` on
+  origin, since pushing `main` no longer releases anything.
 
 ## v0.1.3 — 2026-11-12
 

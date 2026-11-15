@@ -81,9 +81,11 @@ Key patterns:
    - Frontend: `npx tsc --noEmit -p tsconfig.app.json` and `npx eslint .` in `src/async-ui`.
    - Fix all errors. Fix warnings whenever that is safe without changing behaviour.
 2. **After every committed change**, run the version check-bump flow:
-   1. Check whether the current `VERSION` has been pushed to origin
-      (`git log origin/main..HEAD -- VERSION`). If it has, bump the patch number and add a new
-      `## v{version} — {date}` heading to `RELEASE_NOTES.md`. Otherwise reuse the current version.
+   1. Check whether the current `VERSION` has been released, i.e. its tag exists on origin
+      (`git fetch --tags origin && git rev-parse -q --verify "refs/tags/v$(cat VERSION)"`). If it has,
+      bump the patch number and add a new `## v{version} — {date}` heading to `RELEASE_NOTES.md`.
+      Otherwise reuse the current version. Pushing `main` without a tag releases nothing, so whether
+      `VERSION` is on origin does not matter.
    2. Make sure the heading for the current version carries today's date.
    3. Append a bullet for the change under that heading.
 3. **After every architectural or schema change**, update `AGENTS.md` (the design doc) and `README.md`

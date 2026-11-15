@@ -25,6 +25,7 @@ published apps, so mobile push goes through a relay that we host.
 | Extra data (v1) | Photos & videos, contacts, calendars. Not SMS/iMessage: iOS has no API, Google Play restricts SMS |
 | Distribution | Third parties self-host → a minimal stateless push relay that we host (free Cloudflare Worker) holds the APNs/FCM keys; self-hosters can also push directly or run their own relay (see "Push") |
 | Database | PostgreSQL 16 (EF Core + Npgsql) |
+| License | MIT (`LICENSE`) |
 | App identifiers | `ua.pp.chds.async`: the Android application id and the iOS bundle id |
 | Packages | Central versions in `Directory.Packages.props` with transitive pinning |
 | Engine crypto | BCL only, so it runs unchanged on iOS/Android: AES-256-GCM with per-object HKDF subkeys, HMAC-SHA256 blob ids, PBKDF2-SHA256 (600k) for passphrases. Not BLAKE3/XChaCha20 (not in the BCL) |
@@ -1249,7 +1250,6 @@ The gap list is complete: **M3 (desktop app) is next.**
 Open questions:
 - Should there be a SQLite option for small installs?
 - Apple and Google developer accounts, relay domain.
-- License.
 - Product name: "ASync" is hard to search for.
 
 ## Implementation notes (gotchas)

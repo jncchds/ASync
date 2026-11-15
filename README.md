@@ -389,3 +389,7 @@ See [CLAUDE.md](CLAUDE.md) for commands and rules, and [AGENTS.md](AGENTS.md) fo
 The tests include API-level checks of every endpoint (who may call it, and that nobody reaches someone else's
 data); they need the PostgreSQL of `docker-compose.test.yml` and are skipped without it.
 `scripts/e2e-sync.sh` runs the end-to-end sync test: a throw-away server stack on port 5190 and real agents.
+
+## License
+
+[MIT](LICENSE).
