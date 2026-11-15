@@ -141,6 +141,10 @@ public sealed class AsyncApiClient : IDisposable
     public Task<List<DeviceFolderDto>> GetFoldersAsync(CancellationToken ct = default) =>
         SendAsync<List<DeviceFolderDto>>(HttpMethod.Get, "api/sync/folders", null, true, ct);
 
+    /// <summary>Open problems the server sees with this device's folders (overdue, failing, failed check or prune).</summary>
+    public Task<List<DeviceFolderAlertDto>> GetFolderAlertsAsync(CancellationToken ct = default) =>
+        SendAsync<List<DeviceFolderAlertDto>>(HttpMethod.Get, "api/sync/folders/alerts", null, true, ct);
+
     public Task<DeviceFolderDto> UpdateOwnSettingsAsync(int folderId, UpdateDeviceFolderRequest req, CancellationToken ct = default) =>
         SendAsync<DeviceFolderDto>(HttpMethod.Patch, $"api/sync/folders/{folderId}", req, true, ct);
 

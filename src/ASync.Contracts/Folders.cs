@@ -80,6 +80,12 @@ public record DeviceFolderDto(
     long Revision, bool RepositoryReady, string LocalPath, MirrorDirection? Direction, bool Paused);
 
 /// <summary>A device changing its own settings for a folder (from the device's UI or CLI). Null = unchanged.</summary>
+/// <summary>
+/// An open problem the server sees with one of this device's folders (<c>GET /api/sync/folders/alerts</c>): this device
+/// is Overdue or Failing there, or the folder's last check or prune failed. Shown by the apps next to the folder.
+/// </summary>
+public record DeviceFolderAlertDto(int FolderId, AlertKind Kind, string Detail, DateTime OpenedAt);
+
 public record UpdateDeviceFolderRequest(string? LocalPath = null, MirrorDirection? Direction = null, bool? Paused = null, long? ExpectedRevision = null);
 
 public record SyncReportRequest(bool Ok, string? Message, int Uploaded = 0, int Downloaded = 0, int Deleted = 0, int Conflicts = 0, long Bytes = 0);

@@ -37,6 +37,22 @@ public static class ControlProtocol
         public const string Unlock = "unlock";
         /// <summary>Turn the connection into an event stream: a <c>status</c> event at once, then every change.</summary>
         public const string Subscribe = "subscribe";
+
+        // Added for the desktop app (still protocol 1: an older agent answers "Unknown operation").
+
+        /// <summary>
+        /// Enroll this device with an add-device code (<c>server</c>, <c>code</c>, <c>name</c>, <c>platform</c>). The agent
+        /// keeps the new identity and starts syncing. Result: <see cref="ControlResponse.Status"/>.
+        /// </summary>
+        public const string Enroll = "enroll";
+        /// <summary>
+        /// Start the device-code flow (<c>server</c>, <c>name</c>, <c>platform</c>): the result's
+        /// <see cref="ControlResponse.Enrollment"/> has the code to show and the approval link; the agent polls the server
+        /// and starts by itself once someone approves it (<see cref="AgentStatusDto.Enrollment"/> tracks the request).
+        /// </summary>
+        public const string DeviceCode = "device-code";
+        /// <summary>Forget this device's identity (sign out): stops syncing, deletes the identity and cancels a pending enrollment.</summary>
+        public const string Forget = "forget";
     }
 }
 
@@ -51,6 +67,14 @@ public sealed record ControlRequest
     public string? Secret { get; init; }
     /// <summary><c>sync</c>: let this run delete more than half of a folder's files.</summary>
     public bool AllowMassDelete { get; init; }
+    /// <summary><c>enroll</c>, <c>device-code</c>: the server's address.</summary>
+    public string? Server { get; init; }
+    /// <summary><c>enroll</c>: the add-device code. A one-time secret: never logged.</summary>
+    public string? Code { get; init; }
+    /// <summary><c>enroll</c>, <c>device-code</c>: this device's name.</summary>
+    public string? Name { get; init; }
+    /// <summary><c>enroll</c>, <c>device-code</c>: what to register the device as (default Cli).</summary>
+    public DevicePlatform? Platform { get; init; }
 }
 
 public sealed record ControlResponse
@@ -64,6 +88,8 @@ public sealed record ControlResponse
     public HelloDto? Hello { get; init; }
     public AgentStatusDto? Status { get; init; }
     public List<FolderRunDto>? Results { get; init; }
+    /// <summary><c>device-code</c>: the code to show and the link to approve it.</summary>
+    public PendingEnrollmentDto? Enrollment { get; init; }
 }
 
 /// <summary>A line of the event stream.</summary>
@@ -130,7 +156,18 @@ public sealed record AgentStatusDto
     /// <summary>The last connection problem (or why the device was revoked).</summary>
     public string? Problem { get; init; }
     public List<FolderStatusDto> Folders { get; init; } = [];
+    /// <summary>A device-code enrollment waiting for approval (or the reason it ended without one).</summary>
+    public PendingEnrollmentDto? Enrollment { get; init; }
 }
+
+/// <summary>
+/// A device-code request the agent is polling: show <see cref="UserCode"/> and open <see cref="VerificationUri"/>.
+/// <see cref="Error"/> is set when it was denied, expired or failed; the next enrollment clears it.
+/// </summary>
+public sealed record PendingEnrollmentDto(string Server, string Name, string UserCode, string VerificationUri, DateTimeOffset ExpiresAt, string? Error = null);
+
+/// <summary>An open problem the server sees with a folder on this device (see <c>GET /api/sync/folders/alerts</c>).</summary>
+public sealed record FolderAlertDto(AlertKind Kind, string Detail, DateTimeOffset OpenedAt);
 
 public sealed record DeviceInfoDto(Guid DeviceId, string DeviceName, string Username, string ServerUrl);
 
@@ -151,6 +188,8 @@ public sealed record FolderStatusDto
     public ProgressDto? Progress { get; init; }
     public FolderRunDto? LastResult { get; init; }
     public DateTimeOffset? NextRunAt { get; init; }
+    /// <summary>What the server's overdue detection reports for this folder and device (null: nothing, or not known yet).</summary>
+    public List<FolderAlertDto>? Alerts { get; init; }
 }
 
 /// <summary>
@@ -159,7 +198,8 @@ public sealed record FolderStatusDto
 /// </summary>
 public sealed record ProgressDto(int Files, int? TotalFiles, long Bytes, long? TotalBytes, string? CurrentFile);
 
-public sealed record FolderRunDto(int FolderId, string Name, bool Ok, string Message, bool Skipped, DateTimeOffset At);
+/// <summary>A run's result. <paramref name="Conflicts"/>: conflict copies the run made (TwoWay).</summary>
+public sealed record FolderRunDto(int FolderId, string Name, bool Ok, string Message, bool Skipped, DateTimeOffset At, int Conflicts = 0);
 
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     UseStringEnumConverter = true)]

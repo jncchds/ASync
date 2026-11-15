@@ -1,3 +1,4 @@
+using ASync.Contracts;
 using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Net.Sockets;
@@ -15,6 +16,17 @@ public interface IControlHandler
     Task<string> SetPausedAsync(int folderId, bool paused, CancellationToken ct);
     Task<string> SetPathAsync(int folderId, string path, CancellationToken ct);
     Task<string> UnlockAsync(int folderId, string secret, CancellationToken ct);
+
+    /// <summary>Enrolls with an add-device code; returns the new status.</summary>
+    Task<AgentStatusDto> EnrollAsync(string server, string code, string name, DevicePlatform platform, CancellationToken ct) =>
+        throw new ControlException("This agent cannot enroll devices.");
+
+    /// <summary>Starts the device-code flow; the agent polls for the approval itself.</summary>
+    Task<PendingEnrollmentDto> StartDeviceCodeAsync(string server, string name, DevicePlatform platform, CancellationToken ct) =>
+        throw new ControlException("This agent cannot enroll devices.");
+
+    /// <summary>Forgets the identity (and cancels a pending enrollment).</summary>
+    Task<string> ForgetAsync(CancellationToken ct) => throw new ControlException("This agent cannot forget its identity.");
 }
 
 /// <summary>An error the agent reports to the client as it is (no stack trace).</summary>
@@ -132,6 +144,8 @@ public sealed class ControlServer : IAsyncDisposable
         try
         {
             int Folder() => r.FolderId ?? throw new ControlException($"\"{r.Op}\" needs a folderId.");
+            string Need(string? value, string name) =>
+                !string.IsNullOrWhiteSpace(value) ? value.Trim() : throw new ControlException($"\"{r.Op}\" needs a {name}.");
             return r.Op switch
             {
                 ControlProtocol.Ops.Hello => new ControlResponse { Id = r.Id, Ok = true, Hello = _handler.Hello() },
@@ -149,6 +163,17 @@ public sealed class ControlServer : IAsyncDisposable
                     Id = r.Id, Ok = true,
                     Message = await _handler.UnlockAsync(Folder(), r.Secret is { Length: > 0 } s ? s : throw new ControlException("\"unlock\" needs a secret."), ct),
                 },
+                ControlProtocol.Ops.Enroll => new ControlResponse
+                {
+                    Id = r.Id, Ok = true,
+                    Status = await _handler.EnrollAsync(Need(r.Server, "server"), Need(r.Code, "code"), Need(r.Name, "name"), r.Platform ?? DevicePlatform.Cli, ct),
+                },
+                ControlProtocol.Ops.DeviceCode => new ControlResponse
+                {
+                    Id = r.Id, Ok = true,
+                    Enrollment = await _handler.StartDeviceCodeAsync(Need(r.Server, "server"), Need(r.Name, "name"), r.Platform ?? DevicePlatform.Cli, ct),
+                },
+                ControlProtocol.Ops.Forget => new ControlResponse { Id = r.Id, Ok = true, Message = await _handler.ForgetAsync(ct) },
                 _ => new ControlResponse { Id = r.Id, Error = $"Unknown operation \"{r.Op}\" (this agent speaks control protocol {ControlProtocol.Version})." },
             };
         }
