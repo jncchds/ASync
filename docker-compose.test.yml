@@ -1,5 +1,5 @@
 # Test servers for the storage back-end conformance tests (src/ASync.Tests/Storage).
-#   docker compose -f docker-compose.test.yml -p async-test up -d
+#   docker compose -f docker-compose.test.yml -p async-test up -d --wait   # returns once every server is ready
 #   eval "$(scripts/test-backends-env.sh)"      # exports ASYNC_TEST_* for the running containers
 #   dotnet test src/ASync.Tests/ASync.Tests.csproj
 # Without the ASYNC_TEST_* variables those tests are skipped.

@@ -302,7 +302,9 @@ users").
   - A test writes, reads, lists, renames and deletes a file under `.async-check/`.
 - **Test servers:** `docker-compose.test.yml` runs SeaweedFS (S3 — MinIO no longer publishes Docker Hub
   images), atmoz/sftp, Apache WebDAV and Samba. `scripts/test-backends-env.sh` exports the `ASYNC_TEST_*`
-  variables. Without them the remote tests are skipped.
+  variables. Without them the remote tests are skipped. Each service has a health check that passes only once it
+  serves requests (S3: an object can be written; PostgreSQL: over TCP, not the socket of the initdb server), so
+  `up -d --wait` returns when the stack is usable. Started cold, SeaweedFS refuses connections for about 10 s.
 - **Known gap:** a back-end can be pointed at hosts on the server's private network (SSRF). That is fine for
   self-hosting with trusted users; a multi-tenant deployment would need an allow-list.
 
@@ -1154,6 +1156,13 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
   - Image tags are `latest`, the `VERSION` value and `sha-…`.
   - Pushes to branches publish nothing. Pull requests run the tests and the end-to-end test, and a manual run
     (`workflow_dispatch`) builds the chosen ref.
+  - The `test` job builds Release with `-warnaserror`, starts `docker-compose.test.yml` with `up -d --wait` (every
+    server healthy) and runs `dotnet test --no-build` with the GitHubActionsTestLogger: failed tests appear as
+    annotations and in the job summary, readable without access to the raw logs. The TRX (`test-results`) and,
+    on failure, the test servers' logs (`test-server-logs`) are uploaded as artifacts
+    (`gh run download <run> -n test-results`). It then type-checks and lints the UI.
+  - Runners are pinned (`ubuntu-24.04`) rather than `ubuntu-latest`, so a runner image change happens in a commit;
+    actions are on their Node 24 majors.
 - **API-level tests** (`src/ASync.Tests/Api`, `[Trait("Category", "Api")]`): `WebApplicationFactory<Program>` runs the
   real server (every controller, the auth pipeline, EF Core, migrations) against a database of its own on the
   PostgreSQL of `docker-compose.test.yml` (`ASYNC_TEST_POSTGRES`, printed by `scripts/test-backends-env.sh`; dropped
