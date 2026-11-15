@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 dotnet build ASync.slnx
 dotnet test src/ASync.Tests/ASync.Tests.csproj
+dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj   # the desktop app: view models + Avalonia.Headless views (xunit v3)
 
 # Remote storage back-end tests and the API-level tests on PostgreSQL (skipped without the ASYNC_TEST_* variables).
 # --wait matters: a cold SeaweedFS refuses connections for ~10 s, and tests started earlier fail.
@@ -40,6 +41,7 @@ docker compose up postgres -d                 # database only
 dotnet run scripts/smoke-devices.cs -- http://localhost:5100 admin admin-password   # end-to-end device checks
 dotnet run scripts/smoke-storage.cs -- http://localhost:5100 admin admin-password   # storage checks (needs the test containers for S3)
 dotnet run scripts/smoke-snapshots.cs -- http://localhost:5100 admin admin-password # folders, a device backup, snapshot browsing/downloads
+XVFB=/path/to/Xvfb scripts/smoke-desktop.sh   # the real desktop app on Xvfb + agent service + throw-away stack (SCREENSHOTS=docs/screenshots)
 ```
 
 ### Releasing
@@ -57,6 +59,8 @@ Docker images are published only for version tags. After `VERSION` and `RELEASE_
 | `src/ASync.Core` | Domain models, repository interfaces, pure logic (`Security/Codes`, `Security/DeviceKeys`) |
 | `src/ASync.Infrastructure` | EF Core `AppDbContext` (PostgreSQL), repositories, migrations, Data Protection key store |
 | `src/ASync.Api` | Controllers, `Auth/` (JWT, OIDC, secrets command), `Services/DeviceProvisioningService`, hosted services |
+| `src/ASync.App` | Avalonia shared UI (views, view models, theme); platform services behind interfaces (`Services/`) |
+| `src/ASync.App.Desktop` | `async-desktop`: window, tray, single instance, start at login; also runs as the agent service |
 | `src/async-ui` | React 19 + TypeScript + Vite SPA, served from the API's `wwwroot` |
 | `src/ASync.Tests` | xUnit with hand-written fakes (`Fakes.cs`) |
 

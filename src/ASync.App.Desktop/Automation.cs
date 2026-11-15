@@ -23,7 +23,7 @@ namespace ASync.App.Desktop;
 /// <item><c>folder &lt;folder name&gt; &lt;button text&gt;</c>: a button in that folder's card.</item>
 /// <item><c>pick-folder &lt;path&gt;</c>: what the next folder picker returns.</item>
 /// <item><c>tray &lt;item header&gt;</c>: a tray menu item.</item>
-/// <item><c>screenshot &lt;file.png&gt;</c>, <c>tray-icon &lt;file.png&gt;</c>, <c>resize &lt;w&gt; &lt;h&gt;</c>,
+/// <item><c>screenshot &lt;file.png&gt;</c>, <c>tray-icon &lt;status&gt; &lt;file.png&gt;</c>, <c>resize &lt;w&gt; &lt;h&gt;</c>,
 ///   <c>theme light|dark|system</c>, <c>show</c>, <c>close</c>, <c>quit</c>.</item>
 /// </list>
 /// </summary>
@@ -79,7 +79,7 @@ internal static class Automation
             "pick-folder" => PickFolder(platform, arg),
             "tray" => Tray(arg),
             "screenshot" => Save(window, arg),
-            "tray-icon" => SaveTrayIcon(shell, arg),
+            "tray-icon" => SaveTrayIcon(arg),
             "resize" => Resize(window, arg),
             "theme" => Theme(platform, arg),
             "show" => Do(() => DesktopApp.ShowWindow(window)),
@@ -180,9 +180,7 @@ internal static class Automation
     {
         var app = Application.Current as DesktopApp ?? throw new InvalidOperationException("not the desktop app");
         var item = app.TrayItems().FirstOrDefault(i => i.Header == header) ?? throw new InvalidOperationException($"no tray item {header}");
-        if (item.Command is { } command) command.Execute(item.CommandParameter);
-        else typeof(NativeMenuItem).GetMethod("RaiseClick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)
-            ?.Invoke(item, null);
+        (item.Command ?? throw new InvalidOperationException($"tray item {header} has no command")).Execute(item.CommandParameter);
         return Ok(new JsonObject { ["headers"] = new JsonArray([.. app.TrayItems().Select(i => (JsonNode?)i.Header)]) });
     }
 
@@ -196,11 +194,14 @@ internal static class Automation
         return Ok(file);
     }
 
-    private static JsonObject SaveTrayIcon(ShellViewModel shell, string file)
+    /// <summary><c>tray-icon &lt;ok|syncing|problem&gt; &lt;file&gt;</c>: one of the tray's icons, 64 px.</summary>
+    private static JsonObject SaveTrayIcon(string arg)
     {
-        using var bitmap = TrayIcons.Render(shell.TrayStatus, 64);
-        bitmap.Save(file, PngBitmapEncoderOptions.Default);
-        return Ok(shell.TrayStatus.ToString());
+        var parts = arg.Split(' ', 2);
+        var status = Enum.Parse<TrayStatus>(parts[0], ignoreCase: true);
+        using var bitmap = TrayIcons.Render(status, 64);
+        bitmap.Save(parts[1], PngBitmapEncoderOptions.Default);
+        return Ok(parts[1]);
     }
 
     private static JsonObject Resize(MainWindow window, string arg)

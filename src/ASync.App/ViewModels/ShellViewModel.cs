@@ -207,7 +207,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             case ControlEventKinds.Folder or ControlEventKinds.RunFinished when e.Folder is { } folder && Status is { } current:
                 Status = current with { Folders = [.. current.Folders.Select(f => f.FolderId == folder.FolderId ? folder : f)] };
                 Dashboard.UpdateFolder(folder);
-                if (e.Kind == ControlEventKinds.RunFinished && (e.Result ?? folder.LastResult) is { } result) OnRunFinished(result);
+                if (e.Kind == ControlEventKinds.RunFinished && (e.Result ?? folder.LastResult) is { } result) OnRunFinished(result, folder);
                 break;
         }
         UpdateTray();
@@ -234,9 +234,11 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>A system notification when a folder starts failing (not on every retry) and for conflict copies.</summary>
-    private void OnRunFinished(FolderRunDto result)
+    private void OnRunFinished(FolderRunDto result, FolderStatusDto folder)
     {
         var notify = Settings.Notifications;
+        // A locked end-to-end folder cannot run until it is unlocked: its card says so, a notification on every try would not help.
+        if (!result.Ok && !result.Skipped && folder.Locked) return;
         if (!result.Ok && !result.Skipped)
         {
             if (_failing.Add(result.FolderId) && notify) Platform.Notify($"Sync failed: {result.Name}", result.Message);
@@ -281,10 +283,25 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
 
     // ── Actions ───────────────────────────────────────────────────────────────
 
+    /// <summary>How long a message about a success stays (errors stay until dismissed or replaced).</summary>
+    public TimeSpan MessageLifetime { get; init; } = TimeSpan.FromSeconds(8);
+
+    private int _messageVersion;
+
     public void ShowMessage(string? message, bool error = false)
     {
         Message = message;
         MessageIsError = error;
+        var version = ++_messageVersion;
+        if (message is not null && !error) _ = ClearLaterAsync(version);
+    }
+
+    private async Task ClearLaterAsync(int version)
+    {
+        try { await Task.Delay(MessageLifetime, Time, _stop.Token); }
+        catch (OperationCanceledException) { return; }
+        catch (ObjectDisposedException) { return; }
+        if (version == _messageVersion) Message = null;
     }
 
     [RelayCommand]

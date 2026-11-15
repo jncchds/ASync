@@ -4,6 +4,7 @@ using ASync.App.ViewModels;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
+using CommunityToolkit.Mvvm.Input;
 
 namespace ASync.App.Desktop;
 
@@ -72,12 +73,7 @@ internal sealed class DesktopApp : App
 
     private TrayIcon BuildTray(ShellViewModel shell, MainWindow window, IClassicDesktopStyleApplicationLifetime desktop)
     {
-        NativeMenuItem Item(string header, Action click)
-        {
-            var item = new NativeMenuItem(header);
-            item.Click += (_, _) => click();
-            return item;
-        }
+        static NativeMenuItem Item(string header, Action click) => new(header) { Command = new RelayCommand(click) };
         _pauseItem = Item(shell.PauseAllText, () => shell.PauseAllCommand.Execute(null));
         var menu = new NativeMenu
         {

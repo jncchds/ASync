@@ -123,6 +123,34 @@ public class ShellViewModelTests
     }
 
     [Fact]
+    public async Task ALockedFolder_RaisesNoFailureNotification()
+    {
+        await using var f = new ShellFixture().Start(Statuses.Connected(Statuses.Folder() with { Locked = true }));
+        await ShellFixture.Until(() => f.Shell.Page is DashboardViewModel);
+        f.Agent.PushRun(Statuses.Folder() with
+        {
+            Locked = true, LastResult = new FolderRunDto(1, "Docs", false, "locked", false, DateTimeOffset.UtcNow),
+        });
+        await ShellFixture.Until(() => f.Shell.Dashboard.Folders[0].LastResultText == "Failed: locked");
+        Assert.Empty(f.Platform.Notifications);
+    }
+
+    [Fact]
+    public async Task SuccessMessages_GoAwayByThemselves_ErrorsStay()
+    {
+        var agent = new FakeAgent();
+        await using var shell = new ShellViewModel(agent, new FakeService(), new FakePlatform(), new MemorySettings())
+        {
+            MessageLifetime = TimeSpan.FromMilliseconds(100),
+        };
+        shell.ShowMessage("done");
+        await ShellFixture.Until(() => shell.Message is null, "the message to go");
+        shell.ShowMessage("broken", error: true);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.Equal("broken", shell.Message);
+    }
+
+    [Fact]
     public async Task PauseAll_PausesEveryFolder_ThenResumeAll()
     {
         await using var f = new ShellFixture().Start(Statuses.Connected(Statuses.Folder(), Statuses.Folder(2, "Photos", "/p")));

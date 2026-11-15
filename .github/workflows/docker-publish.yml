@@ -39,6 +39,12 @@ jobs:
             --logger "GitHubActions;summary-include-passed=false" \
             --logger "trx;LogFileName=tests.trx" --results-directory TestResults
 
+      # The app's view models and its views in Avalonia.Headless (no display needed).
+      - name: Run app tests
+        run: >
+          dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj --configuration Release --no-build
+          --logger "trx;LogFileName=app-tests.trx" --results-directory TestResults
+
       - name: Upload test results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
@@ -73,10 +79,12 @@ jobs:
           npx tsc --noEmit -p tsconfig.app.json
           npx eslint .
 
-  # The agent on the desktop systems: builds async-cli, the agent and the tests there (DPAPI, named pipes, the Keychain
-  # binding and launchd/Task Scheduler code only compile on Linux) and runs the agent's unit tests, which need no Docker:
-  # the control protocol over a named pipe (Windows) or a Unix socket (macOS), the single-instance lock, CLI routing,
-  # the service files, secrets (DPAPI on Windows). Installing a real service is only exercised on Linux (smoke test).
+  # The agent and the desktop app on the desktop systems: builds async-cli, the agent, the desktop app (async-desktop) and
+  # the tests there (DPAPI, named pipes, the Keychain binding, launchd/Task Scheduler, the Run key and the toast code are
+  # only compiled on Linux) and runs the agent's unit tests, which need no Docker: the control protocol over a named pipe
+  # (Windows) or a Unix socket (macOS), the single-instance lock, CLI routing, the service files, secrets (DPAPI on
+  # Windows), and the app's view-model and headless view tests. Installing a real service and running the real app are
+  # only exercised on Linux (scripts/smoke-agent-service.sh, scripts/smoke-desktop.sh).
   agent-desktop:
     strategy:
       fail-fast: false
@@ -92,16 +100,21 @@ jobs:
         with:
           dotnet-version: '10.x'
 
-      - name: Build agent, CLI and tests (warnings are errors)
+      - name: Build agent, CLI, desktop app and tests (warnings are errors)
         run: |
           dotnet build src/ASync.Cli/ASync.Cli.csproj --configuration Release -warnaserror
           dotnet build src/ASync.Tests/ASync.Tests.csproj --configuration Release -warnaserror
+          dotnet build src/ASync.App.Desktop/ASync.App.Desktop.csproj --configuration Release -warnaserror
+          dotnet build src/ASync.App.Tests/ASync.App.Tests.csproj --configuration Release -warnaserror
 
       - name: Agent unit tests
         run: >
           dotnet test src/ASync.Tests/ASync.Tests.csproj --configuration Release --no-build
           --filter "FullyQualifiedName~ASync.Tests.Agent"
           --logger "GitHubActions;summary-include-passed=false"
+
+      - name: App tests (view models, headless views)
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj --configuration Release --no-build
 
   # The real server stack (docker compose) with two async-cli agents plus one in the async-cli image: TwoWay, Mirror,
   # Backup (Transport and end-to-end), live updates and revocation. See scripts/e2e-sync.cs.

@@ -48,7 +48,7 @@
               <TextBlock Classes="muted small" Text="{Binding ExpiresText}" />
               <WrapPanel ItemSpacing="8" LineSpacing="8">
                 <Button Classes="small" Content="Open the approval page" Command="{Binding OpenApprovalLinkCommand}" />
-                <Button Classes="small secondary" Content="Cancel" Command="{Binding CancelPendingCommand}" />
+                <Button Classes="small secondary" Name="CancelPending" Content="Cancel" Command="{Binding CancelPendingCommand}" />
               </WrapPanel>
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <ProgressBar IsIndeterminate="True" Width="80" VerticalAlignment="Center" />
