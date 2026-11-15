@@ -19,6 +19,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { StartAtLogin = false; }
         Theme = shell.Settings.Theme;
         Notifications = shell.Settings.Notifications;
+        CheckForUpdates = shell.Settings.CheckForUpdates;
         _loaded = true;
     }
 
@@ -37,6 +38,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     public bool IsDarkTheme { get => Theme == ThemeChoice.Dark; set { if (value) Theme = ThemeChoice.Dark; } }
 
     [ObservableProperty] public partial bool Notifications { get; set; }
+
+    [ObservableProperty] public partial bool CheckForUpdates { get; set; }
+
+    public UpdatesViewModel Updates => _shell.Updates;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanSignOut))]
@@ -87,6 +92,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     partial void OnNotificationsChanged(bool value)
     {
         if (_loaded) _shell.SaveSettings(_shell.Settings with { Notifications = value });
+    }
+
+    partial void OnCheckForUpdatesChanged(bool value)
+    {
+        if (!_loaded) return;
+        _shell.SaveSettings(_shell.Settings with { CheckForUpdates = value });
+        _shell.Updates.SettingChanged(value);
     }
 
     [RelayCommand]

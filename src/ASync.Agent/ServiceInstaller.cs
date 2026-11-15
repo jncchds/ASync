@@ -43,15 +43,44 @@ public static class ServiceInstaller
     public const string LaunchdLabel = "ua.pp.chds.async.agent";
     public const string WindowsTaskName = "ASync Agent";
 
-    /// <summary>How to start this same program again: the apphost, or <c>dotnet</c> with the dll.</summary>
-    public static IReadOnlyList<string> CurrentProgram()
+    /// <summary>
+    /// How to start this same program again: the apphost, <c>dotnet</c> with the dll, or the AppImage file when running
+    /// from one (the process itself lives in the AppImage's mount, which is gone when it exits).
+    /// </summary>
+    public static IReadOnlyList<string> CurrentProgram() =>
+        CurrentProgram(Environment.ProcessPath ?? throw new InvalidOperationException("Cannot tell which program is running."),
+#pragma warning disable IL3000 // empty in a single-file app (the published async-cli), which never runs under `dotnet`
+            System.Reflection.Assembly.GetEntryAssembly()?.Location,
+#pragma warning restore IL3000
+            Environment.GetEnvironmentVariable("APPIMAGE"), Environment.GetEnvironmentVariable("APPDIR"));
+
+    internal static IReadOnlyList<string> CurrentProgram(string process, string? entryDll, string? appImage, string? appDir)
     {
-        var process = Environment.ProcessPath ?? throw new InvalidOperationException("Cannot tell which program is running.");
-        if (Path.GetFileNameWithoutExtension(process).Equals("dotnet", StringComparison.OrdinalIgnoreCase)
-            && System.Reflection.Assembly.GetEntryAssembly()?.Location is { Length: > 0 } dll)
+        if (appImage is { Length: > 0 } && appDir is { Length: > 0 }
+            && process.StartsWith(appDir.TrimEnd('/') + "/", StringComparison.Ordinal))
+            return [appImage];
+        if (Path.GetFileNameWithoutExtension(process).Equals("dotnet", StringComparison.OrdinalIgnoreCase) && entryDll is { Length: > 0 } dll)
             return [process, dll];
         return [process];
     }
+
+    /// <summary>
+    /// The user unit the .deb and .rpm packages of the desktop app ship (<c>/usr/lib/systemd/user</c>). The per-user install
+    /// enables it instead of writing its own when its own would say the same (this program, the default config directory,
+    /// no extra options), so the package manager owns the file and removes it with the package.
+    /// </summary>
+    public const string PackagedUnitPath = "/usr/lib/systemd/user/" + SystemdUnitName;
+
+    internal static bool UsesPackagedUnit(ServiceInstallOptions o, string? packagedUnit, string defaultConfigDirectory) =>
+        !o.System && packagedUnit is not null && !o.Verbose && o.LogFile is null && o.Program.Count == 1
+        && Path.GetFullPath(o.ConfigDirectory).TrimEnd('/') == Path.GetFullPath(defaultConfigDirectory).TrimEnd('/')
+        && packagedUnit.Contains($"\nExecStart={SystemdUnit.Quote(o.Program[0])} service run\n", StringComparison.Ordinal);
+
+    /// <summary>Where the packaged unit's agent keeps its config: the default without <c>ASYNC_CONFIG_DIR</c> (a user manager does not set it).</summary>
+    private static string PackagedConfigDirectory =>
+        Path.Combine(Environment.GetEnvironmentVariable("XDG_CONFIG_HOME") is { Length: > 0 } x ? x : Path.Combine(Home, ".config"), "async");
+
+    private static string? ReadPackagedUnit() => File.Exists(PackagedUnitPath) ? File.ReadAllText(PackagedUnitPath) : null;
 
     /// <summary>The arguments the service starts the agent with.</summary>
     public static List<string> RunArguments(ServiceInstallOptions o)
@@ -89,6 +118,14 @@ public static class ServiceInstaller
         if (OperatingSystem.IsLinux())
         {
             var path = UnitPath(o.System);
+            if (UsesPackagedUnit(o, ReadPackagedUnit(), PackagedConfigDirectory))
+            {
+                if (File.Exists(path)) File.Delete(path); // an older unit of ours would hide the packaged one
+                await RunChecked("systemctl", ["--user", "daemon-reload"], ct);
+                await RunChecked("systemctl", ["--user", "enable", SystemdUnitName], ct);
+                if (start) await RunChecked("systemctl", ["--user", "restart", SystemdUnitName], ct);
+                return new ServiceResult(true, $"Enabled {PackagedUnitPath}{(start ? " and started it" : "")}.\nLogs: journalctl --user -u {SystemdUnitName} -f");
+            }
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             await File.WriteAllTextAsync(path, SystemdUnit.Render(o), ct);
             var scope = o.System ? "" : "--user ";
@@ -201,14 +238,73 @@ public static class ServiceInstaller
         return new ServiceResult(false, "Not supported on this OS.");
     }
 
+    /// <summary>
+    /// Stops the service without removing it, so its program can be replaced (an update): the agent finishes or cancels
+    /// what it is doing and exits cleanly (transfers resume on the next start). Not an error when it is not running.
+    /// </summary>
+    public static async Task<ServiceResult> StopAsync(bool system, CancellationToken ct = default)
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            await Run("systemctl", [.. Scope(system), "stop", SystemdUnitName], ct);
+            return new ServiceResult(true, "Stopped the agent.");
+        }
+        if (OperatingSystem.IsMacOS())
+        {
+            // bootout waits for the process to exit; StartAsync bootstraps it again.
+            await Run("launchctl", ["bootout", $"{LaunchdDomain(system)}/{LaunchdLabel}"], ct);
+            return new ServiceResult(true, "Stopped the agent.");
+        }
+        if (OperatingSystem.IsWindows())
+        {
+            if (system) await Run("sc.exe", ["stop", AgentHost.WindowsServiceName], ct);
+            else await Run("schtasks.exe", ["/End", "/TN", WindowsTaskName], ct);
+            return new ServiceResult(true, "Stopped the agent.");
+        }
+        return new ServiceResult(false, "Not supported on this OS.");
+    }
+
+    /// <summary>
+    /// The per-user (or system) service's definition as installed — the unit file (the user's own, else the packaged one),
+    /// the plist, the task XML or the Windows Service's configuration — or null when none is installed. Callers check
+    /// which program it runs before removing it (uninstalling the desktop app leaves an async-cli agent alone).
+    /// </summary>
+    public static async Task<string?> DefinitionAsync(bool system, CancellationToken ct = default)
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            var path = UnitPath(system);
+            if (File.Exists(path)) return await File.ReadAllTextAsync(path, ct);
+            return !system && File.Exists(PackagedUnitPath) && (await Run("systemctl", ["--user", "is-enabled", SystemdUnitName], ct)).Exit == 0
+                ? await File.ReadAllTextAsync(PackagedUnitPath, ct) : null;
+        }
+        if (OperatingSystem.IsMacOS()) return File.Exists(PlistPath(system)) ? await File.ReadAllTextAsync(PlistPath(system), ct) : null;
+        if (OperatingSystem.IsWindows())
+        {
+            var r = system ? await Run("sc.exe", ["qc", AgentHost.WindowsServiceName], ct)
+                : await Run("schtasks.exe", ["/Query", "/TN", WindowsTaskName, "/XML"], ct);
+            return r.Exit == 0 ? r.Output : null;
+        }
+        return null;
+    }
+
+    /// <summary>Whether a service <paramref name="definition"/> starts <paramref name="program"/> (as written by the renderers below).</summary>
+    public static bool Runs(string definition, string program)
+    {
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return definition.Contains(program, comparison) || definition.Contains(SecurityElement.Escape(program), comparison)
+               || definition.Contains(SystemdUnit.Quote(program), comparison);
+    }
+
     /// <summary>What the service manager says: installed, running.</summary>
     public static async Task<(bool Installed, bool Running, string Detail)> StatusAsync(bool system, CancellationToken ct = default)
     {
         if (OperatingSystem.IsLinux())
         {
-            var installed = File.Exists(UnitPath(system));
+            var installed = File.Exists(UnitPath(system))
+                || (!system && File.Exists(PackagedUnitPath) && (await Run("systemctl", ["--user", "is-enabled", SystemdUnitName], ct)).Exit == 0);
             var active = await Run("systemctl", [.. Scope(system), "is-active", SystemdUnitName], ct);
-            return (installed, active.Exit == 0, $"{UnitPath(system)}: {(installed ? active.Output.Trim() : "not installed")}");
+            return (installed, active.Exit == 0, $"{SystemdUnitName}: {(installed ? active.Output.Trim() : "not installed")}");
         }
         if (OperatingSystem.IsMacOS())
         {

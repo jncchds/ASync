@@ -4,7 +4,7 @@
              x:Class="ASync.App.Views.ShellView"
              x:DataType="vm:ShellViewModel"
              Background="{DynamicResource Bg}">
-  <Grid RowDefinitions="Auto,Auto,*">
+  <Grid RowDefinitions="Auto,Auto,Auto,*">
     <!-- Top bar: app name and version pill (like the web UI's sidebar head), web UI and settings. -->
     <Border Grid.Row="0" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"
             Padding="14,8">
@@ -44,19 +44,36 @@
       </Grid>
     </Border>
 
-    <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
+    <!-- A new version: nothing is installed until "Install and restart" is pressed. -->
+    <Border Grid.Row="2" Name="UpdateBanner" IsVisible="{Binding Updates.ShowBanner}" Padding="14,10" BorderThickness="0,0,0,1"
+            Background="{DynamicResource AccentFaint}" BorderBrush="{DynamicResource AccentSoft}">
+      <StackPanel Spacing="8">
+        <TextBlock Name="UpdateText" Text="{Binding Updates.BannerText}" TextWrapping="Wrap" FontSize="13.5" />
+        <ProgressBar Value="{Binding Updates.Progress}" Maximum="100" IsVisible="{Binding Updates.ShowProgress}" Height="6" />
+        <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <Button Classes="small" Name="InstallUpdate" Content="Install and restart" Command="{Binding Updates.InstallCommand}"
+                  IsVisible="{Binding Updates.CanInstall}" />
+          <Button Classes="small secondary" Name="InstallUpdateNow" Content="Don't wait: stop the sync and install"
+                  Command="{Binding Updates.InstallNowCommand}" IsVisible="{Binding Updates.IsWaitingForSync}" />
+          <Button Classes="small secondary" Name="UpdateLater" Content="Later" Command="{Binding Updates.LaterCommand}"
+                  IsVisible="{Binding Updates.CanInstall}" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
+
+    <ScrollViewer Grid.Row="3" HorizontalScrollBarVisibility="Disabled">
       <ContentControl Name="PageHost" Content="{Binding Page}" MaxWidth="860" Padding="16" />
     </ScrollViewer>
 
     <!-- Settings cover the page while open. -->
-    <Border Grid.Row="2" Background="{DynamicResource Bg}" IsVisible="{Binding SettingsPage, Converter={x:Static ObjectConverters.IsNotNull}}">
+    <Border Grid.Row="3" Background="{DynamicResource Bg}" IsVisible="{Binding SettingsPage, Converter={x:Static ObjectConverters.IsNotNull}}">
       <ScrollViewer HorizontalScrollBarVisibility="Disabled">
         <ContentControl Name="SettingsHost" Content="{Binding SettingsPage}" MaxWidth="860" Padding="16" />
       </ScrollViewer>
     </Border>
 
     <!-- Dialogs (unlock) over everything. -->
-    <Border Grid.Row="0" Grid.RowSpan="3" Background="{DynamicResource Backdrop}"
+    <Border Grid.Row="0" Grid.RowSpan="4" Background="{DynamicResource Backdrop}"
             IsVisible="{Binding Dialog, Converter={x:Static ObjectConverters.IsNotNull}}">
       <ContentControl Name="DialogHost" Content="{Binding Dialog}" VerticalAlignment="Center" HorizontalAlignment="Stretch" MaxWidth="460" Margin="16" />
     </Border>

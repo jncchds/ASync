@@ -148,6 +148,18 @@
 - fix: **a folder (or a directory in it) that the agent cannot read no longer counts as empty.** A two-way sync then
   deleted its files on the storage (into the storage's trash) when there were too few to trip the mass-deletion guard.
   Now the run fails with "Cannot read … (permission denied). Nothing was changed". Found by the desktop app's smoke test.
+- feat: **Installers, and the desktop app updates itself.** Every release now has the desktop app for Windows (x64 and
+  ARM64: `Setup.exe`, per user, no administrator), macOS (Apple silicon: `.dmg` and `.pkg`) and Linux (x64 and ARM64:
+  AppImage, `.deb`, `.rpm`), and `async-cli` as one self-contained file per system plus `.deb`/`.rpm`. The app looks for
+  a new version after it starts and once a day (*Settings → Updates* turns that off) and shows it in the window and the
+  tray; *Install and restart* waits for a running sync to finish, stops the agent, installs the update and starts the
+  app and the agent again on the new version. The `.deb`/`.rpm` are updated by the package manager, which restarts
+  running agents. Uninstalling removes the agent service too and keeps your device's identity and keys (`async-desktop
+  uninstall --remove-data`, or delete the config folder, removes them): Windows' uninstaller does it, on macOS and for
+  the AppImage run `async-desktop uninstall`, and removing the `.deb`/`.rpm` does it for every user. Windows
+  notifications now show under "ASync". The builds are not code-signed yet (the README says how to open them); signing
+  switches on in CI once certificates are added. Tried on Linux (the `.deb`/`.rpm` on Debian and Fedora, the AppImage
+  including an update with the agent restart); the Windows and macOS installers are built in CI but not tried yet.
 
 ## v0.1.3 — 2026-11-12
 

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ASync.app's Info.plist (scripts/package.sh fills in @VERSION@ and builds the bundle around the publish output).
+  LSUIElement: ASync lives in the menu bar (its tray icon) and has no Dock icon or app menu, like other sync apps; the
+  window opens from the menu-bar icon. The agent service runs this same program from Contents/MacOS as the LaunchAgent
+  ua.pp.chds.async.agent (~/Library/LaunchAgents), start at login is the LaunchAgent ua.pp.chds.async.app.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>ua.pp.chds.async</string>
+  <key>CFBundleName</key>
+  <string>ASync</string>
+  <key>CFBundleDisplayName</key>
+  <string>ASync</string>
+  <key>CFBundleExecutable</key>
+  <string>async-desktop</string>
+  <key>CFBundleIconFile</key>
+  <string>ASync.icns</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@VERSION@</string>
+  <key>CFBundleVersion</key>
+  <string>@VERSION@</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>12.0</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.productivity</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright © 2026 Kirill Chekanov. MIT licence.</string>
+</dict>
+</plist>

@@ -51,6 +51,21 @@
     </Border>
 
     <Border Classes="card">
+      <StackPanel Spacing="10">
+        <TextBlock Classes="h2" Text="Updates" />
+        <CheckBox Name="CheckForUpdates" Content="Check for new versions automatically" IsChecked="{Binding CheckForUpdates}"
+                  IsVisible="{Binding Updates.IsSupported}" />
+        <TextBlock Name="UpdateStatus" Classes="muted" Text="{Binding Updates.StatusText}" TextWrapping="Wrap" />
+        <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding Updates.IsSupported}">
+          <Button Classes="secondary" Name="CheckUpdatesNow" Content="Check now" Command="{Binding Updates.CheckNowCommand}"
+                  IsEnabled="{Binding Updates.CanCheck}" />
+          <Button Name="InstallUpdateFromSettings" Content="Install and restart" Command="{Binding Updates.InstallCommand}"
+                  IsVisible="{Binding Updates.CanInstall}" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
+
+    <Border Classes="card">
       <StackPanel Spacing="6">
         <TextBlock Classes="h2" Text="About" />
         <TextBlock Name="AppVersion" Text="{Binding AppText}" />

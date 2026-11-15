@@ -1,0 +1,76 @@
+# The desktop app as a .deb and .rpm (nfpm; built by scripts/package.sh, which sets the variables). The package manager
+# updates it: no Velopack, no self-update (the app says so in Settings). Ships the systemd user unit for the agent and
+# the desktop entry; the agent is not enabled for anyone until they set it up in the app.
+name: async-desktop
+version: ${VERSION}
+arch: ${ARCH}
+platform: linux
+section: net
+priority: optional
+maintainer: Kirill Chekanov
+vendor: ASync
+homepage: https://github.com/jncchds/ASync
+license: MIT
+description: |
+  ASync desktop app and sync agent.
+  Syncs and backs up folders through a self-hosted ASync server. The app shows and steers the agent, which runs in the
+  background as a systemd user service.
+# Self-contained .NET: needs only the C library, ICU (globalization) and, for the window, X11 or XWayland and fontconfig.
+depends:
+  - libicu78 | libicu77 | libicu76 | libicu75 | libicu74 | libicu73 | libicu72 | libicu71 | libicu70
+  - libfontconfig1
+overrides:
+  rpm:
+    depends:
+      - libicu
+      - fontconfig
+contents:
+  - src: ${PUBLISH_DIR}/
+    dst: /opt/async-desktop/
+    type: tree
+  - src: /opt/async-desktop/async-desktop
+    dst: /usr/bin/async-desktop
+    type: symlink
+  - src: packaging/linux/async-agent.service
+    dst: /usr/lib/systemd/user/async-agent.service
+    file_info:
+      mode: 0644
+  - src: packaging/linux/ua.pp.chds.async.desktop
+    dst: /usr/share/applications/ua.pp.chds.async.desktop
+    file_info:
+      mode: 0644
+  - src: packaging/icons/async-16.png
+    dst: /usr/share/icons/hicolor/16x16/apps/ua.pp.chds.async.png
+    file_info:
+      mode: 0644
+  - src: packaging/icons/async-32.png
+    dst: /usr/share/icons/hicolor/32x32/apps/ua.pp.chds.async.png
+    file_info:
+      mode: 0644
+  - src: packaging/icons/async-48.png
+    dst: /usr/share/icons/hicolor/48x48/apps/ua.pp.chds.async.png
+    file_info:
+      mode: 0644
+  - src: packaging/icons/async-64.png
+    dst: /usr/share/icons/hicolor/64x64/apps/ua.pp.chds.async.png
+    file_info:
+      mode: 0644
+  - src: packaging/icons/async-128.png
+    dst: /usr/share/icons/hicolor/128x128/apps/ua.pp.chds.async.png
+    file_info:
+      mode: 0644
+  - src: packaging/icons/async-256.png
+    dst: /usr/share/icons/hicolor/256x256/apps/ua.pp.chds.async.png
+    file_info:
+      mode: 0644
+  - src: packaging/icons/async-512.png
+    dst: /usr/share/icons/hicolor/512x512/apps/ua.pp.chds.async.png
+    file_info:
+      mode: 0644
+  - src: LICENSE
+    dst: /usr/share/doc/async-desktop/copyright
+    file_info:
+      mode: 0644
+scripts:
+  postinstall: ${SCRIPTS_DIR}/postinstall.sh
+  preremove: ${SCRIPTS_DIR}/preremove.sh

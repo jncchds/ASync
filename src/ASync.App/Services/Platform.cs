@@ -49,6 +49,13 @@ public sealed record AppSettings
     public bool Notifications { get; init; } = true;
     /// <summary>The server address last used to enroll, offered again after signing out.</summary>
     public string? LastServer { get; init; }
+    /// <summary>Look for new versions after start-up and once a day.</summary>
+    public bool CheckForUpdates { get; init; } = true;
+    /// <summary>
+    /// Where updates come from instead of the project's GitHub Releases: a GitHub repository URL, another feed URL or a
+    /// local folder with Velopack's release files (no UI; for testing and private mirrors). <c>ASYNC_UPDATE_URL</c> wins.
+    /// </summary>
+    public string? UpdateFeed { get; init; }
 }
 
 public interface ISettingsStore

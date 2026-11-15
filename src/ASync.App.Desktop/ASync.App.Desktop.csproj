@@ -10,10 +10,13 @@
     <RootNamespace>ASync.App.Desktop</RootNamespace>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The exe's icon in Explorer and the taskbar (packaging/icons, drawn by scripts/render-icons.cs). -->
+    <ApplicationIcon>..\..\packaging\icons\async.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Velopack" />
   </ItemGroup>
 
   <ItemGroup>

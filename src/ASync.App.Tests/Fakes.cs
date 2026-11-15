@@ -104,6 +104,12 @@ internal sealed class FakeService : IAgentServiceManager
         OnInstall?.Invoke();
         return Task.FromResult("started");
     }
+
+    public Task<string> StopAsync(CancellationToken ct)
+    {
+        Calls.Add("stop");
+        return Task.FromResult("stopped");
+    }
 }
 
 internal sealed class FakePlatform : IPlatformServices
@@ -169,12 +175,15 @@ internal sealed class ShellFixture : IAsyncDisposable
     public FakeService Service { get; } = new();
     public FakePlatform Platform { get; } = new();
     public MemorySettings Settings { get; } = new();
+    /// <summary>The release feed; null: the app does not update itself.</summary>
+    public IUpdateService? Updates { get; set; }
     public ShellViewModel Shell { get; private set; } = null!;
 
     public ShellFixture Start(AgentStatusDto? status = null)
     {
         if (status is not null) Agent.Status = status;
-        Shell = new ShellViewModel(Agent, Service, Platform, Settings) { RetryInterval = TimeSpan.FromMilliseconds(50) };
+        Shell = new ShellViewModel(Agent, Service, Platform, Settings, updates: Updates) { RetryInterval = TimeSpan.FromMilliseconds(50) };
+        Shell.Updates.InitialDelay = TimeSpan.Zero;
         Shell.Start();
         return this;
     }

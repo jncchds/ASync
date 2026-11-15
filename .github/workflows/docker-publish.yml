@@ -1,7 +1,9 @@
-name: Build and Publish Docker Images
+name: Build, test and release
 
-# Images are published when a version tag is pushed (git tag v0.1.1 && git push origin v0.1.1).
-# Pull requests only run the tests; a manual run (workflow_dispatch) builds and publishes the chosen ref.
+# A version tag (git tag v0.1.1 && git push origin v0.1.1) publishes the Docker images and makes a DRAFT GitHub Release
+# with the desktop installers, the async-cli archives and packages, and the Velopack update feed; publishing that draft
+# is a person's step. Pull requests run the tests and build every package (nothing is published); a manual run
+# (workflow_dispatch) builds and publishes the images of the chosen ref, and builds the packages without a release.
 on:
   push:
     tags:
@@ -116,6 +118,201 @@ jobs:
       - name: App tests (view models, headless views)
         run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj --configuration Release --no-build
 
+  # The desktop app's installers and update feed (Velopack), async-cli archives, and the Linux .deb/.rpm, for every target
+  # on its own OS (Velopack builds Windows packages only on Windows and macOS packages only on macOS): scripts/package.sh.
+  # Signing runs only when its secrets exist (none yet: the builds are unsigned):
+  #   Windows Authenticode: WINDOWS_CERTIFICATE (base64 .pfx), WINDOWS_CERTIFICATE_PASSWORD
+  #   macOS: MACOS_CERTIFICATE (base64 .p12 with the Developer ID Application and Installer identities),
+  #          MACOS_CERTIFICATE_PASSWORD, MACOS_SIGN_APP_IDENTITY, MACOS_SIGN_INSTALL_IDENTITY;
+  #          notarization also: APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (an app-specific password)
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            os: ubuntu-24.04
+          - rid: linux-arm64
+            os: ubuntu-24.04-arm
+          - rid: win-x64
+            os: windows-2025
+          - rid: win-arm64
+            os: windows-2025
+          - rid: osx-arm64
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    env:
+      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+      HAS_MACOS_CERT: ${{ secrets.MACOS_CERTIFICATE != '' }}
+      HAS_NOTARY: ${{ secrets.APPLE_ID != '' }}
+      NFPM_VERSION: '2.49.0'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Check the tag against VERSION
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION ($version). Tag v$version instead."
+            exit 1
+          fi
+
+      - name: Install vpk (Velopack CLI, version from .config/dotnet-tools.json)
+        run: dotnet tool restore
+
+      - name: Install nfpm
+        if: runner.os == 'Linux'
+        run: |
+          arch=$([ "$(uname -m)" = aarch64 ] && echo arm64 || echo x86_64)
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${arch}.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" nfpm
+          echo "NFPM=$RUNNER_TEMP/nfpm" >> "$GITHUB_ENV"
+
+      # The latest published release of this channel, so vpk can make a delta package against it (none before the first).
+      - name: Previous release (for delta updates)
+        if: github.ref_type == 'tag'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          dotnet vpk download github --repoUrl "https://github.com/${{ github.repository }}" --token "$GITHUB_TOKEN"
+          --channel ${{ matrix.rid }} -o artifacts/packages/${{ matrix.rid }}/velopack
+
+      - name: Windows signing certificate
+        if: runner.os == 'Windows' && env.HAS_WINDOWS_CERT == 'true'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          pfx="$RUNNER_TEMP/signing.pfx"
+          echo "$WINDOWS_CERTIFICATE" | base64 --decode > "$pfx"
+          echo "WINDOWS_SIGN_PARAMS=/f $(cygpath -w "$pfx") /p $WINDOWS_CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256" >> "$GITHUB_ENV"
+
+      - name: macOS signing identities and notarization profile
+        if: runner.os == 'macOS' && env.HAS_MACOS_CERT == 'true'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_APP_IDENTITY: ${{ secrets.MACOS_SIGN_APP_IDENTITY }}
+          MACOS_SIGN_INSTALL_IDENTITY: ${{ secrets.MACOS_SIGN_INSTALL_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(openssl rand -hex 16)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productsign -T /usr/bin/pkgbuild
+          rm "$RUNNER_TEMP/signing.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          # The search list is the new keychain plus the existing ones, one word each.
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          {
+            echo "MACOS_KEYCHAIN=$keychain"
+            echo "MACOS_SIGN_APP_IDENTITY=$MACOS_SIGN_APP_IDENTITY"
+            echo "MACOS_SIGN_INSTALL_IDENTITY=$MACOS_SIGN_INSTALL_IDENTITY"
+          } >> "$GITHUB_ENV"
+          if [ "$HAS_NOTARY" = true ]; then
+            xcrun notarytool store-credentials async-notary --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" --keychain "$keychain"
+            echo "MACOS_NOTARY_PROFILE=async-notary" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build the packages
+        run: scripts/package.sh ${{ matrix.rid }}
+
+      # Installs the .deb on Debian and the .rpm on Fedora in containers, then removes them (see the script).
+      - name: Check the Linux packages
+        if: matrix.rid == 'linux-x64'
+        run: scripts/smoke-packages.sh artifacts/packages/linux-x64
+
+      - name: Upload the packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-${{ matrix.rid }}
+          path: artifacts/packages/${{ matrix.rid }}/
+          if-no-files-found: error
+
+  # A draft GitHub Release for the tag with every package and the Velopack feed (releases.<channel>.json per target): the
+  # desktop app's update check reads the published releases, so nothing reaches anyone until a person publishes it.
+  release:
+    needs: [test, e2e, agent-desktop, package]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download the packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: packages-*
+          path: dist
+
+      - name: Collect the release files
+        run: |
+          mkdir release
+          for dir in dist/packages-*; do
+            rid=${dir#dist/packages-}
+            find "$dir" -maxdepth 1 -type f -exec cp {} release/ \;
+            feed="$dir/velopack"
+            # This release's own Velopack files (assets.<rid>.json): not the previous release vpk downloaded for deltas.
+            jq -r '.[].RelativeFileName' "$feed/assets.$rid.json" | while read -r f; do cp "$feed/$f" release/; done
+            names=$(jq -c '[.[].RelativeFileName]' "$feed/assets.$rid.json")
+            jq --argjson names "$names" '.Assets |= map(select(.FileName as $f | $names | index($f)))' \
+              "$feed/releases.$rid.json" > "release/releases.$rid.json"
+            grep -F -f <(jq -r '.[].RelativeFileName' "$feed/assets.$rid.json") "$feed/RELEASES-$rid" > "release/RELEASES-$rid" || true
+          done
+          (cd release && sha256sum -- * > SHA256SUMS)
+          ls -l release
+
+      - name: Release notes
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          awk -v v="## v$version" 'index($0, v) == 1 { on = 1; next } on && /^## v/ { exit } on { print }' RELEASE_NOTES.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          ## Downloads
+
+          | | |
+          |---|---|
+          | Windows (x64, ARM64) | `ASync.Desktop-win-x64-Setup.exe`, `ASync.Desktop-win-arm64-Setup.exe` |
+          | macOS (Apple silicon) | `ASync-<version>-osx-arm64.dmg`, or `ASync.Desktop-osx-arm64-Setup.pkg` |
+          | Linux (x64, ARM64) | `ASync.Desktop-linux-<arch>.AppImage` (updates itself), or `async-desktop` .deb / .rpm |
+          | async-cli | `async-cli-<version>-<rid>` archives, `async-cli` .deb / .rpm, or the Docker image |
+
+          These builds are not code-signed yet: see "Installing the desktop app" in the README for what Windows and macOS
+          show and how to open them. `SHA256SUMS` lists every file's checksum.
+          EOF
+          sed -i "s/<version>/$version/g" notes.md
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag --title "ASync $version" --notes-file notes.md
+          fi
+
   # The real server stack (docker compose) with two async-cli agents plus one in the async-cli image: TwoWay, Mirror,
   # Backup (Transport and end-to-end), live updates and revocation. See scripts/e2e-sync.cs.
   e2e:
@@ -167,7 +364,7 @@ jobs:
         id: version
         run: |
           version=$(cat VERSION)
-          echo "value=$version" >> $GITHUB_OUTPUT
+          echo "value=$version" >> "$GITHUB_OUTPUT"
           # A release tag must match VERSION, so the image tags and the version the app reports agree.
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match VERSION ($version). Tag v$version instead."

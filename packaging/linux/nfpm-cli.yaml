@@ -1,0 +1,35 @@
+# async-cli as a .deb and .rpm (nfpm; built by scripts/package.sh). One self-contained file, /usr/bin/async-cli; the
+# package manager updates it. `async-cli service install` sets the agent up per user; removing the package removes
+# the services that run it (packaging/linux/preremove.sh).
+name: async-cli
+version: ${VERSION}
+arch: ${ARCH}
+platform: linux
+section: net
+priority: optional
+maintainer: Kirill Chekanov
+vendor: ASync
+homepage: https://github.com/jncchds/ASync
+license: MIT
+description: |
+  ASync command-line agent.
+  Enrolls a device with a self-hosted ASync server and syncs, backs up and restores its folders; runs as a systemd
+  service (async-cli service install).
+depends:
+  - libicu78 | libicu77 | libicu76 | libicu75 | libicu74 | libicu73 | libicu72 | libicu71 | libicu70
+overrides:
+  rpm:
+    depends:
+      - libicu
+contents:
+  - src: ${PUBLISH_DIR}/async-cli
+    dst: /usr/bin/async-cli
+    file_info:
+      mode: 0755
+  - src: LICENSE
+    dst: /usr/share/doc/async-cli/copyright
+    file_info:
+      mode: 0644
+scripts:
+  postinstall: ${SCRIPTS_DIR}/postinstall.sh
+  preremove: ${SCRIPTS_DIR}/preremove.sh
