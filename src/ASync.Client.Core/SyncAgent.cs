@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ASync.Client.Core;
 
-public sealed record FolderRunResult(int FolderId, string Name, bool Ok, string Message, bool Skipped = false);
+public sealed record FolderRunResult(int FolderId, string Name, bool Ok, string Message, bool Skipped = false, int Conflicts = 0);
 
 /// <summary>The agent's link to the server, for status displays.</summary>
 public enum AgentConnection { Connecting, Connected, Reconnecting, Offline, Revoked }
@@ -185,7 +185,7 @@ public sealed class SyncAgent : IAsyncDisposable
                                   ? $", continued download(s): {result.BytesResumed.ToString(CultureInfo.InvariantCulture)} bytes were already here"
                                   : "") +
                               (result.Errors.Count > 0 ? $", {result.Errors.Count} errors: {result.Errors[0]}" : "");
-                outcome = new FolderRunResult(folder.FolderId, folder.Name, result.Ok, message);
+                outcome = new FolderRunResult(folder.FolderId, folder.Name, result.Ok, message, Conflicts: result.Conflicts);
                 report = new SyncReportRequest(result.Ok, message, result.Uploaded, result.Downloaded, result.DeletedLocal + result.DeletedRemote,
                     result.Conflicts, result.Bytes);
             }

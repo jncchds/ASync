@@ -3,9 +3,9 @@
 Self-hosted sync and backup for all your devices: Windows, macOS, Linux, iOS and Android. One server, many
 users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud, SFTP or SMB.
 
-> **Status: early development.** The server, the web UI (folders, devices, storage, snapshot and file browsing) and the
-> headless CLI agent work: devices sync and back up folders through the server today. The desktop and mobile
-> apps are next. The current version is in [VERSION](VERSION), changes are in
+> **Status: early development.** The server, the web UI (folders, devices, storage, snapshot and file browsing), the
+> headless CLI agent and the desktop app (Linux; built for Windows and macOS, not tried there yet) work: devices sync
+> and back up folders through the server today. Desktop installers, then the mobile apps, are next. The current version is in [VERSION](VERSION), changes are in
 > [RELEASE_NOTES.md](RELEASE_NOTES.md), and the design, roadmap and known gaps are in [AGENTS.md](AGENTS.md).
 
 <p>
@@ -303,6 +303,42 @@ Settings (environment variables of the server):
 | `Health__RetryMinutes` | `5` | How soon a failed test is repeated |
 | `Health__FailuresBeforeAlert` | `2` | Failed tests in a row before the alert. `Health__Enabled=false` turns the checks off |
 
+## The desktop app
+
+`async-desktop` is the app for Linux, Windows and macOS: it sets everything up, shows what each folder is doing and
+sits in the tray. The syncing itself is done by the agent, which runs in the background as a service of your user (the
+same one as `async-cli service install`), so it carries on with the window closed or the app ended.
+
+<p>
+  <img src="docs/screenshots/desktop-dashboard-light.png" alt="The desktop app: this device and its folders" width="58%">
+  <img src="docs/screenshots/desktop-dashboard-small-dark.png" alt="The desktop app in a narrow window, dark" width="28%">
+</p>
+
+- **First start:** without an agent the app offers *Install and start the agent* (a systemd user unit on Linux, a
+  LaunchAgent on macOS, a logon task on Windows; a stopped one is started by itself). Then enter the server's address
+  and either the code from *Devices → Add device* (pasting the `async://pair…` link of its QR code fills in both), or
+  choose *Approve in the browser*: the app shows a code and opens the server's approval page.
+- **Folders:** attach folders to the device in the web UI and they appear in the app at once, with their mode, whether
+  they are end-to-end encrypted, the local folder, what they are doing (with files and bytes while syncing), the last
+  result, the next run, and whether the server considers the device overdue or failing for them. *Sync now*, *Pause*,
+  *Open folder* and *Change folder…* (a folder picker) per folder; *Sync all now* and *Pause all* for everything.
+- **End-to-end folders** set up on another device show *Unlock…*: enter the passphrase or the recovery key. It goes to
+  the agent only, which keeps the unlocked key so backups run unattended; it is never shown or logged.
+- **Tray:** the icon shows up to date, syncing or a problem (the tooltip says which); its menu has *Sync now*, *Pause
+  all*, *Open ASync*, *Open the web UI* and *Quit ASync*. Closing the window keeps the app in the tray; *Quit* ends the
+  app, not the agent. On Linux the tray needs a panel that shows StatusNotifier icons (KDE, most panels; GNOME with the
+  AppIndicator extension); without one, closing the window ends the app.
+- **Notifications** when a folder starts failing, when it works again, and when a sync kept both versions of a file
+  (a conflict). They can be turned off in *Settings*.
+- **Settings:** start at login (into the tray), light/dark/system theme, the web UI, the app's and the agent's
+  versions, and *Sign out of this device* (it stops syncing and forgets the identity here; your files stay; remove the
+  device in the web UI too).
+
+Build it with the .NET 10 SDK: `dotnet publish src/ASync.App.Desktop -c Release -o ~/async-desktop` and run
+`~/async-desktop/async-desktop` (installers come next). It uses the same config directory as `async-cli`
+(`~/.config/async`, `ASYNC_CONFIG_DIR` or `--config`), so an agent set up with the CLI shows up in the app and the other
+way round. Only one app runs per config directory; starting it again brings its window up.
+
 ## Run an agent
 
 `async-cli` is the headless agent for servers, NAS boxes and other machines without a screen. It syncs and
@@ -437,6 +473,9 @@ See [CLAUDE.md](CLAUDE.md) for commands and rules, and [AGENTS.md](AGENTS.md) fo
 The tests include API-level checks of every endpoint (who may call it, and that nobody reaches someone else's
 data); they need the PostgreSQL of `docker-compose.test.yml` and are skipped without it.
 `scripts/e2e-sync.sh` runs the end-to-end sync test: a throw-away server stack on port 5190 and real agents.
+The desktop app's tests are in `src/ASync.App.Tests` (view models and headless views, `dotnet test`); on Linux
+`scripts/smoke-desktop.sh` runs the real app on a virtual display (Xvfb) with the real agent service against a
+throw-away stack, and `SCREENSHOTS=docs/screenshots scripts/smoke-desktop.sh` refreshes the app's screenshots.
 
 ## License
 

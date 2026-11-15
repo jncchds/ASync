@@ -22,10 +22,12 @@ public class SyncController : ControllerBase
     private readonly FolderLeaseService _leases;
 
     private readonly IDeviceRepository _devices;
+    private readonly IAlertRepository _alerts;
 
-    public SyncController(IFolderRepository folders, IDeviceRepository devices, FolderService service, FolderLeaseService leases)
+    public SyncController(IFolderRepository folders, IDeviceRepository devices, FolderService service, FolderLeaseService leases, IAlertRepository alerts)
     {
         _folders = folders;
+        _alerts = alerts;
         _devices = devices;
         _service = service;
         _leases = leases;
@@ -39,6 +41,21 @@ public class SyncController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<List<DeviceFolderDto>>> GetAll() =>
         (await _folders.GetForDeviceAsync(DeviceId)).Select(f => FolderService.ToDeviceDto(f, f.Devices[0])).ToList();
+
+    /// <summary>
+    /// Open problems the server's overdue detection sees with this device's folders: this device is Overdue or Failing
+    /// there, or the folder's last check or prune failed. The apps show them next to the folder.
+    /// </summary>
+    [HttpGet("alerts")]
+    public async Task<ActionResult<List<DeviceFolderAlertDto>>> GetAlerts()
+    {
+        var mine = (await _folders.GetForDeviceAsync(DeviceId)).Select(f => f.Id).ToHashSet();
+        var open = await _alerts.GetForUserAsync(User.UserId(), DateTime.MaxValue);
+        return open.Where(i => i.ResolvedAt is null && i.FolderId is int folder && mine.Contains(folder)
+                               && (i.Kind is AlertKind.Overdue or AlertKind.Failing ? i.DeviceId == DeviceId : i.Kind is AlertKind.CheckFailed or AlertKind.PruneFailed))
+            .Select(i => new DeviceFolderAlertDto(i.FolderId!.Value, i.Kind, i.Detail, i.OpenedAt))
+            .ToList();
+    }
 
     [HttpPatch("{id:int}")]
     public async Task<ActionResult<DeviceFolderDto>> UpdateOwnSettings(int id, [FromBody] UpdateDeviceFolderRequest req)

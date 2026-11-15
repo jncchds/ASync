@@ -70,8 +70,11 @@ src/
   ASync.Cli/              async-cli (System.CommandLine): enroll, status, folders, sync, run, set-path, pause/resume,
                           init-encryption, unlock, snapshots, restore (also offline: --repo), prune, check, forget,
                           service install/uninstall/status/run. References ASync.Storage for offline restores
-  ASync.App/              (later) Avalonia shared UI (CommunityToolkit.Mvvm)
-  ASync.App.Desktop/      (later) Win/Linux/macOS head: tray; talks to the agent service over ASync.Agent.Control
+  ASync.App/              Avalonia 12 shared UI (CommunityToolkit.Mvvm): views, view models, theme (the web UI's tokens),
+                          Services/ (IAgentConnector over ASync.Agent.Control, IAgentServiceManager, IPlatformServices)
+  ASync.App.Desktop/      Win/Linux/macOS head (async-desktop): window, tray, single instance, start at login,
+                          notifications, installs the agent service; also *is* the service (`async-desktop service run`)
+  ASync.App.Tests/        xunit v3: view models with a fake agent, views in Avalonia.Headless
   ASync.App.iOS/          (later) PhotoKit, Contacts, EventKit, BGTaskScheduler, APNs, background URLSession
   ASync.App.Android/      (later) MediaStore, Contacts/CalendarProvider, WorkManager, FCM/UnifiedPush
   ASync.Push/             (later) APNs/FCM/UnifiedPush sender, used by the server (direct mode) and the relay
@@ -83,6 +86,7 @@ scripts/
   smoke-snapshots.cs      end-to-end check of folders, a device backup, snapshot browsing and downloads
   e2e-sync.sh / .cs       end-to-end sync test: throw-away server stack + real async-cli agents (local and Docker)
   smoke-agent-service.sh  the agent as a real systemd user service: install, sync, restart, uninstall (Linux)
+  smoke-desktop.sh        the real desktop app under Xvfb with the real agent service and server stack (Linux)
   test-backends-env.sh    ASYNC_TEST_* variables for the containers of docker-compose.test.yml
 ```
 
@@ -523,6 +527,8 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
 - **Mirror Upload and Download:** one side is made equal to the other.
 - **Safety:**
   - Nothing runs when the local folder is missing (an unmounted disk).
+  - Nor when a directory in it cannot be read (permission denied): the scan does not skip it as empty
+    (`IgnoreInaccessible` is off), which would delete its files on the storage below the mass-deletion threshold.
   - More than half of the known files (and over 10) deleted in one run → `SyncRefusedException`, unless
     `--allow-mass-delete`.
   - Local deletions go to `<folder>/.async/trash`; remote ones to the plain layout's trash and versions.
@@ -1033,7 +1039,7 @@ a random id in a container.
 ## Agent service and control channel (M3)
 
 The sync agent runs in the background as a service of the OS, and a local control channel lets the CLI and the
-desktop app (M3-2) see and steer it. No GUI yet.
+desktop app (see "Desktop app (M3-2)") see and steer it.
 
 **Where it lives.** The host is a mode of `async-cli` (`async-cli service run`), with the logic in the library
 `ASync.Agent`, not a separate executable:
@@ -1101,10 +1107,19 @@ runs two agents of one user.
   - `hello`: protocol and agent version, pid, mode, config directory (sent by `ControlClient` on connect);
   - `status`: state (NotEnrolled, Connecting, Connected, Reconnecting, Offline, Revoked, Stopping), device, problem, and
     per folder its settings, activity (Idle, Syncing, BackingUp, Maintenance, Paused), whether an E2E folder is
-    locked here, progress `{files, totalFiles, bytes, totalBytes, currentFile}`, last result and next run;
+    locked here, progress `{files, totalFiles, bytes, totalBytes, currentFile}`, last result (with `conflicts`, the
+    conflict copies the run made) and next run, and `alerts`: the open Overdue/Failing/CheckFailed/PruneFailed incidents
+    of the folder on this device, which the agent reads from `GET /api/sync/folders/alerts` on start and every 5 minutes;
   - `sync` (a folder or all): waits for runs that start after the request and returns their results;
   - `pause`, `resume`, `set-path`: through the server's device settings, then a reload;
   - `unlock`: the secret is never logged; starts the backup that waited for it;
+  - `enroll` (`server`, `code`, `name`, `platform`), `device-code` (`server`, `name`, `platform`; answers
+    `enrollment {server, name, userCode, verificationUri, expiresAt}` and polls the server in the background, the status
+    carrying `enrollment` until it is approved, or its `error` when denied or expired) and `forget` (stops the device's
+    run, deletes the identity and its token, cancels a pending request): the desktop app enrolls and signs out through
+    the agent, so the agent alone writes the identity and its secrets (Keychain items and DPAPI blobs belong to the
+    program that made them). A saved identity ends the wait for one at once. `enroll` refuses while enrolled (`forget`
+    first). The code is never logged;
   - `subscribe`: the connection then carries only events: a full `status` first, then `folder` changes, `run-finished`
     with the result, progress twice a second while it moves, `status` on connection or folder-list changes. A
     subscriber that does not keep up loses its oldest events (bounded channel of 256) instead of slowing the agent.
@@ -1136,6 +1151,94 @@ pause and resume, a watcher sync, journald lines, `systemctl --user restart` wit
 `service uninstall` leaving nothing behind (unit, process, socket, endpoint file) and the CLI in-process again. It
 refuses to run when the user already has an `async-agent.service`, and removes its unit even when it fails half-way.
 
+## Desktop app (M3-2)
+
+`async-desktop` is what people use on Linux, Windows and macOS instead of `async-cli`. It is a **client of the agent**:
+it shows and steers the agent service over the control channel and never syncs in-process, so syncing goes on with the
+window closed or the app ended, and the CLI and the app always see the same agent.
+
+**Projects.**
+- `ASync.App` (shared with the iOS/Android heads of M4): `App` (Fluent theme with the ASync palette, the family's
+  component styles, the view templates), `ViewModels/` (CommunityToolkit.Mvvm source generators), `Views/` (compiled
+  bindings), `Theme/Tokens.axaml` + `Theme/Controls.axaml`, `Services/`. Nothing desktop-only: what differs per platform
+  is behind `IAgentConnector`/`IAgentSession` (the agent: `ControlAgentConnector` over `ASync.Agent.Control` here; a
+  mobile head can hand in an agent running in its own process), `IAgentServiceManager` (install/start the service) and
+  `IPlatformServices` (machine name, platform, open a URL or a folder, the folder picker, notifications, theme, start at
+  login). Opening and picking go through Avalonia's `Launcher` and `StorageProvider`, which exist on mobile too.
+- `ASync.App.Desktop` (`async-desktop`): `Program` (arguments; `service run` → `AgentHost.RunServiceAsync`, exactly
+  what `async-cli service run` does), `DesktopApp` (window, tray, lifetime), `DesktopPlatform`, `DesktopAgentService`
+  (`ServiceInstaller` with this program: the unit/plist/task runs `async-desktop --config <dir> service run`),
+  `StartAtLogin`, `SingleInstance`, `TrayIcons`, `TraySupport`, `Automation`.
+
+**Pages** (`ShellViewModel` routes the agent's status to one):
+- *No agent* → `ServiceSetupViewModel`: "Install and start the agent" (per-user service, same code as `async-cli service
+  install`). An installed service that is stopped is started once without asking; if that fails, a Start button.
+  `AgentServiceState.Running` (the service manager says it runs, or the config directory's agent lock is held: an
+  `async-cli run` in a terminal) shows "Connecting…" and keeps trying.
+- *NotEnrolled* → `EnrollViewModel`: server address (`https://` added when missing), device name (the machine name),
+  then either a code (a pasted `async://pair?s=…&c=…` link fills both fields) or "Approve in the browser" (the
+  device-code flow: shows the code, opens the approval page, the agent polls; Cancel = `forget`). Errors appear next to
+  the form; the last server is remembered.
+- *Enrolled* → `DashboardViewModel`: device, account and server, connection state and problem, Sync all, Pause/Resume
+  all; a card per folder (`FolderViewModel`): mode, end-to-end, local path, a state pill (Syncing, Backing up, Paused,
+  Locked, Failed, Overdue, Up to date…), live progress (a bar with files and bytes when the totals are known,
+  indeterminate for backups), the current file, the last result and how long ago, the next run, the server's alerts,
+  and Sync now, Pause/Resume, Open folder, Change folder… (native folder picker → `set-path`), Unlock….
+- `UnlockViewModel` (a dialog): passphrase or recovery key in a masked text box; the secret goes only to the agent's
+  `unlock`, the field is cleared as soon as it is sent, and nothing logs it.
+- `SettingsViewModel` (over the page): start at login, notifications, theme (light/dark/system, applied at once),
+  open the web UI, versions of the app and the agent, and *Sign out of this device* (a confirmation, then `forget`).
+- The shell reconnects when the agent goes away ("The agent stopped", tray: problem) and refreshes "5 min ago" every
+  30 seconds. All state changes happen on the UI thread (the loop is started there and awaits continue there).
+
+**Tray** (`TrayIcon` with a `NativeMenu`): icons drawn at start-up (`TrayIcons`: the logo plus a green, white/fuchsia or
+red dot) for ok, syncing and problem (agent missing or not enrolled, offline, revoked, a failed run, a server alert, a
+locked folder); the tooltip says which. Menu: Sync now, Pause all/Resume all, Open ASync, Open the web UI, Quit
+ASync. Closing the window hides it while a tray host exists (on Linux a StatusNotifierWatcher on the session bus,
+checked with `gdbus`; `ASYNC_APP_TRAY=0/1` overrides); without one, closing ends the app. Quit ends the app, never the
+agent.
+
+**Notifications** (`ShellViewModel.OnRunFinished`, setting *Notify me…*): when a folder starts failing (once per
+failure streak, not on every retry), when it works again, and when a run made conflict copies (the agent now counts
+them: `FolderRunResult.Conflicts`). Linux: `notify-send`; macOS: `osascript`; Windows: a WinRT toast through
+PowerShell (shown under PowerShell's name until the M3-3 installer registers an app id).
+
+**Single instance** (`SingleInstance`): `app.lock` in the config directory (`FileShare.None`, dropped by the OS with
+the process); a second start sends `show` to the first over `app-<hash>.sock` next to the agent's socket (0600, in the
+0700 runtime directory) or the pipe `ASync.App.<hash>` (current user only) and exits.
+
+**Start at login** (`StartAtLogin`, only the app; the agent service starts by itself): `~/.config/autostart/
+ua.pp.chds.async.desktop`, the LaunchAgent `ua.pp.chds.async.app`, or `HKCU\…\Run\ASync`, each starting
+`async-desktop --config <dir> --minimized` (into the tray).
+
+**Settings** of the app itself (`AppSettings`: theme, notifications, last server) live in `app-settings.json` in the
+config directory; everything about folders stays on the server.
+
+**Look:** the web UI's tokens (`index.css`) as theme dictionaries (`Bg`, `Surface`, `Surface2`, `BorderBrush`, `Text`,
+`TextMuted`, `Accent`…, the `*Faint`/`*Line` mixes written out with alpha), Fluent's palette and text-box keys set to
+the same colours, and the family's components as style classes: `Border.card`, `Border.pill.success|warning|danger|
+accent`, `Border.notice(.danger|.info)`, `Button` (primary), `.secondary`, `.danger`, `.small`, `.link`, `.icon`,
+`TextBlock.h1|h2|muted|label`. Inter from `Avalonia.Fonts.Inter`. Layouts use `WrapPanel`s and wrapping text and fit a
+360-pixel-wide window (tested headless), since the shared views will run on phones.
+
+**Automation (tests only):** with `ASYNC_APP_AUTOMATION=<socket>` the app accepts line commands (state, type into or
+click a named control, a button of a folder card, a tray menu item, the folder picker's answer, screenshot, resize,
+theme, close, quit). `scripts/smoke-desktop.sh` drives the real app with it; nothing listens without the variable.
+
+**Tests:** `ASync.App.Tests`: the shell, pages and folders against a fake agent (connection loop, service install and
+start, enroll by code, pasted links and the device-code flow, progress, state pills, alerts, tray state, notifications
+once per failure, pause all, the folder picker, unlock never keeping the secret, settings, sign out), the desktop head's
+pure parts (arguments, autostart files, toast escaping), and the views in Avalonia.Headless (controls wired to commands,
+the masked secret, no horizontal overflow at 360 px, the palette per theme). `scripts/smoke-desktop.sh` runs the
+published app on Xvfb with a private D-Bus session and logging stand-ins for `xdg-open` and `notify-send` (nothing
+reaches the real desktop) against a throw-away stack (project `async-desktop-smoke`, port 5192): install the service
+from the app, device code (shown, approval page opened, cancelled), enroll by code, a folder attached in the web UI
+appears live, change its local folder, sync with live progress, pause/resume (card and tray), a failing folder and its
+notification, unlock an end-to-end folder set up by an `async-cli` device (a wrong passphrase first; the passphrase in
+no log), open folder and web UI, start at login, close to tray, one instance, Quit leaving the agent running, sign out,
+then a device-code enrollment approved through the API. `SCREENSHOTS=docs/screenshots` also saves every screen in light
+and dark (`desktop-*.png`).
+
 ## Background work and wake-ups (M3–M4)
 
 Planned, except for the desktop agent service ("Agent service and control channel"), the server's overdue
@@ -1143,7 +1246,7 @@ detection and alerts (below) and `Push__Mode=None` (the only push mode so far), 
 in this section or in "Push" exists yet.
 
 - **Desktop:** the agent runs as a systemd unit, a launchd agent, or a logon task / Windows Service (implemented).
-  The tray UI (M3-2) talks to it over the named pipe or Unix socket. The CLI container runs the same agent.
+  The desktop app talks to it over the named pipe or Unix socket. The CLI container runs the same agent.
 - **iOS** (silent push alone is not reliable, so several mechanisms are layered):
   - Background `URLSession` transfers keep going after the app is suspended.
   - `BGAppRefreshTask` and `BGProcessingTask` run scheduled scans; processing tasks can require power and
@@ -1227,6 +1330,9 @@ report, so it needs no push channel, no relay and nothing on the device.
   (open ones plus those resolved in the last days), `GET/POST /api/alerts/channels`, `PUT/DELETE
   /api/alerts/channels/{id}`, `POST /api/alerts/channels/test` (unsaved settings) and
   `POST /api/alerts/channels/{id}/test`.
+- **Devices** (`GET /api/sync/folders/alerts`, device token): the open incidents of the device's folders: Overdue and
+  Failing of this device, CheckFailed and PruneFailed of the folder. The agent adds them to its status, so the apps
+  show "Overdue (server): …" next to the folder.
 - **Web UI:** an *Alerts* page (open problems, channels with "Send test", the rules, recently fixed problems)
   and on the *Folders* page an Overdue/Failing pill per device plus a notice linking to the Alerts page.
 
@@ -1323,11 +1429,15 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
   (or their device) → 404 on every endpoint with an id of someone else's folder, back-end, device, code, channel,
   purge, snapshot or upload. A new route parameter fails the test until it is mapped to another user's resource, a
   new anonymous endpoint until it is listed. `ApiQuotaTests` covers quotas over HTTP.
-- **Agent on Windows and macOS** (job `agent-desktop`, `windows-latest` and `macos-latest`): builds async-cli, the
-  agent and the tests with `-warnaserror` and runs `src/ASync.Tests/Agent` (no Docker there): the control protocol
-  over a named pipe or a socket, the lock, routing, service files, DPAPI on Windows. Releases wait for it. Installing
-  a real service is only exercised on Linux (`scripts/smoke-agent-service.sh`, run by hand: CI runners have no user
-  systemd manager).
+- **Agent and desktop app on Windows and macOS** (job `agent-desktop`, `windows-latest` and `macos-latest`): builds
+  async-cli, the agent, the desktop app and the tests with `-warnaserror` and runs `src/ASync.Tests/Agent` (no Docker
+  there): the control protocol over a named pipe or a socket, the lock, routing, service files, DPAPI on Windows; and
+  `src/ASync.App.Tests` (view models, headless views). Releases wait for it. Installing a real service and running the
+  real app are only exercised on Linux (`scripts/smoke-agent-service.sh`, `scripts/smoke-desktop.sh`, run by hand: CI
+  runners have no user systemd manager).
+- **App tests** (`src/ASync.App.Tests`) run on xunit v3 (Avalonia.Headless.XUnit 12 needs it), apart from
+  `ASync.Tests` (xunit v2); the `test` job runs them too, with a TRX (the GitHubActions logger clashes with v3's test
+  platform).
 - **Windows x64/ARM64:** MSIX, or Velopack with auto-update, plus winget.
 - **macOS ARM64:** a signed and notarized dmg, with Velopack updates.
 - **Linux x64/ARM64:** AppImage, deb and rpm, with a systemd unit for the agent.
@@ -1353,7 +1463,13 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
      real user unit); on Windows and macOS compiled, with CI jobs for the agent's unit tests, but never installed
      or run there. Left open: the system-wide Windows Service runs as LocalSystem (its identity is the machine's);
      no libsecret on Linux; the Keychain binding uses the deprecated SecKeychain API.
-   - M3-2 desktop app (next): the Avalonia tray app on the control channel.
+   - **M3-2 desktop app (done):** `ASync.App` (shared Avalonia 12 views and view models) and `ASync.App.Desktop`
+     (async-desktop: window, tray, single instance, start at login, notifications, installs and is the agent service),
+     the control operations `enroll`, `device-code` and `forget`, folder alerts from the server, conflict counts.
+     Verified on Linux: view-model and headless view tests, and `scripts/smoke-desktop.sh` (the real app under Xvfb with
+     the real user service and server). On Windows and macOS compiled in CI, where the view-model and headless tests
+     also run; the tray, notifications, start at login, the folder picker and the service install there were never run.
+   - M3-3 (next): installers (MSIX/Velopack, dmg, AppImage/deb/rpm) and auto-update.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
    overdue devices.
 6. **M5 — hardening:** OpenTelemetry, and whatever is left of the gap list below. Later: Google Drive,

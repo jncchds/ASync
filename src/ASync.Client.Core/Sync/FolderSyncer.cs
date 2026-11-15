@@ -413,11 +413,23 @@ public sealed class FolderSyncer
     private Dictionary<string, LocalFile> ScanLocal()
     {
         var files = new Dictionary<string, LocalFile>(StringComparer.Ordinal);
-        var options = new EnumerationOptions { RecurseSubdirectories = false, IgnoreInaccessible = true, AttributesToSkip = 0 };
+        // Not IgnoreInaccessible: a directory we cannot read would look empty, and the plan would delete its files on the
+        // storage (TwoWay) or download them again over it. Such a run fails instead, with nothing changed.
+        var options = new EnumerationOptions { RecurseSubdirectories = false, IgnoreInaccessible = false, AttributesToSkip = 0 };
         var pending = new Stack<(DirectoryInfo Dir, string Relative)>([(new DirectoryInfo(_root), "")]);
         while (pending.TryPop(out var item))
         {
-            foreach (var entry in item.Dir.EnumerateFileSystemInfos("*", options))
+            List<FileSystemInfo> entries;
+            try
+            {
+                entries = [.. item.Dir.EnumerateFileSystemInfos("*", options)];
+            }
+            catch (UnauthorizedAccessException)
+            {
+                throw new SyncRefusedException(
+                    $"Cannot read {item.Dir.FullName} (permission denied). Nothing was changed: fix its permissions, or exclude it.");
+            }
+            foreach (var entry in entries)
             {
                 var relative = item.Relative.Length == 0 ? entry.Name : $"{item.Relative}/{entry.Name}";
                 if (relative == LocalMeta || entry.Name.EndsWith(".async-tmp", StringComparison.Ordinal) || _excludes.Matches(relative)) continue;

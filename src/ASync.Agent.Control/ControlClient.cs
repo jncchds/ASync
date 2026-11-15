@@ -1,3 +1,4 @@
+using ASync.Contracts;
 using System.Runtime.CompilerServices;
 
 namespace ASync.Agent.Control;
@@ -83,6 +84,20 @@ public sealed class ControlClient : IAsyncDisposable
 
     public async Task<string> UnlockAsync(int folderId, string secret, CancellationToken ct = default) =>
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.Unlock, FolderId = folderId, Secret = secret }, ct)).Message ?? "";
+
+    /// <summary>Enrolls this device with an add-device code; the agent keeps the identity. Returns its new status.</summary>
+    public async Task<AgentStatusDto> EnrollAsync(string server, string code, string name, DevicePlatform platform, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.Enroll, Server = server, Code = code, Name = name, Platform = platform }, ct)).Status
+        ?? throw new InvalidDataException("No status in the answer.");
+
+    /// <summary>Starts the device-code flow: show the code, open the link; the agent waits for the approval.</summary>
+    public async Task<PendingEnrollmentDto> StartDeviceCodeAsync(string server, string name, DevicePlatform platform, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.DeviceCode, Server = server, Name = name, Platform = platform }, ct)).Enrollment
+        ?? throw new InvalidDataException("No enrollment in the answer.");
+
+    /// <summary>Forgets this device's identity (sign out of this device).</summary>
+    public async Task<string> ForgetAsync(CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.Forget }, ct)).Message ?? "";
 
     /// <summary>
     /// The agent's events on a connection of their own: a <see cref="ControlEventKinds.Status"/> event first, then every

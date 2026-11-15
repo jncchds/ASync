@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The desktop head (Linux, Windows, macOS): the window, the tray icon, one instance per config directory, start at
+    login, system notifications, and installing the agent service. The program is also the agent service itself
+    (`async-desktop service run`, see Program.cs): the service the app installs runs this same binary, as the CLI's does.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>async-desktop</AssemblyName>
+    <RootNamespace>ASync.App.Desktop</RootNamespace>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ASync.App\ASync.App.csproj" />
+    <ProjectReference Include="..\ASync.Agent\ASync.Agent.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ASync.App.Tests" />
+  </ItemGroup>
+</Project>

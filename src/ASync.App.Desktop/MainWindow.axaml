@@ -1,0 +1,9 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:ASync.App.Views"
+        x:Class="ASync.App.Desktop.MainWindow"
+        Title="ASync"
+        Width="760" Height="720" MinWidth="340" MinHeight="420"
+        WindowStartupLocation="CenterScreen">
+  <views:ShellView Name="Shell" />
+</Window>

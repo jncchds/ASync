@@ -130,6 +130,30 @@ public class FolderSyncerTests : IDisposable
     }
 
     [Fact]
+    public async Task AnUnreadableDirectory_FailsTheRun_InsteadOfLookingEmpty()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root") return; // Unix permissions; root reads anything
+        Write(_a, "private/a.txt", "a");
+        Write(_a, "private/b.txt", "b");
+        Write(_a, "open.txt", "o");
+        await SyncA();
+        var dir = Path.Combine(_a.Path, "private");
+        File.SetUnixFileMode(dir, UnixFileMode.None);
+        try
+        {
+            // Read as empty, it would delete both files on the storage (two files: below the mass-deletion guard).
+            var refused = await Assert.ThrowsAsync<SyncRefusedException>(() => SyncA());
+            Assert.Contains("permission denied", refused.Message);
+            Assert.Equal(2, Directory.EnumerateFiles(Path.Combine(_storage.Path, "private")).Count());
+        }
+        finally
+        {
+            File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        Assert.Equal(0, (await SyncA()).DeletedRemote);
+    }
+
+    [Fact]
     public async Task MassDeletion_IsRefused_AndAMissingFolderToo()
     {
         for (var i = 0; i < 30; i++) Write(_a, $"f{i}.txt", $"{i}");

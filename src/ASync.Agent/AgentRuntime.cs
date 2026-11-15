@@ -22,6 +22,8 @@ public sealed record AgentOptions
     public bool SystemService { get; init; }
     /// <summary>How often to look for a new identity while waiting.</summary>
     public TimeSpan IdentityPollInterval { get; init; } = TimeSpan.FromSeconds(5);
+    /// <summary>How often to ask the server which of this device's folders are overdue or failing.</summary>
+    public TimeSpan AlertPollInterval { get; init; } = TimeSpan.FromMinutes(5);
 }
 
 /// <summary>
@@ -45,6 +47,22 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     private int _disposed;
     private string? _revokedMessage;
     private Guid? _revokedDevice;
+    private readonly SemaphoreSlim _identityGate = new(1, 1);
+    private volatile CancellationTokenSource? _deviceStop;
+    private TaskCompletionSource _deviceDone = CompletedSource();
+    /// <summary>Released when an identity was saved or forgotten, so the wait for one ends at once instead of at the next poll.</summary>
+    private readonly SemaphoreSlim _identityChanged = new(0);
+    private volatile PendingEnrollmentDto? _enrollment;
+    private CancellationTokenSource? _enrollmentStop;
+    private readonly Lock _enrollmentLock = new();
+    private volatile Dictionary<int, List<FolderAlertDto>> _alerts = [];
+
+    private static TaskCompletionSource CompletedSource()
+    {
+        var done = new TaskCompletionSource();
+        done.SetResult();
+        return done;
+    }
 
     public AgentRuntime(AgentOptions options, ILoggerFactory loggers)
     {
@@ -95,16 +113,53 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         {
             while (!ct.IsCancellationRequested)
             {
-                var identity = _store.LoadIdentity();
-                if (identity is null || identity.DeviceId == _revokedDevice)
+                DeviceIdentity? identity;
+                CancellationTokenSource deviceStop;
+                TaskCompletionSource deviceDone;
+                // `forget` holds the gate while it deletes the identity, so no run starts with one that is going away.
+                await _identityGate.WaitAsync(ct);
+                try
                 {
-                    if (!_options.WaitForIdentity) throw new InvalidOperationException("This device is not enrolled.");
+                    identity = _store.LoadIdentity();
+                    if (identity is null || identity.DeviceId == _revokedDevice)
+                    {
+                        if (!_options.WaitForIdentity) throw new InvalidOperationException("This device is not enrolled.");
+                        deviceStop = null!;
+                        deviceDone = null!;
+                    }
+                    else
+                    {
+                        _revokedMessage = null;
+                        _revokedDevice = null;
+                        deviceStop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        deviceDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                        _deviceStop = deviceStop;
+                        _deviceDone = deviceDone;
+                    }
+                }
+                finally
+                {
+                    _identityGate.Release();
+                }
+                if (deviceStop is null)
+                {
                     await WaitForIdentityChangeAsync(identity?.DeviceId, ct);
                     continue;
                 }
-                _revokedMessage = null;
-                _revokedDevice = null;
-                await RunDeviceAsync(identity, ct);
+                try
+                {
+                    await RunDeviceAsync(identity!, deviceStop.Token);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // `forget` stopped this device: wait for the next identity.
+                }
+                finally
+                {
+                    _deviceStop = null;
+                    deviceStop.Dispose();
+                    deviceDone.TrySetResult();
+                }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
@@ -127,6 +182,8 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         _api = api;
         _agent = agent;
         Publish(StatusEvent());
+        using var alertsStop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var alerts = PollAlertsAsync(api, alertsStop.Token);
         try
         {
             await agent.RunAsync(ct);
@@ -140,6 +197,9 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         }
         finally
         {
+            await alertsStop.CancelAsync();
+            await alerts;
+            _alerts = [];
             _agent = null;
             _api = null;
             await agent.DisposeAsync();
@@ -155,13 +215,48 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         if (current is null) _logger.LogInformation("Not enrolled yet: waiting for `async-cli enroll` (or the app) to add this device.");
         while (true)
         {
-            await Task.Delay(_options.IdentityPollInterval, ct);
+            await _identityChanged.WaitAsync(_options.IdentityPollInterval, ct);
             Guid? now;
             try { now = _store.LoadIdentity()?.DeviceId; }
             catch (Exception e) when (e is IOException or System.Text.Json.JsonException) { continue; } // being written
             if (now != current) return;
         }
     }
+
+    /// <summary>
+    /// What the server's overdue detection says about this device's folders, for the app: on start and every
+    /// <see cref="AgentOptions.AlertPollInterval"/> (the server itself rescans every few minutes). A server without the
+    /// endpoint, or one that cannot be reached, just leaves the folders without alerts.
+    /// </summary>
+    private async Task PollAlertsAsync(AsyncApiClient api, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    var open = await api.GetFolderAlertsAsync(ct);
+                    var next = open.GroupBy(a => a.FolderId).ToDictionary(g => g.Key,
+                        g => g.Select(a => new FolderAlertDto(a.Kind, a.Detail, new DateTimeOffset(DateTime.SpecifyKind(a.OpenedAt, DateTimeKind.Utc)))).ToList());
+                    if (!SameAlerts(_alerts, next))
+                    {
+                        _alerts = next;
+                        Publish(StatusEvent());
+                    }
+                }
+                catch (Exception e) when (e is ApiException or HttpRequestException or InvalidOperationException or System.Text.Json.JsonException)
+                {
+                    _logger.LogDebug("Could not read the server's alerts: {Message}", e.Message);
+                }
+                await Task.Delay(_options.AlertPollInterval, ct);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private static bool SameAlerts(Dictionary<int, List<FolderAlertDto>> a, Dictionary<int, List<FolderAlertDto>> b) =>
+        a.Count == b.Count && a.All(kv => b.TryGetValue(kv.Key, out var other) && kv.Value.SequenceEqual(other));
 
     // ── Events ────────────────────────────────────────────────────────────────
 
@@ -230,6 +325,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             Device = identity is null ? null : new DeviceInfoDto(identity.DeviceId, identity.DeviceName, identity.Username, identity.ServerUrl),
             Problem = _revokedMessage ?? agent?.ConnectionProblem,
             Folders = agent is null ? [] : [.. agent.Folders.Select(Map)],
+            Enrollment = _enrollment,
         };
     }
 
@@ -257,10 +353,11 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             Progress = s.Progress is { } p ? new ProgressDto(p.Files, p.TotalFiles, p.Bytes, p.TotalBytes, p.CurrentFile) : null,
             LastResult = s.LastResult is { } r ? Map(r, s.LastRunAt ?? DateTimeOffset.UtcNow) : null,
             NextRunAt = s.NextRunAt,
+            Alerts = _alerts.GetValueOrDefault(f.FolderId),
         };
     }
 
-    private static FolderRunDto Map(FolderRunResult r, DateTimeOffset at) => new(r.FolderId, r.Name, r.Ok, r.Message, r.Skipped, at);
+    private static FolderRunDto Map(FolderRunResult r, DateTimeOffset at) => new(r.FolderId, r.Name, r.Ok, r.Message, r.Skipped, at, r.Conflicts);
 
     // ── Control requests ──────────────────────────────────────────────────────
 
@@ -356,10 +453,159 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         return $"\"{folder.Name}\" is unlocked on this device; it will back up unattended.";
     }
 
+    // ── Enrollment and sign-out (the desktop app) ─────────────────────────────
+
+    private void RefuseWhenEnrolled()
+    {
+        if (_store.LoadIdentity() is { } existing && existing.DeviceId != _revokedDevice)
+            throw new ControlException($"Already enrolled as \"{existing.DeviceName}\" with {existing.ServerUrl}. Sign out of this device first.");
+    }
+
+    private static string NormalizeServer(string server)
+    {
+        var url = server.Contains("://", StringComparison.Ordinal) ? server : "https://" + server;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+            throw new ControlException($"\"{server}\" is not a server address (e.g. https://sync.example.com).");
+        return uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+    }
+
+    private void IdentitySaved()
+    {
+        _identityChanged.Release();
+        Publish(StatusEvent());
+    }
+
+    public async Task<AgentStatusDto> EnrollAsync(string server, string code, string name, DevicePlatform platform, CancellationToken ct)
+    {
+        await _identityGate.WaitAsync(ct);
+        try
+        {
+            RefuseWhenEnrolled();
+            CancelEnrollment();
+            using var api = new AsyncApiClient(NormalizeServer(server)) { AppVersion = _options.Version };
+            var identity = await api.EnrollAsync(code, name, platform, ct);
+            if (_revokedDevice is not null) _store.DeleteIdentity(); // the revoked one: its token goes too
+            _store.SaveIdentity(identity);
+            _logger.LogInformation("Enrolled \"{Device}\" for {User} on {Server}.", identity.DeviceName, identity.Username, identity.ServerUrl);
+        }
+        catch (ApiException e)
+        {
+            throw new ControlException(e.Message);
+        }
+        catch (HttpRequestException e)
+        {
+            throw new ControlException($"Cannot reach the server: {e.Message}");
+        }
+        finally
+        {
+            _identityGate.Release();
+        }
+        IdentitySaved();
+        return BuildStatus();
+    }
+
+    public async Task<PendingEnrollmentDto> StartDeviceCodeAsync(string server, string name, DevicePlatform platform, CancellationToken ct)
+    {
+        RefuseWhenEnrolled();
+        var url = NormalizeServer(server);
+        CancelEnrollment();
+        var stop = new CancellationTokenSource();
+        lock (_enrollmentLock) _enrollmentStop = stop;
+        var shown = new TaskCompletionSource<DeviceCodeDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var api = new AsyncApiClient(url) { AppVersion = _options.Version };
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var identity = await api.EnrollWithDeviceCodeAsync(name, platform, started => shown.TrySetResult(started), stop.Token);
+                await _identityGate.WaitAsync(stop.Token);
+                try
+                {
+                    stop.Token.ThrowIfCancellationRequested();
+                    if (_revokedDevice is not null) _store.DeleteIdentity();
+                    _store.SaveIdentity(identity);
+                    _enrollment = null;
+                }
+                finally
+                {
+                    _identityGate.Release();
+                }
+                _logger.LogInformation("Enrolled \"{Device}\" for {User} on {Server} (approved in the web UI).", identity.DeviceName, identity.Username, identity.ServerUrl);
+                IdentitySaved();
+            }
+            catch (OperationCanceledException)
+            {
+                shown.TrySetCanceled();
+            }
+            catch (Exception e)
+            {
+                var message = e is HttpRequestException ? $"Cannot reach the server: {e.Message}" : e.Message;
+                if (!shown.TrySetException(new ControlException(message)))
+                {
+                    _enrollment = _enrollment is { } pending ? pending with { Error = message } : null;
+                    _logger.LogWarning("The device-code enrollment ended: {Message}", message);
+                    Publish(StatusEvent());
+                }
+            }
+            finally
+            {
+                api.Dispose();
+                lock (_enrollmentLock)
+                    if (ReferenceEquals(_enrollmentStop, stop)) _enrollmentStop = null;
+                stop.Dispose();
+            }
+        }, CancellationToken.None);
+        var code = await shown.Task.WaitAsync(ct);
+        var enrollment = new PendingEnrollmentDto(url, name, code.UserCode, code.VerificationUri, new DateTimeOffset(DateTime.SpecifyKind(code.ExpiresAt, DateTimeKind.Utc)));
+        _enrollment = enrollment;
+        Publish(StatusEvent());
+        return enrollment;
+    }
+
+    private void CancelEnrollment()
+    {
+        lock (_enrollmentLock)
+        {
+            try { _enrollmentStop?.Cancel(); }
+            catch (ObjectDisposedException) { }
+            _enrollmentStop = null;
+        }
+        _enrollment = null;
+    }
+
+    public async Task<string> ForgetAsync(CancellationToken ct)
+    {
+        await _identityGate.WaitAsync(ct);
+        string? name;
+        try
+        {
+            CancelEnrollment();
+            name = _store.LoadIdentity()?.DeviceName;
+            if (_deviceStop is { } running)
+            {
+                await running.CancelAsync();
+                await _deviceDone.Task.WaitAsync(TimeSpan.FromSeconds(60), ct);
+            }
+            _store.DeleteIdentity();
+            _revokedMessage = null;
+            _revokedDevice = null;
+        }
+        finally
+        {
+            _identityGate.Release();
+        }
+        _logger.LogInformation("This device's identity was forgotten; waiting for a new enrollment.");
+        IdentitySaved();
+        return name is null
+            ? "This device was not enrolled."
+            : $"Signed out: \"{name}\" is no longer enrolled here. Its folders' files stay where they are; remove the device in the web UI too.";
+    }
+
     /// <summary>Closes the control channel and releases the lock. Idempotent: the host disposes it, and so may its owner.</summary>
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        CancelEnrollment();
         if (_server is not null)
         {
             await _server.DisposeAsync();

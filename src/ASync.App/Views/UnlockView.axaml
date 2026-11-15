@@ -1,0 +1,29 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ASync.App.ViewModels"
+             x:Class="ASync.App.Views.UnlockView"
+             x:DataType="vm:UnlockViewModel">
+  <Border Classes="card" BoxShadow="0 8 32 0 #40000000">
+    <StackPanel Spacing="12">
+      <TextBlock Classes="h2" Text="{Binding Title}" />
+      <TextBlock Classes="muted" Text="Its files are encrypted on this device before they leave it. Enter the folder's passphrase or its recovery key; it is only passed to the agent, which keeps the unlocked key so backups run unattended." />
+      <WrapPanel ItemSpacing="16">
+        <RadioButton GroupName="secret" Content="Passphrase" IsChecked="{Binding !UseRecoveryKey}" />
+        <RadioButton GroupName="secret" Name="UseRecoveryKey" Content="Recovery key" IsChecked="{Binding UseRecoveryKey}" />
+      </WrapPanel>
+      <StackPanel>
+        <TextBlock Classes="label" Text="{Binding SecretLabel}" />
+        <!-- PasswordChar: never shown on screen; RevealPassword stays off. -->
+        <TextBox Name="Secret" Text="{Binding Secret}" PasswordChar="•" />
+      </StackPanel>
+      <Border Classes="notice danger" IsVisible="{Binding HasError}">
+        <TextBlock Name="Error" Text="{Binding Error}" />
+      </Border>
+      <WrapPanel ItemSpacing="8" LineSpacing="8">
+        <Button Name="Unlock" Content="Unlock" Command="{Binding UnlockCommand}" IsDefault="True" />
+        <Button Classes="secondary" Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" />
+        <ProgressBar IsIndeterminate="True" Width="80" IsVisible="{Binding IsBusy}" VerticalAlignment="Center" />
+      </WrapPanel>
+    </StackPanel>
+  </Border>
+</UserControl>

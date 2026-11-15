@@ -132,6 +132,22 @@
   that passes only once it serves requests, and CI (and `CLAUDE.md`) start the stack with `up -d --wait`. Failed
   tests now appear as annotations and in the job summary, the TRX and the test servers' logs are uploaded as
   artifacts, all actions are on their Node 24 versions, and the runners are pinned to `ubuntu-24.04`.
+- feat: **The desktop app.** `async-desktop` (Linux, Windows, macOS) replaces the CLI for people at a computer. On
+  first start it installs and starts the background agent for your user (or starts a stopped one), then adds the
+  device with a code from the web UI (a pasted `async://pair` link fills in the server too) or by approving it in the
+  browser. It shows this device and its server, the connection, and every folder with its mode, encryption, local
+  folder, live progress, last result, next run and whether the server sees it as overdue or failing; per folder *Sync
+  now*, *Pause/Resume*, *Open folder*, *Change folder…* and *Unlock…* for end-to-end folders (passphrase or recovery
+  key, never shown or logged). A tray icon shows up to date / syncing / a problem, with *Sync now*, *Pause all*, *Open
+  the web UI* and *Quit* (which leaves the agent running); closing the window keeps the app in the tray. Desktop
+  notifications when a folder starts failing, recovers, or kept both versions of a file. Settings: start at login,
+  light/dark/system theme, sign out of this device. Same look and palette as the web UI. The agent's control channel
+  gained `enroll`, `device-code` and `forget`, and devices can read their folders' open alerts
+  (`GET /api/sync/folders/alerts`). Tried on Linux, including a scripted run of the real app on a virtual display with
+  the real agent service; on Windows and macOS it is built and its tests run in CI, but it has not been tried there.
+- fix: **a folder (or a directory in it) that the agent cannot read no longer counts as empty.** A two-way sync then
+  deleted its files on the storage (into the storage's trash) when there were too few to trip the mass-deletion guard.
+  Now the run fails with "Cannot read … (permission denied). Nothing was changed". Found by the desktop app's smoke test.
 
 ## v0.1.3 — 2026-11-12
 
