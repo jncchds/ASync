@@ -721,6 +721,86 @@ namespace ASync.Infrastructure.Migrations
                     b.ToTable("StorageBackends");
                 });
 
+            modelBuilder.Entity("ASync.Core.Models.UploadSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("BackendVersion")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("FolderId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Handle")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<long?>("LastModified")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("PartSize")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceId");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.HasIndex("FolderId", "DeviceId", "Path")
+                        .IsUnique();
+
+                    b.ToTable("UploadSessions");
+                });
+
+            modelBuilder.Entity("ASync.Core.Models.UploadSessionPart", b =>
+                {
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Token")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("SessionId", "Number");
+
+                    b.ToTable("UploadSessionParts");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
                 {
                     b.Property<int>("Id")
@@ -856,6 +936,34 @@ namespace ASync.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ASync.Core.Models.UploadSession", b =>
+                {
+                    b.HasOne("ASync.Core.Models.Device", "Device")
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ASync.Core.Models.Folder", "Folder")
+                        .WithMany()
+                        .HasForeignKey("FolderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Device");
+
+                    b.Navigation("Folder");
+                });
+
+            modelBuilder.Entity("ASync.Core.Models.UploadSessionPart", b =>
+                {
+                    b.HasOne("ASync.Core.Models.UploadSession", null)
+                        .WithMany("Parts")
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ASync.Core.Models.AppUser", b =>
                 {
                     b.Navigation("Devices");
@@ -864,6 +972,11 @@ namespace ASync.Infrastructure.Migrations
             modelBuilder.Entity("ASync.Core.Models.Folder", b =>
                 {
                     b.Navigation("Devices");
+                });
+
+            modelBuilder.Entity("ASync.Core.Models.UploadSession", b =>
+                {
+                    b.Navigation("Parts");
                 });
 #pragma warning restore 612, 618
         }

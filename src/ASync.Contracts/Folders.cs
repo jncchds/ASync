@@ -109,6 +109,17 @@ public record StorageEntryDto(string Path, bool IsDirectory, long Size, DateTime
 
 public record StorageMoveRequest(string From, string To);
 
+// ── Resumable uploads through the gateway (/api/sync/folders/{id}/storage/uploads) ──
+// POST uploads {path, size, mtime} starts one, or continues the device's upload of the same path, size and mtime.
+// PUT uploads/{id}/parts/{n} (body = exactly that part, X-Content-SHA256 = its hex SHA-256) stores a part;
+// POST uploads/{id}/complete puts the file in place atomically; DELETE uploads/{id} abandons it. An unknown or
+// expired upload answers 404 with X-Upload-Error: gone (start again).
+
+public record StartUploadRequest(string Path, long Size, long? Mtime);
+
+/// <summary>Parts are numbered from 0; all are <paramref name="PartSize"/> bytes but the last. <paramref name="ReceivedParts"/> need not be sent again.</summary>
+public record UploadSessionDto(Guid Id, int PartSize, int PartCount, IReadOnlyList<int> ReceivedParts);
+
 // ── Live events (SignalR /hubs/sync, method "event") ──────────────────────────
 
 /// <summary>Every hub message: a per-process sequence number, an event name and its arguments.</summary>

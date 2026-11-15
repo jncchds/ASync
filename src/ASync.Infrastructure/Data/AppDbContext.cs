@@ -24,6 +24,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AlertChannel> AlertChannels => Set<AlertChannel>();
     public DbSet<AlertSettings> AlertSettings => Set<AlertSettings>();
     public DbSet<PurgeJob> PurgeJobs => Set<PurgeJob>();
+    public DbSet<UploadSession> UploadSessions => Set<UploadSession>();
+    public DbSet<UploadSessionPart> UploadSessionParts => Set<UploadSessionPart>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -87,6 +89,25 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(f => f.User).WithMany().HasForeignKey(f => f.UserId).OnDelete(DeleteBehavior.Cascade);
             // A back-end with folders on it cannot be deleted by accident.
             e.HasOne(f => f.StorageBackend).WithMany().HasForeignKey(f => f.StorageBackendId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // One resumable upload per device and path; gone with its folder or device (CleanupService aborts idle ones).
+        b.Entity<UploadSession>(e =>
+        {
+            e.Property(s => s.Path).HasMaxLength(1000);
+            e.Property(s => s.Handle).HasMaxLength(1000);
+            e.HasIndex(s => new { s.FolderId, s.DeviceId, s.Path }).IsUnique();
+            e.HasIndex(s => s.UpdatedAt);
+            e.HasOne(s => s.Folder).WithMany().HasForeignKey(s => s.FolderId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(s => s.Device).WithMany().HasForeignKey(s => s.DeviceId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(s => s.Parts).WithOne().HasForeignKey(p => p.SessionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<UploadSessionPart>(e =>
+        {
+            e.HasKey(p => new { p.SessionId, p.Number });
+            e.Property(p => p.Sha256).HasMaxLength(64);
+            e.Property(p => p.Token).HasMaxLength(200);
         });
 
         b.Entity<FolderDevice>(e =>

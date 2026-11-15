@@ -112,7 +112,9 @@ public sealed class WebDavBackend : IStorageBackend
         var temp = StoragePath.Combine(parent, $".{Guid.NewGuid():N}.async-tmp");
         using (var request = new HttpRequestMessage(HttpMethod.Put, UriOf(temp)) { Content = new StreamContent(content) })
         {
+            // A known length is sent (some servers refuse chunked uploads): seekable streams, and joined parts.
             if (content.CanSeek) request.Content.Headers.ContentLength = content.Length - content.Position;
+            else if (content is ConcatStream or BoundedStream && content.Position == 0) request.Content.Headers.ContentLength = content.Length;
             if (lastModified is { } mtime) request.Headers.Add("X-OC-Mtime", mtime.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
             using var response = await _http.SendAsync(request, ct);
             await EnsureSuccessAsync(response, "PUT", path);

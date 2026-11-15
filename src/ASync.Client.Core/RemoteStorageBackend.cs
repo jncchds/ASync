@@ -55,15 +55,42 @@ public sealed class RemoteStorageBackend(AsyncApiClient api, int folderId) : ISt
         }
     }
 
+    /// <summary>Files larger than this are uploaded in parts (resumable); smaller ones in one PUT.</summary>
+    public const long PartUploadThreshold = 32 * 1024 * 1024;
+
+    /// <summary>Bytes of file content sent to the server (single PUTs and parts), for progress and tests.</summary>
+    public long BytesSent => Interlocked.Read(ref _bytesSent);
+
+    /// <summary>Bytes the server already had when an upload was continued (parts that were not sent again).</summary>
+    public long BytesResumed => Interlocked.Read(ref _bytesResumed);
+
+    /// <summary>Uploads that continued an earlier, interrupted one.</summary>
+    public int UploadsResumed => _uploadsResumed;
+
+    /// <summary>Called after each acknowledged part: path, bytes stored so far, size.</summary>
+    public Action<string, long, long>? PartUploaded { get; set; }
+
+    /// <summary>Wait before sending a failed part again (times the attempt number).</summary>
+    public TimeSpan RetryDelay { get; init; } = TimeSpan.FromSeconds(2);
+
+    private long _bytesSent;
+    private long _bytesResumed;
+    private int _uploadsResumed;
+
     public async Task WriteAsync(string path, Stream content, DateTimeOffset? lastModified = null, CancellationToken ct = default)
     {
         // Buffer non-seekable input so a retry after a 401 can resend it.
         var body = content.CanSeek ? content : await BufferAsync(content, ct);
         var start = body.Position;
-        var url = $"{Base}/file?path={Q(StoragePath.Normalize(path))}"
-                  + (lastModified is { } m ? $"&mtime={m.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)}" : "");
         try
         {
+            if (body.Length - start > PartUploadThreshold)
+            {
+                await WritePartsAsync(path, body, start, lastModified, ct);
+                return;
+            }
+            var url = $"{Base}/file?path={Q(StoragePath.Normalize(path))}"
+                      + (lastModified is { } m ? $"&mtime={m.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)}" : "");
             using var response = await api.SendRawAsync(() =>
             {
                 body.Position = start;
@@ -72,10 +99,88 @@ public sealed class RemoteStorageBackend(AsyncApiClient api, int folderId) : ISt
                 return new HttpRequestMessage(HttpMethod.Put, url) { Content = streamContent };
             }, ct);
             await CheckAsync(response, path, ct);
+            Interlocked.Add(ref _bytesSent, body.Length - start);
         }
         finally
         {
             if (!ReferenceEquals(body, content)) await body.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// A resumable upload: the server keeps the parts it acknowledged (per device, path, size and mtime), so writing the
+    /// same file to the same path again (after an interruption, or a restart of the agent) sends only what is missing.
+    /// Each part carries its SHA-256; a part that fails is sent again (up to three times).
+    /// </summary>
+    private async Task WritePartsAsync(string path, Stream body, long start, DateTimeOffset? lastModified, CancellationToken ct)
+    {
+        var size = body.Length - start;
+        var normalized = StoragePath.Normalize(path);
+        var request = new StartUploadRequest(normalized, size, lastModified?.ToUnixTimeMilliseconds());
+        for (var attempt = 0; ; attempt++)
+        {
+            using var started = await api.SendRawAsync(() => new HttpRequestMessage(HttpMethod.Post, $"{Base}/uploads")
+            {
+                Content = JsonContent.Create(request, options: AsyncApiClient.Json),
+            }, ct);
+            await CheckAsync(started, path, ct);
+            var session = (await started.Content.ReadFromJsonAsync<UploadSessionDto>(AsyncApiClient.Json, ct))!;
+            var received = session.ReceivedParts.ToHashSet();
+            long stored = received.Sum(n => PartLength(session, size, n));
+            if (received.Count > 0)
+            {
+                Interlocked.Increment(ref _uploadsResumed);
+                Interlocked.Add(ref _bytesResumed, stored);
+            }
+            try
+            {
+                var buffer = new byte[(int)Math.Min(session.PartSize, size)];
+                for (var n = 0; n < session.PartCount; n++)
+                {
+                    if (received.Contains(n)) continue;
+                    var length = (int)PartLength(session, size, n);
+                    body.Position = start + (long)n * session.PartSize;
+                    await body.ReadExactlyAsync(buffer.AsMemory(0, length), ct);
+                    await SendPartAsync(path, session.Id, n, buffer, length, ct);
+                    stored += length;
+                    PartUploaded?.Invoke(normalized, stored, size);
+                }
+                using var completed = await api.SendRawAsync(() => new HttpRequestMessage(HttpMethod.Post, $"{Base}/uploads/{session.Id}/complete"), ct);
+                await CheckAsync(completed, path, ct);
+                return;
+            }
+            catch (UploadGoneException) when (attempt == 0)
+            {
+                // Expired or replaced on the server meanwhile: start once more from the beginning.
+            }
+        }
+    }
+
+    private static long PartLength(UploadSessionDto session, long size, int number) => Math.Min(session.PartSize, size - (long)number * session.PartSize);
+
+    private async Task SendPartAsync(string path, Guid id, int number, byte[] buffer, int length, CancellationToken ct)
+    {
+        var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(buffer.AsSpan(0, length)));
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var response = await api.SendRawAsync(() =>
+                {
+                    var content = new ByteArrayContent(buffer, 0, length);
+                    content.Headers.ContentLength = length;
+                    var message = new HttpRequestMessage(HttpMethod.Put, $"{Base}/uploads/{id}/parts/{number}") { Content = content };
+                    message.Headers.Add("X-Content-SHA256", sha);
+                    return message;
+                }, ct);
+                await CheckAsync(response, path, ct);
+                Interlocked.Add(ref _bytesSent, length);
+                return;
+            }
+            catch (Exception e) when (attempt < 3 && e is IOException or HttpRequestException && e is not UploadGoneException && !ct.IsCancellationRequested)
+            {
+                await Task.Delay(RetryDelay * attempt, ct);
+            }
         }
     }
 
@@ -104,6 +209,8 @@ public sealed class RemoteStorageBackend(AsyncApiClient api, int folderId) : ISt
         if (response.IsSuccessStatusCode) return;
         if (response.StatusCode == HttpStatusCode.NotFound && response.Headers.Contains("X-Storage-Error"))
             throw new StorageNotFoundException(path);
+        if (response.StatusCode == HttpStatusCode.NotFound && response.Headers.Contains("X-Upload-Error"))
+            throw new UploadGoneException(path);
         try
         {
             await AsyncApiClient.EnsureSuccessAsync(response, ct);
@@ -117,6 +224,9 @@ public sealed class RemoteStorageBackend(AsyncApiClient api, int folderId) : ISt
             throw new IOException(e.Message, e);
         }
     }
+
+    /// <summary>The server no longer knows a part upload (expired, or replaced by another start).</summary>
+    private sealed class UploadGoneException(string path) : IOException($"The upload of '{path}' expired on the server.");
 
     private static async Task<Stream> BufferAsync(Stream content, CancellationToken ct)
     {

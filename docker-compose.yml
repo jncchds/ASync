@@ -30,6 +30,12 @@ services:
       # ── Storage ───────────────────────────────────────────────────────────────
       # Where admins may create "Local" back-ends (comma-separated). Mount disks or NAS shares below these.
       # - Storage__LocalRoots=/data
+      # ── Large files (Mirror and two-way folders) ──────────────────────────────
+      # Files over 32 MB are uploaded in parts; an interrupted upload continues with the missing parts.
+      # - Uploads__PartSizeMB=16                # 5–64
+      # - Uploads__MaxParallelParts=4           # parts held in memory at once (part size × this = RAM used)
+      # - Uploads__AbandonAfterHours=24         # unfinished uploads without progress are thrown away
+      # - Uploads__MaxSinglePutMB=256           # largest file accepted in one piece (older clients)
       # ── Backup housekeeping ───────────────────────────────────────────────────
       # The server prunes and checks standard-encryption Backup folders on each folder's schedule (set in the
       # folder form). This is how often it looks for folders that are due; Maintenance__Enabled=false turns it off.

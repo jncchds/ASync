@@ -14,7 +14,7 @@ namespace ASync.Storage;
 /// through <see cref="ObservedFingerprint"/> so the caller can pin it (trust on first use).
 /// Writes go to a temporary name and are renamed with the posix-rename extension (atomic replace).
 /// </summary>
-public sealed class SftpBackend : IStorageBackend
+public sealed class SftpBackend : IStorageBackend, IPartUploadBackend
 {
     private readonly SftpClient _client;
     private readonly string _root;
@@ -117,38 +117,32 @@ public sealed class SftpBackend : IStorageBackend
         }
     }
 
-    public async Task<Stream> OpenReadAsync(string path, long offset = 0, long? length = null, CancellationToken ct = default)
+    public Task<Stream> OpenReadAsync(string path, long offset = 0, long? length = null, CancellationToken ct = default)
     {
-        // Read into memory while holding the connection: SSH.NET streams are tied to the client, and back-end calls
-        // must not interleave. Callers read packs (16 MB) and single files; large files stream through a temp file.
+        // Back-end calls must not interleave on the one connection, so the file is read chunk by chunk (4 MB), each
+        // chunk under the gate: a large file streams without being copied to memory or disk first.
         var remote = Remote(path);
-        var buffer = await RunAsync(() =>
+        return RangeReadStream.OpenAsync((at, count, c) => RunAsync(() =>
         {
             try
             {
                 using var stream = _client.OpenRead(remote);
-                if (offset > 0) stream.Seek(offset, SeekOrigin.Begin);
-                var total = length ?? Math.Max(0, stream.Length - offset);
-                Stream sink = total > 64 * 1024 * 1024
-                    ? new FileStream(Path.GetTempFileName(), FileMode.Create, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose)
-                    : new MemoryStream((int)total);
-                var chunk = new byte[256 * 1024];
-                for (var left = total; left > 0;)
+                if (at > 0) stream.Seek(at, SeekOrigin.Begin);
+                var chunk = new byte[count];
+                var filled = 0;
+                while (filled < count)
                 {
-                    var n = stream.Read(chunk, 0, (int)Math.Min(chunk.Length, left));
+                    var n = stream.Read(chunk, filled, count - filled);
                     if (n == 0) break;
-                    sink.Write(chunk, 0, n);
-                    left -= n;
+                    filled += n;
                 }
-                sink.Position = 0;
-                return sink;
+                return filled == count ? chunk : chunk[..filled];
             }
             catch (SftpPathNotFoundException)
             {
                 throw new StorageNotFoundException(path);
             }
-        }, ct);
-        return buffer;
+        }, c), offset, length, ct: ct);
     }
 
     public Task WriteAsync(string path, Stream content, DateTimeOffset? lastModified = null, CancellationToken ct = default) => RunAsync(() =>
@@ -207,6 +201,60 @@ public sealed class SftpBackend : IStorageBackend
         try { _client.DeleteDirectory(remote); }
         catch (SftpPathNotFoundException) { }
     }, ct);
+
+    // ── Part uploads: each part is written at its offset into a hidden file, renamed into place at the end ──
+
+    public async Task<string> BeginPartsAsync(string path, DateTimeOffset? lastModified, CancellationToken ct = default)
+    {
+        var handle = PartUploads.NewHandle();
+        var staging = Remote(PartUploads.StagingPath(path, handle));
+        await RunAsync(() =>
+        {
+            EnsureDirectory(staging[..staging.LastIndexOf('/')]);
+            using (_client.Open(staging, FileMode.CreateNew, FileAccess.Write)) { }
+        }, ct);
+        return handle;
+    }
+
+    public async Task<string?> WritePartAsync(string path, string handle, int number, long offset, Stream content, long length, CancellationToken ct = default)
+    {
+        var staging = Remote(PartUploads.StagingPath(path, handle));
+        await RunAsync(() =>
+        {
+            if (!_client.Exists(staging)) throw new StorageNotFoundException(path);
+            using var file = _client.Open(staging, FileMode.Open, FileAccess.Write);
+            file.Seek(offset, SeekOrigin.Begin);
+            new BoundedStream(content, length).CopyTo(file, 256 * 1024);
+            file.Flush();
+        }, ct);
+        return null;
+    }
+
+    public Task CompletePartsAsync(string path, string handle, IReadOnlyList<UploadedPart> parts, long size, DateTimeOffset? lastModified,
+        CancellationToken ct = default)
+    {
+        PartUploads.CheckComplete(parts, size);
+        var staging = Remote(PartUploads.StagingPath(path, handle));
+        var target = Remote(path);
+        return RunAsync(() =>
+        {
+            if (!_client.Exists(staging)) throw new StorageNotFoundException(path);
+            var actual = _client.GetAttributes(staging).Size;
+            if (actual != size) throw new IOException($"The upload holds {actual} bytes, not {size}.");
+            if (lastModified is { } mtime) _client.SetLastWriteTimeUtc(staging, mtime.UtcDateTime);
+            Rename(staging, target);
+        }, ct);
+    }
+
+    public Task AbortPartsAsync(string path, string handle, CancellationToken ct = default)
+    {
+        var staging = Remote(PartUploads.StagingPath(path, handle));
+        return RunAsync(() =>
+        {
+            try { _client.DeleteFile(staging); }
+            catch (SftpPathNotFoundException) { }
+        }, ct);
+    }
 
     private void EnsureDirectory(string directory)
     {

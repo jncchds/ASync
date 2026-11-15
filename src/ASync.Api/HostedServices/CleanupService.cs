@@ -1,8 +1,9 @@
+using ASync.Api.Services;
 using ASync.Core.Interfaces;
 
 namespace ASync.Api.HostedServices;
 
-/// <summary>Hourly: deletes expired sign-in sessions, enrollment codes and device-code requests, and old purge records.</summary>
+/// <summary>Hourly: deletes expired sign-in sessions, enrollment codes and device-code requests, old purge records, and abandoned uploads.</summary>
 public class CleanupService(IServiceScopeFactory scopes, TimeProvider clock, ILogger<CleanupService> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(1);
@@ -24,9 +25,11 @@ public class CleanupService(IServiceScopeFactory scopes, TimeProvider clock, ILo
                 // Finished purges stay on the Folders and Users pages for a while, then go.
                 var purges = await scope.ServiceProvider.GetRequiredService<IPurgeJobRepository>()
                     .DeleteFinishedAsync(clock.GetUtcNow().UtcDateTime - PurgeRetention);
-                if (sessions + codes + purges > 0)
-                    logger.LogInformation("Cleanup deleted {Sessions} expired sessions, {Codes} expired device codes and {Purges} finished purge records.",
-                        sessions, codes, purges);
+                // Resumable uploads nobody continued: aborted on the back-end, then forgotten.
+                var uploads = await scope.ServiceProvider.GetRequiredService<UploadService>().AbortIdleAsync(stoppingToken);
+                if (sessions + codes + purges + uploads > 0)
+                    logger.LogInformation("Cleanup deleted {Sessions} expired sessions, {Codes} expired device codes, {Purges} finished purge records " +
+                                          "and {Uploads} abandoned uploads.", sessions, codes, purges, uploads);
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {

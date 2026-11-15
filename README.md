@@ -133,8 +133,13 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   places.
 - After a password change, other browsers are signed out, but a page that is already open keeps working for up
   to 15 minutes (its current access token).
-- Very large files in Mirror and two-way folders are uploaded in one piece, with no resume; on S3 storage
-  files over 5 GB fail.
+- Large files in Mirror and two-way folders are uploaded in 16 MB parts and downloaded with resume, so an
+  interrupted transfer continues where it stopped. Two steps still happen in one long request, which a reverse
+  proxy in front of ASync may cut off if its read timeout is short (give it several minutes): finishing an
+  upload to **WebDAV** storage (the server joins the parts on the storage, reading and writing the file once
+  more), and, on **S3**, moving a file over 5 GB into place (the copy runs inside S3). An unfinished upload is
+  thrown away after a day without progress. On S3 storage that ASync does not clean up itself, a bucket
+  lifecycle rule "abort incomplete multipart uploads after N days" is a good safety net.
 
 The planned fixes are listed in [AGENTS.md](AGENTS.md) under "Before M3: gaps to close".
 
@@ -158,6 +163,10 @@ Open http://localhost:5100 and create the admin account. Settings are environmen
 | `Storage__LocalRoots` | Where admins may create back-ends on the server's own disk (default `/data`, the `async_data` volume). Comma-separated. |
 | `Maintenance__PollSeconds` | How often the server looks for Backup folders due for pruning or verifying (default 900). |
 | `Maintenance__Enabled` | `false` stops the server from pruning and verifying on its own. |
+| `Uploads__PartSizeMB` | Files over 32 MB are uploaded in parts of this size (default 16, 5–64); an interrupted upload continues with the parts that are missing. |
+| `Uploads__MaxParallelParts` | Parts the server holds in memory at once, across all devices (default 4; the rest wait). |
+| `Uploads__AbandonAfterHours` | An unfinished upload without a new part for this long is thrown away (default 24). |
+| `Uploads__MaxSinglePutMB` | The largest file accepted in one piece (default 256), from devices that do not upload in parts. |
 | `Alerts__MinimumGraceMinutes`, `Alerts__GraceFactor` | A device is overdue after the longer of these minutes (default 240) and its folder's interval times the factor (default 3) without a successful run. People can change both for themselves. |
 | `Alerts__FailureThreshold`, `Alerts__ReminderHours` | Failed runs in a row before a device counts as failing (default 3); how often open problems are repeated (default 24, 0 = never). Also per person. |
 | `Alerts__PollSeconds`, `Alerts__Enabled` | How often the server looks for problems (default 300); `false` turns alerts off. `Alerts__RetryMinutes` (15): wait after a message no channel took. |
@@ -280,7 +289,7 @@ async-cli run                                                                # k
 |---|---|
 | `enroll` | Adds this machine to your account: with `--code`, or by showing a link and code to approve in the web UI. |
 | `status`, `folders` | This device, and the folders assigned to it. |
-| `sync [--folder N]` | Syncs (or backs up) every folder, or one, once. |
+| `sync [--folder N] [--progress]` | Syncs (or backs up) every folder, or one, once. `--progress` prints a line for every part of a large upload the server has stored. An interrupted upload or download continues on the next sync. |
 | `run` | Keeps syncing: on schedule, when files change, and as soon as another device changes a folder. The default in Docker. |
 | `set-path`, `pause`, `resume` | Changes this device's settings for a folder. |
 | `init-encryption --folder N` | Sets up an end-to-end encrypted Backup folder (on one device) and prints its recovery key. |

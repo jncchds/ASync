@@ -114,6 +114,20 @@ public interface IFolderRepository
     Task RemoveDeviceAsync(FolderDevice membership);
 }
 
+public interface IUploadSessionRepository
+{
+    /// <summary>The device's session for <paramref name="path"/> in the folder, with its parts.</summary>
+    Task<UploadSession?> FindAsync(int folderId, Guid deviceId, string path);
+    /// <summary>A session with its parts (null when it does not exist).</summary>
+    Task<UploadSession?> GetAsync(Guid id);
+    Task AddAsync(UploadSession session);
+    /// <summary>Records an acknowledged part (replacing an earlier one with the same number) and touches the session.</summary>
+    Task SavePartAsync(UploadSessionPart part, DateTime now);
+    Task DeleteAsync(Guid id);
+    /// <summary>Sessions not touched since <paramref name="idleSince"/>, with their folder and its back-end.</summary>
+    Task<List<UploadSession>> GetIdleAsync(DateTime idleSince);
+}
+
 public interface IAlertRepository
 {
     Task<AlertSettings?> GetSettingsAsync(int userId);

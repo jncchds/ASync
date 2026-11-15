@@ -12,6 +12,9 @@ public abstract class BackendConformanceTests : IAsyncLifetime
 {
     protected IStorageBackend Backend { get; private set; } = null!;
 
+    /// <summary>For subclasses' own tests of one back-end.</summary>
+    protected bool Configured => Backend is not null;
+
     /// <summary>Null = not configured here; the tests then skip.</summary>
     protected abstract Task<IStorageBackend?> CreateAsync();
 
@@ -130,6 +133,94 @@ public abstract class BackendConformanceTests : IAsyncLifetime
         Assert.Equal(data.Length, (await Backend.StatAsync("large.bin"))!.Size);
         var read = await Backend.ReadAllBytesAsync("large.bin");
         Assert.True(data.AsSpan().SequenceEqual(read));
+    }
+
+    /// <summary>
+    /// Size of the large-object cases: 24 MiB by default, so they run in CI; <c>ASYNC_TEST_LARGE_MB</c> raises it (e.g.
+    /// 6000 for objects past S3's 5 GB CopyObject limit; needs that much free space on the test server).
+    /// </summary>
+    protected static long LargeSize => (Environment.GetEnvironmentVariable("ASYNC_TEST_LARGE_MB") is { } mb && long.TryParse(mb, out var n) ? n : 24)
+                                       * 1024 * 1024 + 4321;
+
+    [SkippableFact]
+    public async Task LargeObject_StreamsIn_Moves_AndReadsBackInRanges()
+    {
+        SkipIfMissing();
+        var size = LargeSize;
+        // Not seekable and never in memory as a whole: what the gateway or a big local file looks like to a back-end.
+        await using (var source = new GeneratedStream(size, seed: 7))
+            await Backend.WriteAsync("big/in.bin", source, new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero));
+        Assert.Equal(size, (await Backend.StatAsync("big/in.bin"))!.Size);
+
+        await Backend.MoveAsync("big/in.bin", "big/moved.bin");
+        Assert.Null(await Backend.StatAsync("big/in.bin"));
+        Assert.Equal(size, (await Backend.StatAsync("big/moved.bin"))!.Size);
+
+        await using (var read = await Backend.OpenReadAsync("big/moved.bin"))
+            Assert.Equal(GeneratedStream.Hash(size, 7), await GeneratedStream.HashAsync(read));
+        var tail = await Backend.ReadRangeAsync("big/moved.bin", size - 5000, 5000);
+        Assert.Equal(GeneratedStream.Bytes(size, 7, size - 5000, 5000), tail);
+        await Backend.DeleteAsync("big/moved.bin");
+    }
+
+    [SkippableFact]
+    public async Task PartUpload_AppearsOnlyWhenComplete_InAnyOrder()
+    {
+        SkipIfMissing();
+        var parts = PartUploads.For(Backend);
+        var data = TestData.Random(13 * 1024 * 1024 + 77, seed: 3);
+        const int partSize = 5 * 1024 * 1024; // the S3 minimum for all but the last part
+        await Backend.WriteAsync("p/target.bin", Bytes("the old content"));
+        var mtime = new DateTimeOffset(2025, 6, 7, 8, 9, 10, TimeSpan.Zero);
+
+        var handle = await parts.BeginPartsAsync("p/target.bin", mtime);
+        var written = new List<UploadedPart>();
+        foreach (var number in new[] { 2, 0, 1 })
+        {
+            var offset = (long)number * partSize;
+            var length = (int)Math.Min(partSize, data.Length - offset);
+            var token = await parts.WritePartAsync("p/target.bin", handle, number, offset, new MemoryStream(data, (int)offset, length), length);
+            written.Add(new UploadedPart(number, offset, length, token));
+        }
+        // Until it is complete the old file is still there, and nothing else shows up in listings.
+        Assert.Equal("the old content", Encoding.UTF8.GetString(await Backend.ReadAllBytesAsync("p/target.bin")));
+        var listed = new List<string>();
+        await foreach (var e in Backend.ListAsync("p", recursive: true)) listed.Add(e.Path);
+        Assert.Equal(["p/target.bin"], listed);
+
+        await parts.CompletePartsAsync("p/target.bin", handle, [.. written.OrderBy(p => p.Number)], data.Length, mtime);
+        Assert.Equal(data, await Backend.ReadAllBytesAsync("p/target.bin"));
+        listed.Clear();
+        await foreach (var e in Backend.ListAsync("p", recursive: true)) listed.Add(e.Path);
+        Assert.Equal(["p/target.bin"], listed);
+    }
+
+    [SkippableFact]
+    public async Task PartUpload_RewrittenPartReplacesIt_AndAbortLeavesNothing()
+    {
+        SkipIfMissing();
+        var parts = PartUploads.For(Backend);
+        var data = TestData.Random(6 * 1024 * 1024, seed: 4);
+        var handle = await parts.BeginPartsAsync("q/file.bin", null);
+        // An interrupted part is sent again in full: the second write is what counts.
+        var junk = TestData.Random(5 * 1024 * 1024, seed: 5);
+        await parts.WritePartAsync("q/file.bin", handle, 0, 0, new MemoryStream(junk), junk.Length);
+        var first = await parts.WritePartAsync("q/file.bin", handle, 0, 0, new MemoryStream(data, 0, 5 * 1024 * 1024), 5 * 1024 * 1024);
+        var second = await parts.WritePartAsync("q/file.bin", handle, 1, 5 * 1024 * 1024, new MemoryStream(data, 5 * 1024 * 1024, 1024 * 1024), 1024 * 1024);
+        await Assert.ThrowsAsync<ArgumentException>(() => parts.CompletePartsAsync("q/file.bin", handle,
+            [new UploadedPart(1, 5 * 1024 * 1024, 1024 * 1024, second)], data.Length, null));
+        await parts.CompletePartsAsync("q/file.bin", handle,
+            [new UploadedPart(0, 0, 5 * 1024 * 1024, first), new UploadedPart(1, 5 * 1024 * 1024, 1024 * 1024, second)], data.Length, null);
+        Assert.Equal(data, await Backend.ReadAllBytesAsync("q/file.bin"));
+
+        var abandoned = await parts.BeginPartsAsync("q/gone.bin", null);
+        await parts.WritePartAsync("q/gone.bin", abandoned, 0, 0, new MemoryStream(junk), junk.Length);
+        await parts.AbortPartsAsync("q/gone.bin", abandoned);
+        await parts.AbortPartsAsync("q/gone.bin", abandoned); // twice is fine
+        Assert.Null(await Backend.StatAsync("q/gone.bin"));
+        var left = new List<string>();
+        await foreach (var e in Backend.ListAsync("q", recursive: true)) left.Add(e.Path);
+        Assert.Equal(["q/file.bin"], left);
     }
 
     [SkippableFact]
