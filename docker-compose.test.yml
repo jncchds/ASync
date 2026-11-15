@@ -3,6 +3,8 @@
 #   eval "$(scripts/test-backends-env.sh)"      # exports ASYNC_TEST_* for the running containers
 #   dotnet test src/ASync.Tests/ASync.Tests.csproj
 # Without the ASYNC_TEST_* variables those tests are skipped.
+# Every service has a health check that passes only once it serves requests: `up -d --wait` returns when all are ready
+# (CI uses it; started cold, SeaweedFS and Samba need several seconds before the first request works).
 services:
   # S3-compatible server (MinIO no longer publishes images on Docker Hub). No identities configured = no auth.
   s3:
@@ -11,12 +13,23 @@ services:
     command: server -s3 -dir=/data -s3.port=8333 -volume.max=100
     ports:
       - "19000:8333"
+    # Ready = an object can be written (the volume server has registered), in the bucket the tests use.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null -X PUT http://127.0.0.1:8333/async-test; curl -sf -o /dev/null -X PUT --data-binary ok http://127.0.0.1:8333/async-test/healthcheck"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
 
   sftp:
     image: atmoz/sftp:latest
     command: test:test:1001:1001:upload
     ports:
       - "12222:22"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/22 && head -c 4 <&3 | grep -q SSH"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
 
   webdav:
     image: bytemark/webdav:latest
@@ -26,11 +39,22 @@ services:
       PASSWORD: test
     ports:
       - "18081:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://test:test@127.0.0.1/"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
 
   # SMBLibrary always connects to port 445, which is often taken on the host: tests use the container's IP.
   samba:
     image: dperson/samba:latest
     command: -u "test;test" -s "share;/share;yes;no;no;test" -p
+    # The image's own check (smbclient) runs only every 60 s.
+    healthcheck:
+      test: ["CMD-SHELL", "smbclient -L //127.0.0.1 -U test%test -m SMB3 >/dev/null"]
+      interval: 2s
+      timeout: 10s
+      retries: 60
 
   # PostgreSQL for the API-level tests (src/ASync.Tests/Api): each test class makes and drops a database of its own.
   postgres:
@@ -43,7 +67,8 @@ services:
     ports:
       - "15432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U async"]
+      # Over TCP: during initdb the image runs a temporary server on the Unix socket only, then restarts it.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U async"]
       interval: 2s
       timeout: 5s
       retries: 30
