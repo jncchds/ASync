@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The sync agent as a long-running process: single-instance lock, the control channel's handler, the Generic Host
+    for `async-cli service run` (systemd, Windows Service, launchd), logging, and the service installers. Used by
+    async-cli now and by ASync.App.Desktop (M3-2) later.
+  -->
+  <PropertyGroup>
+    <RootNamespace>ASync.Agent</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ASync.Client.Core\ASync.Client.Core.csproj" />
+    <ProjectReference Include="..\ASync.Agent.Control\ASync.Agent.Control.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ASync.Tests" />
+  </ItemGroup>
+</Project>

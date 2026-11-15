@@ -59,12 +59,19 @@ src/
   ASync.Api/              Controllers/, Auth/, Services/, HostedServices/, Program.cs; wwwroot/ = built SPA
   async-ui/               React 19 + Vite 8 + TS: axios api.ts, react-router 7, one index.css
   ASync.Tests/            xUnit, hand-written fakes
-  ASync.Client.Core/      device side: identity/store, API client, RemoteStorageBackend, FolderSyncer, BackupJob, SyncAgent
+  ASync.Client.Core/      device side: identity/store (Secrets/: file, DPAPI, Keychain), API client, RemoteStorageBackend,
+                          FolderSyncer, BackupJob, SyncAgent, RunProgress
+  ASync.Agent.Control/    the agent's local control channel: versioned JSON-lines protocol, endpoint (Unix socket /
+                          named pipe), ControlClient, ControlServer. BCL + System.Text.Json source generation only, so the
+                          Avalonia app shares it without ASP.NET or the engine
+  ASync.Agent/            the agent as a process: AgentRuntime (lock, control handler, SyncAgent), AgentHost (Generic
+                          Host: systemd notify, Windows Service, logging), ServiceInstaller (systemd, launchd, Task
+                          Scheduler, sc.exe), RollingFileLogger
   ASync.Cli/              async-cli (System.CommandLine): enroll, status, folders, sync, run, set-path, pause/resume,
-                          init-encryption, unlock, snapshots, restore (also offline: --repo), prune, check, forget.
-                          References ASync.Storage for offline restores from remote storage
+                          init-encryption, unlock, snapshots, restore (also offline: --repo), prune, check, forget,
+                          service install/uninstall/status/run. References ASync.Storage for offline restores
   ASync.App/              (later) Avalonia shared UI (CommunityToolkit.Mvvm)
-  ASync.App.Desktop/      (later) Win/Linux/macOS head: tray + background service host
+  ASync.App.Desktop/      (later) Win/Linux/macOS head: tray; talks to the agent service over ASync.Agent.Control
   ASync.App.iOS/          (later) PhotoKit, Contacts, EventKit, BGTaskScheduler, APNs, background URLSession
   ASync.App.Android/      (later) MediaStore, Contacts/CalendarProvider, WorkManager, FCM/UnifiedPush
   ASync.Push/             (later) APNs/FCM/UnifiedPush sender, used by the server (direct mode) and the relay
@@ -75,6 +82,7 @@ scripts/
   smoke-storage.cs        end-to-end check of storage back-end management (Local + S3)
   smoke-snapshots.cs      end-to-end check of folders, a device backup, snapshot browsing and downloads
   e2e-sync.sh / .cs       end-to-end sync test: throw-away server stack + real async-cli agents (local and Docker)
+  smoke-agent-service.sh  the agent as a real systemd user service: install, sync, restart, uninstall (Linux)
   test-backends-env.sh    ASYNC_TEST_* variables for the containers of docker-compose.test.yml
 ```
 
@@ -552,7 +560,8 @@ locked by a prune is not a failed run: the agent retries it after 30 seconds and
 - **Results** are stored on the folder (see "Data model") by `FolderService.RecordMaintenanceAsync`, which
   sends `folder.status` to the owner's pages. The folder's `Revision` does not change, so agents don't reload.
 
-**Agent** (`SyncAgent`, used by `async-cli run` and later by the desktop service):
+**Agent** (`SyncAgent`, run by `AgentRuntime` for `async-cli run` and `async-cli service run`; see "Agent service and
+control channel"):
 - One worker per folder, triggered by:
   - its interval;
   - local file changes (FileSystemWatcher, 5-second debounce; TwoWay and Mirror Upload);
@@ -562,6 +571,18 @@ locked by a prune is not a failed run: the agent retries it after 30 seconds and
 - After a run of an end-to-end Backup folder it does the prune or check the server hands it (see "Prune and
   check").
 - Results go to `POST .../report`. Runs that changed the storage call `POST .../changed`.
+- **State for status displays:** `Connection` (Connecting, Connected, Reconnecting, Offline, Revoked) and
+  `Folders` (each worker's activity, progress, last result and time, next run), with `StatusChanged` and
+  `FolderStatusChanged` events. `RequestRunAsync(folder)` asks a worker for a run that starts after the request and
+  returns its result; a worker replaced after a settings change hands its waiting requests to the new one.
+- A first hub connection that fails (no network at boot) is retried in the background with backoff up to 5 minutes;
+  SignalR's own reconnect only covers connections that once worked.
+- **Progress** (`RunProgress`): `FolderSyncer` sets the plan's totals (files to transfer or delete, bytes to
+  transfer) and counts each file and the bytes of the current one (download buffers, upload parts); `BackupJob`
+  reports through its `IProgress<BackupProgress>` (no totals: a backup does not count its folder first). The
+  syncer only writes plain fields (`Volatile`/`Interlocked`, no locks, events or allocations per update), and
+  readers take snapshots: the control channel twice a second while somebody subscribes. Without a progress object
+  the download path is the old `CopyToAsync`.
 
 **Device identity on the CLI** (`FileClientStore`): stored in `ASYNC_CONFIG_DIR`, or by default
 `~/.config/async`, as files only the user can read:
@@ -569,9 +590,27 @@ locked by a prune is not a failed run: the agent retries it after 30 seconds and
 - `token.json`: the current 15-minute access token (`ITokenCache`), so one-command processes don't sign in
   every time;
 - `keys/<folder>.key`: unlocked end-to-end keys;
-- `state/<folder>/`: sync state.
+- `state/<folder>/`: sync state;
+- `agent.lock`, `agent.endpoint`: see "Agent service and control channel".
 
-The apps will keep the same data in the OS keystore.
+**Secrets per platform** (`ISecretProtector` in `ASync.Client.Core/Secrets`, behind the same `IClientStore`): the
+private key in `identity.json` and the folder keys in `keys/` are written as
+- plain base64 (`file`): Linux and Docker. The 0600 file is the protection, as before. libsecret was left out: it
+  needs a D-Bus session with an unlocked keyring, which a lingering user service, a system unit, an SSH session or a
+  container does not have, and binding it means a native library; a keyring would add little against a process
+  running as the same user, which can read either.
+- `dpapi:<base64>`: Windows, DPAPI with CurrentUser scope (`System.Security.Cryptography.ProtectedData`); only the
+  same Windows account can decrypt it, also from a copied file.
+- `keychain:<account>`: macOS, a generic password in the login Keychain (service `ua.pp.chds.async`, account
+  `<hash of the store's path>/<id>`); the file only names it. Bound with `LibraryImport` to Security.framework's
+  `SecKeychain*GenericPassword` functions: deprecated by Apple but shipped, and simple enough to bind without
+  Objective-C, a NuGet binding or a native build step.
+- `SecretProtectors.Unprotect` reads every format, so stores made by older versions (all plain) keep working, and
+  `FileClientStore` rewrites a secret in this machine's format when it reads one in another (`TryMigrate`: a
+  read-only mount or a locked Keychain leaves the old file as it is). A `dpapi:` or `keychain:` value elsewhere fails
+  with a message naming where it can be read. `ASYNC_SECRET_STORE=file` chooses the file on every OS (a Mac without
+  a login Keychain, e.g. a LaunchDaemon). The Keychain and DPAPI paths are only compiled on Linux; CI runs the DPAPI
+  round trip on Windows.
 
 ### Large files (resumable transfers)
 
@@ -991,13 +1030,120 @@ a random id in a container.
   - Revocation: commands fail, the running agent exits, and the server closed its hub connection.
 - With `--server-container` it inspects the storage with `docker exec`.
 
+## Agent service and control channel (M3)
+
+The sync agent runs in the background as a service of the OS, and a local control channel lets the CLI and the
+desktop app (M3-2) see and steer it. No GUI yet.
+
+**Where it lives.** The host is a mode of `async-cli` (`async-cli service run`), with the logic in the library
+`ASync.Agent`, not a separate executable:
+- one program to install and update: the service runs exactly the CLI that installed it
+  (`ServiceInstaller.CurrentProgram`: the apphost, or `dotnet async-cli.dll`), so the CLI and the agent are never
+  different versions;
+- the desktop app (M3-2) can reference `ASync.Agent` too, to run the same `AgentRuntime` or install the service;
+  `ASync.Agent.Control` is the only part it needs to talk to one.
+
+**Processes.** `AgentRuntime` is the agent process around `SyncAgent`, used by `async-cli run` (foreground, console
+logs) and `async-cli service run`:
+- `Start()` takes the config directory's `AgentLock` and opens the control channel. A channel that cannot be opened is
+  logged and the agent runs without it; the lock still keeps the CLI from syncing next to it.
+- `RunAsync()` signs the device in and runs `SyncAgent`. As a service (`WaitForIdentity`) it does not exit without an
+  identity or after a revocation: it reports `NotEnrolled`/`Revoked`, polls `identity.json` every 5 seconds and starts
+  by itself after `async-cli enroll` (or `forget` + `enroll`). A supervisor would only restart it into the same state.
+  The foreground `run` keeps its old behaviour (enroll from the environment, exit 1 on revocation).
+
+**Host** (`AgentHost.RunServiceAsync`, Generic Host with `DisableDefaults`):
+- **systemd:** `AddSystemd()`, `Type=notify`. The runtime starts (lock, socket) in the hosted service's `StartAsync`,
+  so READY=1 comes only after that, and a second agent fails before READY. Logs via `AddSystemdConsole` (journald
+  priorities, no timestamps of its own).
+- **Windows Service:** `AddWindowsService()` (`ASyncAgent`), logs to the Event Log (source "ASync Agent").
+- **Everything else** (launchd, the Windows logon task, a terminal): a rolling file (`--log-file`, 10 MB × 5, written
+  by a background thread; a full queue drops lines rather than block sync) or the console.
+- Level Information (Microsoft.* and System.Net.Http at Warning); `--verbose` or `ASYNC_LOG_LEVEL` changes it.
+  Shutdown timeout 45 s (systemd `TimeoutStopSec=60`). `AgentRuntime.DisposeAsync` and `ControlServer.DisposeAsync` are
+  idempotent: the host disposes the singleton runtime, and `RunServiceAsync` disposes it again for the paths where the
+  host never started (before this, every stop ended in an `ObjectDisposedException` and exit 1).
+
+**Install** (`async-cli service install|uninstall|status [--system] [--run-as user] [--no-start] [--log-file]`,
+`ServiceInstaller`; the unit, plist and task XML are pure functions with tests):
+
+| | per user (default) | `--system` |
+|---|---|---|
+| Linux | `~/.config/systemd/user/async-agent.service`, `WantedBy=default.target`, `systemctl --user enable` + `restart`; hints at `loginctl enable-linger` | `/etc/systemd/system/async-agent.service`, `User=`, `RuntimeDirectory=async-agent` (0700) with `ASYNC_CONTROL_SOCKET=/run/async-agent/agent.sock`, after `network-online.target` |
+| macOS | LaunchAgent `~/Library/LaunchAgents/ua.pp.chds.async.agent.plist`, `launchctl bootstrap gui/<uid>`, `KeepAlive` on failure, log in `~/Library/Logs/ASync` | LaunchDaemon with `UserName` |
+| Windows | Task Scheduler task "ASync Agent" at logon, as the user (`InteractiveToken`, least privilege), through `conhost --headless` (no window), restarted on failure | Windows Service `ASyncAgent` (`sc.exe create`, LocalSystem, delayed auto-start, restart actions) |
+
+Per user on Windows is a logon task, not a service: a service running as a user needs that user's password stored
+with it, and the agent needs the user (DPAPI's CurrentUser keys, the user's own paths and mapped drives). `install`
+restarts an agent that already runs, so re-installing after an update picks up the new binary.
+
+**Single instance** (`AgentLock`): `agent.lock` in the config directory, held open with `FileShare.None` while the
+agent runs. .NET turns that into `flock(LOCK_EX)` on Linux/macOS and a sharing lock on Windows; the OS drops it with
+the process, so a crash leaves nothing stale. A second `run` or service fails with `AgentAlreadyRunningException`
+(`service run` exits 2), `forget` refuses while it is held, and the routed commands below refuse to work in-process
+next to an agent whose channel does not answer. One agent per config directory, not per user: the end-to-end test
+runs two agents of one user.
+
+**Control channel** (`ASync.Agent.Control`):
+- **Transport:** a Unix domain socket on Linux and macOS, `$XDG_RUNTIME_DIR/async/agent-<hash>.sock` (macOS: `$TMPDIR`;
+  without either, e.g. in a container: `/tmp/async-<uid>/`, created 0700 and refused when it cannot be tightened,
+  i.e. someone else owns it); the socket is 0600 in a 0700 directory. On Windows the named pipe `ASync.Agent.<hash>`,
+  created with `PipeOptions.CurrentUserOnly` (the pipe's DACL allows only the current user) and `FirstPipeInstance`;
+  the client uses `CurrentUserOnly` too, which checks that the server runs as the same user, so no other account can
+  plant an impostor pipe. The system service's pipe allows SYSTEM and Administrators. `<hash>` is SHA-256 of the user
+  name and the config directory's full path (trailing separators trimmed). `ASYNC_CONTROL_SOCKET` overrides the
+  address; the agent writes the address it uses to `agent.endpoint` in the config directory and clients read that
+  first, so they find an agent started with another environment (the system unit).
+- **Protocol** (version 1): one JSON object per line each way, camelCase, string enums, nulls left out, at most 1 MiB
+  a line, `System.Text.Json` source generation (`ControlJsonContext`; trimming- and AOT-safe for the app). Requests
+  `{v, id, op, folderId?, path?, secret?, allowMassDelete?}` get one response `{v, id, ok, error?, message?, hello?,
+  status?, results?}` each, in order. Operations:
+  - `hello`: protocol and agent version, pid, mode, config directory (sent by `ControlClient` on connect);
+  - `status`: state (NotEnrolled, Connecting, Connected, Reconnecting, Offline, Revoked, Stopping), device, problem, and
+    per folder its settings, activity (Idle, Syncing, BackingUp, Maintenance, Paused), whether an E2E folder is
+    locked here, progress `{files, totalFiles, bytes, totalBytes, currentFile}`, last result and next run;
+  - `sync` (a folder or all): waits for runs that start after the request and returns their results;
+  - `pause`, `resume`, `set-path`: through the server's device settings, then a reload;
+  - `unlock`: the secret is never logged; starts the backup that waited for it;
+  - `subscribe`: the connection then carries only events: a full `status` first, then `folder` changes, `run-finished`
+    with the result, progress twice a second while it moves, `status` on connection or folder-list changes. A
+    subscriber that does not keep up loses its oldest events (bounded channel of 256) instead of slowing the agent.
+- **Versioning:** within version 1 only optional fields and operations are added; clients ignore unknown fields and
+  check `hello.protocol` before using newer operations. A request with a higher `v` is refused naming the agent's
+  version, so an old agent tells a new app to update it. Errors come back as `{ok: false, error}`; the connection
+  stays usable.
+- **Authentication is the OS's access control, nothing more.** Only the user's own processes (and root or
+  administrators, who can read the identity file anyway) can open the socket or pipe. Everything the channel can do,
+  such a process can already do directly: read `identity.json` and the folder keys, sign in as the device, change the
+  files being synced. A token or password on top would sit in a file readable by the same processes and protect
+  nothing more. The channel never returns secrets (device key, folder keys, tokens), listens on no network address,
+  and `unlock` only takes a secret in.
+
+**CLI routing** (`ASync.Cli/Routed.cs`): `status`, `sync`, `pause`, `resume`, `set-path` and `unlock` first try the
+agent of the config directory. If one answers, the command goes through it (same output and exit codes; `status` adds
+each folder's activity, progress, last result and next run; `sync --progress` follows the event stream). If none runs,
+the command works in-process as before. If the lock is held but the channel does not answer (another user, an agent
+without a channel), it fails rather than sync next to the agent. `ASYNC_IN_PROCESS=1` skips the routing and that check
+(for debugging). The other commands (`enroll`, `folders`, `snapshots`, `restore`, `prune`, `check`, `init-encryption`)
+stay in-process: they don't sync plain folders, and the repository lock protects Backup folders.
+
+**Tests:** `src/ASync.Tests/Agent`: the protocol over a real socket (or pipe) with a fake handler, endpoints and their
+modes, a real `AgentRuntime` on its channel, the lock and a second agent, CLI routing and output, the unit, plist and
+task rendering and quoting, the rolling log, secret formats and migration, progress. `scripts/smoke-agent-service.sh`
+installs the real user unit on Linux against a throw-away stack (project `async-agent-smoke`, port 5191) and checks:
+active after READY, status through the service, the first sync on start, a routed `sync`, a refused second `run`,
+pause and resume, a watcher sync, journald lines, `systemctl --user restart` with a clean stop and a new pid, then
+`service uninstall` leaving nothing behind (unit, process, socket, endpoint file) and the CLI in-process again. It
+refuses to run when the user already has an `async-agent.service`, and removes its unit even when it fails half-way.
+
 ## Background work and wake-ups (M3–M4)
 
-Planned, except for the server's overdue detection and alerts (below, implemented) and `Push__Mode=None`
-(the only push mode so far). Nothing else in this section or in "Push" exists yet.
+Planned, except for the desktop agent service ("Agent service and control channel"), the server's overdue
+detection and alerts (below) and `Push__Mode=None` (the only push mode so far), which are implemented. Nothing else
+in this section or in "Push" exists yet.
 
-- **Desktop:** the agent runs as a Windows Service, a systemd unit or a launchd agent. The tray UI talks to it
-  over a named pipe or Unix socket. The CLI container runs the same agent.
+- **Desktop:** the agent runs as a systemd unit, a launchd agent, or a logon task / Windows Service (implemented).
+  The tray UI (M3-2) talks to it over the named pipe or Unix socket. The CLI container runs the same agent.
 - **iOS** (silent push alone is not reliable, so several mechanisms are layered):
   - Background `URLSession` transfers keep going after the app is suspended.
   - `BGAppRefreshTask` and `BGProcessingTask` run scheduled scans; processing tasks can require power and
@@ -1177,6 +1323,11 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
   (or their device) → 404 on every endpoint with an id of someone else's folder, back-end, device, code, channel,
   purge, snapshot or upload. A new route parameter fails the test until it is mapped to another user's resource, a
   new anonymous endpoint until it is listed. `ApiQuotaTests` covers quotas over HTTP.
+- **Agent on Windows and macOS** (job `agent-desktop`, `windows-latest` and `macos-latest`): builds async-cli, the
+  agent and the tests with `-warnaserror` and runs `src/ASync.Tests/Agent` (no Docker there): the control protocol
+  over a named pipe or a socket, the lock, routing, service files, DPAPI on Windows. Releases wait for it. Installing
+  a real service is only exercised on Linux (`scripts/smoke-agent-service.sh`, run by hand: CI runners have no user
+  systemd manager).
 - **Windows x64/ARM64:** MSIX, or Velopack with auto-update, plus winget.
 - **macOS ARM64:** a signed and notarized dmg, with Velopack updates.
 - **Linux x64/ARM64:** AppImage, deb and rpm, with a systemd unit for the agent.
@@ -1194,8 +1345,15 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 3. **M2 — sync over the CLI (done).** The sync protocol (storage gateway, leases, live events) and `async-cli`
    (enroll, Backup, Mirror, TwoWay, end-to-end encryption, restore), the `async-cli` Docker image, the
    end-to-end test in CI, and the web UI for folders and for browsing and downloading snapshots.
-   "Before M3: gaps to close" is done too (items 1–7). **← current stage; next is M3.**
-4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
+   "Before M3: gaps to close" is done too (items 1–7).
+4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update. **← current stage.**
+   - **M3-1 agent service (done):** the agent as a systemd/launchd/Task Scheduler/Windows service
+     (`async-cli service`), the local control channel (`ASync.Agent.Control`), CLI routing and the single-instance
+     lock, progress reporting, secrets in DPAPI and the Keychain. Verified on Linux (unit tests, smoke test with a
+     real user unit); on Windows and macOS compiled, with CI jobs for the agent's unit tests, but never installed
+     or run there. Left open: the system-wide Windows Service runs as LocalSystem (its identity is the machine's);
+     no libsecret on Linux; the Keychain binding uses the deprecated SecKeychain API.
+   - M3-2 desktop app (next): the Avalonia tray app on the control channel.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
    overdue devices.
 6. **M5 — hardening:** OpenTelemetry, and whatever is left of the gap list below. Later: Google Drive,
@@ -1254,7 +1412,7 @@ app starts after them, because it would otherwise be built on the same holes.
    count only after the next scan (usage errs high); a modified agent could use a prune claim to write past its
    quota; no per-folder quota; no quota on the server's own temp space; parallel uploads of several files.
 
-The gap list is complete: **M3 (desktop app) is next.**
+The gap list is complete; M3 (desktop app) has started.
 
 Open questions:
 - Should there be a SQLite option for small installs?

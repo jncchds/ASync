@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.CommandLine;
+using ASync.Agent;
+using ASync.Agent.Control;
 using ASync.Cli;
 using ASync.Client.Core;
 using ASync.Client.Core.Sync;
@@ -27,7 +29,10 @@ root.Options.Add(configOption);
 root.Options.Add(verboseOption);
 
 // Runs a command with its context, turning expected failures into one readable line and exit code 1.
-Command Define(string name, string description, Func<CliContext, ParseResult, CancellationToken, Task<int>> run, params Option[] options)
+Command Define(string name, string description, Func<CliContext, ParseResult, CancellationToken, Task<int>> run, params Option[] options) =>
+    DefineIn(root, name, description, run, options);
+
+Command DefineIn(Command parent, string name, string description, Func<CliContext, ParseResult, CancellationToken, Task<int>> run, params Option[] options)
 {
     var command = new Command(name, description);
     foreach (var o in options) command.Options.Add(o);
@@ -45,7 +50,7 @@ Command Define(string name, string description, Func<CliContext, ParseResult, Ca
             return 1;
         }
         catch (Exception e) when (e is CliException or ApiException or SyncRefusedException or HttpRequestException or WrongKeyException
-                                     or RepositoryLockedException)
+                                     or RepositoryLockedException or ControlException or AgentAlreadyRunningException or ServiceCommandException)
         {
             Console.Error.WriteLine($"error: {e.Message}");
             return 1;
@@ -55,9 +60,12 @@ Command Define(string name, string description, Func<CliContext, ParseResult, Ca
             ctx?.Dispose();
         }
     });
-    root.Subcommands.Add(command);
+    parent.Subcommands.Add(command);
     return command;
 }
+
+// The agent of this config directory, when one runs: the commands below then go through it (see Routed).
+Task<ControlClient?> AgentAsync(CliContext ctx, CancellationToken ct) => Routed.ConnectAsync(ctx.Store.Root, ct);
 
 // ── enroll ────────────────────────────────────────────────────────────────────
 var serverOption = new Option<string?>("--server", "-s") { Description = "The server's address, e.g. https://sync.example.com (else ASYNC_SERVER)." };
@@ -96,20 +104,27 @@ async Task<DeviceIdentity> EnrollAsync(CliContext ctx, string? server, string? c
 
 Define("forget", "Remove this device's identity and keys from this machine (remove it in the web UI too).", (ctx, _, _) =>
 {
+    if (AgentLock.IsHeld(ctx.Store.Root))
+        throw new CliException("An agent is running with this identity. Stop it first (`async-cli service uninstall`, or end `async-cli run`).");
     ctx.Store.DeleteIdentity();
     Console.WriteLine("This device's identity was removed. Its folders' files stay where they are.");
     return Task.FromResult(0);
 });
 
 // ── status / folders ──────────────────────────────────────────────────────────
-Define("status", "Show this device and its folders.", async (ctx, _, ct) =>
+Define("status", "Show this device and its folders (and, when an agent runs, what each folder is doing).", async (ctx, _, ct) =>
 {
+    if (await AgentAsync(ctx, ct) is { } agent)
+        await using (agent)
+            return await Routed.StatusAsync(agent, Console.Out, ct);
     var id = ctx.Identity;
     Console.WriteLine($"Device:  {id.DeviceName} ({id.DeviceId})");
     Console.WriteLine($"Account: {id.Username} on {id.ServerUrl}");
     var self = await ctx.Api.SelfAsync(ct);
     Console.WriteLine($"Server:  reachable, last seen {self.LastSeenAt?.ToLocalTime():yyyy-MM-dd HH:mm}");
     PrintFolders(await ctx.Api.GetFoldersAsync(ct), ctx);
+    Console.WriteLine();
+    Console.WriteLine("Agent:   not running (`async-cli run`, or `async-cli service install` to run it in the background).");
     return 0;
 });
 
@@ -139,8 +154,11 @@ void PrintFolders(List<DeviceFolderDto> folders, CliContext ctx)
 }
 
 // ── sync / run ────────────────────────────────────────────────────────────────
-Define("sync", "Sync (or back up) folders once, now.", async (ctx, p, ct) =>
+Define("sync", "Sync (or back up) folders once, now (through the running agent, if there is one).", async (ctx, p, ct) =>
 {
+    if (await AgentAsync(ctx, ct) is { } running)
+        await using (running)
+            return await Routed.SyncAsync(running, p.GetValue(optionalFolderOption), p.GetValue(massDeleteOption), p.GetValue(progressOption), Console.Out, ct);
     await using var agent = new SyncAgent(ctx.Api, ctx.Store, ctx.Loggers.CreateLogger("sync"))
     {
         AllowMassDeletion = p.GetValue(massDeleteOption),
@@ -172,11 +190,14 @@ Define("run", "Keep syncing: on schedule, on file changes and when other devices
                 throw new CliException("Not enrolled. Run `async-cli enroll`, or set ASYNC_SERVER (and ASYNC_ENROLL_CODE) to enroll on start.");
             await EnrollAsync(ctx, null, null, null, ct);
         }
-        var logger = ctx.Loggers.CreateLogger("agent");
-        logger.LogInformation("ASync agent {Version}: {Device} → {Server}", CliContext.Version, ctx.Identity.DeviceName, ctx.Identity.ServerUrl);
-        await using var agent = new SyncAgent(ctx.Api, ctx.Store, logger) { AllowMassDeletion = p.GetValue(massDeleteOption) };
-        await agent.RunAsync(ct);
-        logger.LogInformation("Stopped.");
+        // The same agent as the service (lock, control channel), in the foreground with console logs.
+        await using var runtime = new AgentRuntime(new AgentOptions
+        {
+            ConfigDirectory = ctx.Store.Root, Mode = AgentMode.Foreground, Version = CliContext.Version, AllowMassDeletion = p.GetValue(massDeleteOption),
+        }, ctx.Loggers);
+        runtime.Start();
+        await runtime.RunAsync(ct);
+        ctx.Loggers.CreateLogger("agent").LogInformation("Stopped.");
         return 0;
     }, massDeleteOption);
 
@@ -184,6 +205,12 @@ Define("run", "Keep syncing: on schedule, on file changes and when other devices
 var pathOption = new Option<string>("--path", "-p") { Description = "Where the folder lives on this device.", Required = true };
 Define("set-path", "Change where a folder lives on this device.", async (ctx, p, ct) =>
 {
+    if (await AgentAsync(ctx, ct) is { } agent)
+        await using (agent)
+        {
+            Console.WriteLine(await agent.SetPathAsync(p.GetValue(folderOption), Path.GetFullPath(p.GetValue(pathOption)!), ct));
+            return 0;
+        }
     var folder = await ctx.FolderAsync(p.GetValue(folderOption), ct);
     var updated = await ctx.Api.UpdateOwnSettingsAsync(folder.FolderId, new UpdateDeviceFolderRequest(LocalPath: Path.GetFullPath(p.GetValue(pathOption)!), ExpectedRevision: folder.Revision), ct);
     Console.WriteLine($"\"{updated.Name}\" now syncs at {updated.LocalPath}.");
@@ -193,6 +220,12 @@ Define("set-path", "Change where a folder lives on this device.", async (ctx, p,
 foreach (var (name, paused) in new[] { ("pause", true), ("resume", false) })
     Define(name, $"{(paused ? "Pause" : "Resume")} syncing a folder on this device.", async (ctx, p, ct) =>
     {
+        if (await AgentAsync(ctx, ct) is { } agent)
+            await using (agent)
+            {
+                Console.WriteLine(await agent.SetPausedAsync(p.GetValue(folderOption), paused, ct));
+                return 0;
+            }
         var folder = await ctx.FolderAsync(p.GetValue(folderOption), ct);
         await ctx.Api.UpdateOwnSettingsAsync(folder.FolderId, new UpdateDeviceFolderRequest(Paused: paused, ExpectedRevision: folder.Revision), ct);
         Console.WriteLine($"\"{folder.Name}\" {(paused ? "paused" : "resumed")} on this device.");
@@ -216,6 +249,13 @@ Define("init-encryption", "Set up an end-to-end encrypted Backup folder (once, o
 
 Define("unlock", "Unlock an end-to-end encrypted folder on this device (passphrase or recovery key).", async (ctx, p, ct) =>
 {
+    if (await AgentAsync(ctx, ct) is { } agent)
+        await using (agent)
+        {
+            var typed = Prompt.Secret("passphrase or recovery key", "ASYNC_PASSPHRASE", p.GetValue(passphraseFileOption));
+            Console.WriteLine(await agent.UnlockAsync(p.GetValue(folderOption), typed, ct));
+            return 0;
+        }
     var folder = await ctx.FolderAsync(p.GetValue(folderOption), ct);
     var secret = Prompt.Secret("passphrase or recovery key", "ASYNC_PASSPHRASE", p.GetValue(passphraseFileOption));
     await RepositoryAccess.UnlockAsync(ctx.Store, folder, new RemoteStorageBackend(ctx.Api, folder.FolderId), secret, ct);
@@ -382,5 +422,62 @@ Define("prune", "Free the space of forgotten snapshots in Backup folders (all of
 
 Define("check", "Verify that Backup folders' repositories are complete and readable. Exit code 1 when problems are found.",
     (ctx, p, ct) => MaintainAsync(ctx, p, MaintenanceKind.Check, ct), optionalFolderOption, readDataOption);
+
+// ── service ───────────────────────────────────────────────────────────────────
+// The agent as a background service: systemd (Linux), a logon task or Windows Service (Windows), launchd (macOS).
+var service = new Command("service", "Run the agent in the background as a service (per user by default): install, uninstall, status.");
+root.Subcommands.Add(service);
+var systemOption = new Option<bool>("--system")
+{
+    Description = "System-wide instead of for this user (a systemd system unit, a Windows Service, a LaunchDaemon). Needs root/administrator.",
+};
+var runAsOption = new Option<string?>("--run-as") { Description = "With --system on Linux and macOS: the account the agent runs as (default: SUDO_USER)." };
+var noStartOption = new Option<bool>("--no-start") { Description = "Only install; start it later (or at the next logon/boot)." };
+var logFileOption = new Option<string?>("--log-file") { Description = "Log to this file (rolled over at 10 MB, 5 kept) instead of the console." };
+
+DefineIn(service, "install", "Install the agent as a service and start it.", async (ctx, p, ct) =>
+{
+    var system = p.GetValue(systemOption);
+    var runAs = p.GetValue(runAsOption) ?? (system ? Environment.GetEnvironmentVariable("SUDO_USER") : null);
+    if (system && !OperatingSystem.IsWindows() && string.IsNullOrEmpty(runAs))
+        throw new CliException("Give --run-as <user>: the account the system service runs as (its config directory and folders must be theirs).");
+    var result = await ServiceInstaller.InstallAsync(new ServiceInstallOptions
+    {
+        Program = ServiceInstaller.CurrentProgram(), ConfigDirectory = ctx.Store.Root, System = system, RunAs = runAs,
+        Verbose = p.GetValue(verboseOption), LogFile = p.GetValue(logFileOption),
+    }, start: !p.GetValue(noStartOption), ct);
+    Console.WriteLine(result.Message);
+    if (ctx.Store.LoadIdentity() is null)
+        Console.WriteLine("This device is not enrolled yet: run `async-cli enroll --server <url>`; the service starts syncing by itself afterwards.");
+    return result.Ok ? 0 : 1;
+}, systemOption, runAsOption, noStartOption, logFileOption);
+
+DefineIn(service, "uninstall", "Stop the agent's service and remove it (the identity and folders stay).", async (_, p, ct) =>
+{
+    var result = await ServiceInstaller.UninstallAsync(p.GetValue(systemOption), ct);
+    Console.WriteLine(result.Message);
+    return result.Ok ? 0 : 1;
+}, systemOption);
+
+DefineIn(service, "status", "Whether the agent's service is installed and running, and what it is doing.", async (ctx, p, ct) =>
+{
+    var (installed, running, detail) = await ServiceInstaller.StatusAsync(p.GetValue(systemOption), ct);
+    Console.WriteLine($"Service: {detail}");
+    if (await AgentAsync(ctx, ct) is { } agent)
+        await using (agent)
+            return await Routed.StatusAsync(agent, Console.Out, ct);
+    Console.WriteLine("Agent:   not reachable for this config directory.");
+    return installed && running ? 1 : 3; // 3: not running, like systemctl is-active
+}, systemOption);
+
+// Started by the service manager. Also usable by hand to try the service setup in a terminal.
+DefineIn(service, "run", "Run the agent as the service manager starts it (systemd notify, Windows Service, logs to the system log).", async (ctx, p, ct) =>
+{
+    return await AgentHost.RunServiceAsync(new ServiceRunOptions
+    {
+        ConfigDirectory = ctx.Store.Root, Version = CliContext.Version, Verbose = p.GetValue(verboseOption), LogFile = p.GetValue(logFileOption),
+        SystemService = p.GetValue(systemOption), AllowMassDeletion = p.GetValue(massDeleteOption),
+    }, ct);
+}, systemOption, logFileOption, massDeleteOption);
 
 return await root.Parse(args).InvokeAsync();

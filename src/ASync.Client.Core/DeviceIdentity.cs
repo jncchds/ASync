@@ -1,12 +1,13 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using ASync.Client.Core.Secrets;
 using ASync.Contracts;
 
 namespace ASync.Client.Core;
 
 /// <summary>
 /// Who this device is: its server, its id and its ECDSA P-256 private key. Kept by an <see cref="IClientStore"/>
-/// (a 0600 file for the CLI; the OS keystore in the apps).
+/// (see <see cref="FileClientStore"/>: a 0600 file, DPAPI or the Keychain).
 /// </summary>
 public sealed record DeviceIdentity(string ServerUrl, Guid DeviceId, int UserId, string Username, string DeviceName, string PrivateKey)
 {
@@ -58,20 +59,27 @@ public interface IClientStore
 }
 
 /// <summary>
-/// The CLI's store: a directory (default <c>~/.config/async</c>, or <c>ASYNC_CONFIG_DIR</c>) with files only the
-/// current user can read: <c>identity.json</c>, <c>token.json</c> (the current access token), <c>keys/&lt;folder&gt;.key</c>,
-/// <c>state/&lt;folder&gt;/</c>.
+/// The CLI's and the agent's store: a directory (default <c>~/.config/async</c>, or <c>ASYNC_CONFIG_DIR</c>) with files
+/// only the current user can read: <c>identity.json</c>, <c>token.json</c> (the current access token),
+/// <c>keys/&lt;folder&gt;.key</c>, <c>state/&lt;folder&gt;/</c>. The private key and the folder keys go through an
+/// <see cref="ISecretProtector"/>: plain in the 0600 file on Linux, DPAPI on Windows, the Keychain on macOS. Files written
+/// in another format (an older version, another protector) are read as they are and rewritten in this one.
 /// </summary>
 public sealed class FileClientStore : IClientStore, ITokenCache
 {
+    private const string DeviceKeyId = "device-key";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     public string Root { get; }
 
-    public FileClientStore(string root)
+    /// <summary>How secrets are written (see <see cref="SecretProtectors.ForThisMachine"/>).</summary>
+    public ISecretProtector Protector { get; }
+
+    public FileClientStore(string root, ISecretProtector? protector = null)
     {
         Root = Path.GetFullPath(root);
         Directory.CreateDirectory(Root);
+        Protector = protector ?? SecretProtectors.ForThisMachine(Root);
         // A mount point (Docker's /config) may belong to someone else while being writable for us: then it keeps its
         // mode, and the files in it are still private.
         try { Restrict(Root, directory: true); }
@@ -85,15 +93,26 @@ public sealed class FileClientStore : IClientStore, ITokenCache
 
     private string IdentityPath => Path.Combine(Root, "identity.json");
 
-    public DeviceIdentity? LoadIdentity() =>
-        File.Exists(IdentityPath) ? JsonSerializer.Deserialize<DeviceIdentity>(File.ReadAllText(IdentityPath), Json) : null;
+    public DeviceIdentity? LoadIdentity()
+    {
+        if (!File.Exists(IdentityPath)) return null;
+        var stored = JsonSerializer.Deserialize<DeviceIdentity>(File.ReadAllText(IdentityPath), Json);
+        if (stored is null) return null;
+        var identity = stored with { PrivateKey = Convert.ToBase64String(SecretProtectors.Unprotect(stored.PrivateKey, Root)) };
+        if (SecretProtectors.KindOf(stored.PrivateKey) != Protector.Kind) TryMigrate(() => SaveIdentity(identity));
+        return identity;
+    }
 
-    public void SaveIdentity(DeviceIdentity identity) => WriteSecret(IdentityPath, JsonSerializer.SerializeToUtf8Bytes(identity, Json));
+    public void SaveIdentity(DeviceIdentity identity) =>
+        WriteSecret(IdentityPath, JsonSerializer.SerializeToUtf8Bytes(
+            identity with { PrivateKey = Protector.Protect(DeviceKeyId, Convert.FromBase64String(identity.PrivateKey)) }, Json));
 
     public void DeleteIdentity()
     {
         if (File.Exists(IdentityPath)) File.Delete(IdentityPath);
         if (File.Exists(TokenPath)) File.Delete(TokenPath);
+        try { Protector.Forget(DeviceKeyId); }
+        catch (System.Security.Cryptography.CryptographicException) { /* nothing was kept there */ }
     }
 
     private string TokenPath => Path.Combine(Root, "token.json");
@@ -118,13 +137,31 @@ public sealed class FileClientStore : IClientStore, ITokenCache
 
     private string KeyPath(int folderId) => Path.Combine(Root, "keys", $"{folderId}.key");
 
-    public byte[]? LoadRepositoryKeys(int folderId) =>
-        File.Exists(KeyPath(folderId)) ? Convert.FromBase64String(File.ReadAllText(KeyPath(folderId)).Trim()) : null;
+    private static string FolderKeyId(int folderId) => $"folder-{folderId}";
+
+    public byte[]? LoadRepositoryKeys(int folderId)
+    {
+        if (!File.Exists(KeyPath(folderId))) return null;
+        var stored = File.ReadAllText(KeyPath(folderId)).Trim();
+        var keys = SecretProtectors.Unprotect(stored, Root);
+        if (SecretProtectors.KindOf(stored) != Protector.Kind) TryMigrate(() => SaveRepositoryKeys(folderId, keys));
+        return keys;
+    }
+
+    /// <summary>Whether this device has a folder's keys, without reading them (no Keychain access).</summary>
+    public bool HasRepositoryKeys(int folderId) => File.Exists(KeyPath(folderId));
 
     public void SaveRepositoryKeys(int folderId, byte[] keys)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(KeyPath(folderId))!);
-        WriteSecret(KeyPath(folderId), System.Text.Encoding.ASCII.GetBytes(Convert.ToBase64String(keys)));
+        WriteSecret(KeyPath(folderId), System.Text.Encoding.ASCII.GetBytes(Protector.Protect(FolderKeyId(folderId), keys)));
+    }
+
+    /// <summary>Rewrites a secret in this store's format; the old file stays readable when that fails (read-only mount, locked Keychain).</summary>
+    private static void TryMigrate(Action save)
+    {
+        try { save(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) { }
     }
 
     public string StateDirectory(int folderId)
