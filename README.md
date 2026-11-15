@@ -157,6 +157,9 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 - Quotas are per person and per shared storage, not per folder. They protect against accidents and keep shared
   storage fair; they are not a defence against a person's own tampered agent.
 - Folders are uploaded one file at a time (each large file in up to 3 parts at once).
+- The agent's background service was tried for real on Linux (systemd) only. On Windows and macOS the service,
+  the named pipe, DPAPI and the Keychain have CI jobs that build them and run their unit tests, but installing and running the service
+  there has not been tried by hand yet.
 
 What comes next is listed in [AGENTS.md](AGENTS.md) under "Milestones and current stage" (the desktop app).
 
@@ -339,14 +342,59 @@ async-cli enroll --server https://sync.example.com --code K7QD-M2XP-9RWA   # or 
 async-cli run                                                                # keep syncing (Ctrl+C stops)
 ```
 
+### As a background service (Linux, Windows, macOS)
+
+`async-cli service install` runs the agent in the background for your user, starts it at logon and restarts it
+when it fails. Enroll first (or afterwards: a service without an identity waits for `async-cli enroll`).
+
+```bash
+async-cli enroll --server https://sync.example.com --code K7QD-M2XP-9RWA
+async-cli service install     # writes the service for this OS, enables and starts it
+async-cli service status      # is it installed and running, and what is each folder doing
+async-cli service uninstall   # stops and removes it (the identity and your folders stay)
+```
+
+| OS | What `service install` sets up | Logs |
+|---|---|---|
+| **Linux** | the systemd user unit `~/.config/systemd/user/async-agent.service` (`Type=notify`) | `journalctl --user -u async-agent -f` |
+| **macOS** | the LaunchAgent `~/Library/LaunchAgents/ua.pp.chds.async.agent.plist` | `~/Library/Logs/ASync/agent.log` (rolled over at 10 MB, 5 kept) |
+| **Windows** | the Task Scheduler task "ASync Agent", run at your logon without a window | `%LOCALAPPDATA%\ASync\logs\agent.log` |
+
+- **Linux:** a user unit runs while you are logged in. For a server or a NAS, keep it running without a
+  login and start it at boot with `loginctl enable-linger $USER`, or install a system unit as root:
+  `sudo async-cli service install --system --run-as <user>` (`/etc/systemd/system/async-agent.service`,
+  running as that user, with `--config` pointing at their config directory).
+- **Windows:** `--system` (as administrator) installs the Windows Service `ASyncAgent` instead, running as
+  LocalSystem and logging to the Event Log (source "ASync Agent"). Its folders must then be readable by
+  LocalSystem, and its identity is the machine's, not yours: the per-user task is the right choice on a desktop.
+- **macOS:** `--system` (with sudo) installs a LaunchDaemon in `/Library/LaunchDaemons` running as `--run-as`.
+- The log level is Information; `--verbose` at install time, or `ASYNC_LOG_LEVEL=Debug` in the service's
+  environment, gives more. `--log-file <path>` adds a rolling log file anywhere.
+- The service runs the same program you installed it from, with the same `--config`. After an update, run
+  `service install` again; it restarts the service on the new version.
+
+**While the service runs, the CLI talks to it.** `status`, `sync`, `pause`, `resume`, `set-path` and
+`unlock` are sent to the running agent over a local control channel instead of being done by the command
+itself, so a folder is never synced by two programs at once and the agent reacts at once (an unlock starts
+the backup it was waiting for). `status` then also shows what each folder is doing right now (syncing, with
+files and bytes, or backing up), its last result and its next run. A second `async-cli run` is refused, and so
+is `forget`, until the service is stopped. Without a running agent the commands work as before.
+
+**Where the device's key is kept:** in `~/.config/async/identity.json`, readable only by you (Linux, and in
+Docker); encrypted with Windows DPAPI for your Windows account (Windows); in your login Keychain (macOS, item
+`ua.pp.chds.async`), the file then only names the item. The same goes for unlocked end-to-end folder keys.
+Identities made by earlier versions keep working and are moved to the new form the first time they are read.
+`ASYNC_SECRET_STORE=file` keeps everything in the 0600 file on any OS (e.g. a Mac without a login Keychain).
+
 ### Commands
 
 | Command | What it does |
 |---|---|
 | `enroll` | Adds this machine to your account: with `--code`, or by showing a link and code to approve in the web UI. |
-| `status`, `folders` | This device, and the folders assigned to it. |
+| `status`, `folders` | This device, and the folders assigned to it. With a running agent, `status` also shows what each folder is doing. |
 | `sync [--folder N] [--progress]` | Syncs (or backs up) every folder, or one, once. `--progress` prints a line for every part of a large upload the server has stored. An interrupted upload or download continues on the next sync. |
-| `run` | Keeps syncing: on schedule, when files change, and as soon as another device changes a folder. The default in Docker. |
+| `run` | Keeps syncing: on schedule, when files change, and as soon as another device changes a folder. The default in Docker. Refused while another agent (the service) runs for the same config directory. |
+| `service install\|uninstall\|status [--system]` | Runs the agent in the background as a service of this OS (see above). |
 | `set-path`, `pause`, `resume` | Changes this device's settings for a folder. |
 | `init-encryption --folder N` | Sets up an end-to-end encrypted Backup folder (on one device) and prints its recovery key. |
 | `unlock --folder N` | Unlocks an end-to-end encrypted folder on another device, with the passphrase or the recovery key. |

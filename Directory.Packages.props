@@ -19,6 +19,11 @@
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
     <PackageVersion Include="System.CommandLine" Version="2.0.15" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.14" />
+    <!-- The agent as a service: systemd (Type=notify, journald), Windows Service (Event Log); DPAPI for the store on Windows -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
     <!-- Storage back-ends -->
     <PackageVersion Include="AWSSDK.S3" Version="4.0.104.12" />
     <PackageVersion Include="SSH.NET" Version="2026.0.0" />

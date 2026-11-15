@@ -81,6 +81,18 @@ public sealed class FolderSyncer
 
     private enum Action { None, Upload, Download, DeleteLocal, DeleteRemote, Forget, Conflict, Compare }
 
+    /// <summary>Where the run is (files and bytes of the plan, the current file), for the agent's status.</summary>
+    public RunProgress? Progress { get; init; }
+
+    /// <summary>What an action transfers, for the progress totals.</summary>
+    private static long BytesOf(Action action, LocalFile? l, RemoteFile? r) => action switch
+    {
+        Action.Upload => l?.Size ?? 0,
+        Action.Download or Action.Compare => r?.Size ?? 0,
+        Action.Conflict => (l?.Size ?? 0) + (r?.Size ?? 0),
+        _ => 0,
+    };
+
     public async Task<SyncResult> RunAsync(CancellationToken ct = default)
     {
         if (!Directory.Exists(_root))
@@ -104,6 +116,20 @@ public sealed class FolderSyncer
             plan.Add((path, Decide(l, r, b)));
         }
         CheckMassDeletion(plan);
+        if (Progress is { } progress)
+        {
+            long bytes = 0;
+            var count = 0;
+            foreach (var (path, action) in plan)
+            {
+                if (action is Action.None or Action.Forget) continue;
+                count++;
+                local.TryGetValue(path, out var l);
+                remote.TryGetValue(path, out var r);
+                bytes += BytesOf(action, l, r);
+            }
+            progress.SetTotals(count, bytes);
+        }
 
         // Over the quota, the first refused upload says so and the rest are not tried this run (each would be refused);
         // downloads and deletions go on.
@@ -118,6 +144,8 @@ public sealed class FolderSyncer
                 refusedByQuota++;
                 continue;
             }
+            var counted = Progress is not null && action is not (Action.None or Action.Forget);
+            if (counted) Progress!.StartFile(path);
             try
             {
                 await ExecuteAsync(path, action, l, r, result, ct);
@@ -131,6 +159,7 @@ public sealed class FolderSyncer
             {
                 result.Errors.Add($"{path}: {e.Message}");
             }
+            if (counted) Progress!.FinishFile(BytesOf(action, l, r));
             if (++_unsaved >= 50) SaveState();
         }
         if (refusedByQuota > 0) result.Errors.Add($"{refusedByQuota} file(s) not uploaded: over the storage quota.");
@@ -263,7 +292,23 @@ public sealed class FolderSyncer
                     {
                         await using var input = await _remote.Backend.OpenReadAsync(PlainStore.CheckPath(path), have, ct: ct);
                         await using var output = new FileStream(temp, FileMode.Append, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true);
-                        await input.CopyToAsync(output, ct);
+                        if (Progress is null)
+                        {
+                            await input.CopyToAsync(output, ct);
+                        }
+                        else
+                        {
+                            // The same copy, telling the progress how far it got after each buffer.
+                            var buffer = new byte[1 << 20];
+                            var copied = have;
+                            int read;
+                            while ((read = await input.ReadAsync(buffer, ct)) > 0)
+                            {
+                                await output.WriteAsync(buffer.AsMemory(0, read), ct);
+                                copied += read;
+                                Progress.FileBytes(copied);
+                            }
+                        }
                     }
                     break;
                 }

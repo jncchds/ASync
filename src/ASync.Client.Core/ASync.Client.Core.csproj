@@ -3,6 +3,11 @@
     Everything a device needs to sync, shared by the CLI agent and (later) the desktop and mobile apps:
     identity, API client, the storage gateway client, sync and backup logic, and the agent loop.
   -->
+  <PropertyGroup>
+    <!-- LibraryImport (the macOS Keychain binding) generates code with pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\ASync.Contracts\ASync.Contracts.csproj" />
     <ProjectReference Include="..\ASync.Engine\ASync.Engine.csproj" />
@@ -10,9 +15,12 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <!-- DPAPI (Windows) for the device key and folder keys; throws PlatformNotSupported elsewhere and is not used there. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="ASync.Tests" />
+    <InternalsVisibleTo Include="ASync.Agent" />
   </ItemGroup>
 </Project>

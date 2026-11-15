@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The agent's local control channel: the versioned JSON protocol, the endpoint (Unix socket or named pipe) of a
+    config directory, a client and a listener. BCL + System.Text.Json source generation only, so the Avalonia app
+    (M3-2), the CLI and the agent share it without ASP.NET or the sync engine.
+  -->
+  <PropertyGroup>
+    <RootNamespace>ASync.Agent.Control</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ASync.Contracts\ASync.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ASync.Tests" />
+    <InternalsVisibleTo Include="ASync.Agent" />
+  </ItemGroup>
+</Project>

@@ -2,6 +2,16 @@
 
 ## v0.1.4 — 2026-11-15
 
+- feat(cli): **The agent runs in the background as a service.** `async-cli service install` sets it up for your
+  user and starts it: a systemd user unit on Linux (logs in the journal), a LaunchAgent on macOS, a logon task on
+  Windows (`--system` for a system unit, LaunchDaemon or Windows Service); `service uninstall` and `service status`
+  go with it. While it runs, `status`, `sync`, `pause`, `resume`, `set-path` and `unlock` go to it over a local
+  channel only your user can open (a Unix socket or a named pipe), so a folder is never synced twice at once, and
+  `status` shows what each folder is doing right now, with files and bytes, its last result and its next run. A
+  second `async-cli run` is refused while one runs. On Windows the device key is now encrypted with DPAPI, on macOS
+  it is kept in the login Keychain; existing identities keep working and move over by themselves. The service was
+  tried on Linux; on Windows and macOS it is built and unit-tested in CI but not tried on a real machine yet. The
+  control channel is what the desktop app will use.
 - feat: **Storage use, quotas and storage health checks.** The *Folders* and *Storage* pages show how much each
   folder takes on its storage (old versions and trash separately; for standard-encryption backups also how much
   data the snapshots hold after deduplication), your total and your use of each storage. The server counts this in

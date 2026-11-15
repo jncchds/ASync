@@ -10,6 +10,15 @@ namespace ASync.Client.Core;
 
 public sealed record FolderRunResult(int FolderId, string Name, bool Ok, string Message, bool Skipped = false);
 
+/// <summary>The agent's link to the server, for status displays.</summary>
+public enum AgentConnection { Connecting, Connected, Reconnecting, Offline, Revoked }
+
+public enum WorkerActivity { Idle, Syncing, BackingUp, Maintenance }
+
+/// <summary>One folder as the running agent sees it (see <see cref="SyncAgent.Folders"/>).</summary>
+public sealed record FolderState(DeviceFolderDto Folder, WorkerActivity Activity, ProgressSnapshot? Progress, FolderRunResult? LastResult,
+    DateTimeOffset? LastRunAt, DateTimeOffset? NextRunAt);
+
 /// <summary>
 /// Syncs every folder of this device, and keeps doing so. Each folder runs when its interval is due, when files in
 /// it change (TwoWay and Mirror Upload, debounced), and when the server says another device changed it (TwoWay and
@@ -29,6 +38,55 @@ public sealed class SyncAgent : IAsyncDisposable
     private DeviceRevokedException? _revoked;
     private HubConnection? _hub;
     private volatile bool _hubReconnecting;
+    private volatile AgentConnection _connection = AgentConnection.Connecting;
+    private volatile string? _problem;
+
+    /// <summary>The live-updates connection to the server (and whether the device was revoked).</summary>
+    public AgentConnection Connection => _connection;
+
+    /// <summary>The last connection problem, or the revocation message.</summary>
+    public string? ConnectionProblem => _problem;
+
+    /// <summary>Raised when <see cref="Connection"/> or the folder list changes. Handlers must be quick and not throw.</summary>
+    public event Action? StatusChanged;
+
+    /// <summary>Raised with a folder id when its activity or last result changes. Handlers must be quick and not throw.</summary>
+    public event Action<int>? FolderStatusChanged;
+
+    private void SetConnection(AgentConnection connection, string? problem = null)
+    {
+        if (_connection == AgentConnection.Revoked) return;
+        _connection = connection;
+        _problem = problem;
+        Raise(StatusChanged);
+    }
+
+    private void Raise(Action? handler)
+    {
+        try { handler?.Invoke(); }
+        catch (Exception e) { _logger.LogDebug("A status listener failed: {Message}", e.Message); }
+    }
+
+    private void RaiseFolder(int folderId)
+    {
+        try { FolderStatusChanged?.Invoke(folderId); }
+        catch (Exception e) { _logger.LogDebug("A status listener failed: {Message}", e.Message); }
+    }
+
+    /// <summary>The folders of the running agent (<see cref="RunAsync"/>), by id.</summary>
+    public IReadOnlyList<FolderState> Folders =>
+        [.. _workers.Values.Select(w => w.State()).OrderBy(f => f.Folder.Name, StringComparer.CurrentCultureIgnoreCase)];
+
+    /// <summary>
+    /// Asks the running agent to run a folder now (as a trigger does) and returns the result of that run: a run that
+    /// starts after the request, so it sees changes made before it. Throws <see cref="KeyNotFoundException"/> when the
+    /// folder has no worker, and <see cref="OperationCanceledException"/> when its worker stopped (replaced after a
+    /// settings change, or the agent stopping) before the run finished.
+    /// </summary>
+    public Task<FolderRunResult> RequestRunAsync(int folderId, bool allowMassDeletion = false, CancellationToken ct = default) =>
+        _workers.TryGetValue(folderId, out var worker)
+            ? worker.Request(allowMassDeletion).WaitAsync(ct)
+            : throw new KeyNotFoundException($"Folder {folderId} is not assigned to this device.");
 
     /// <summary>Set once the server refused this device's sign-in; <see cref="RunAsync"/> then stops with it.</summary>
     public DeviceRevokedException? Revoked => _revoked;
@@ -37,6 +95,9 @@ public sealed class SyncAgent : IAsyncDisposable
     {
         if (e is not DeviceRevokedException revoked || Interlocked.CompareExchange(ref _revoked, revoked, null) is not null) return;
         _logger.LogError("{Message}", revoked.Message);
+        _problem = revoked.Message;
+        _connection = AgentConnection.Revoked;
+        Raise(StatusChanged);
         try { _stop.Cancel(); } catch (ObjectDisposedException) { }
     }
 
@@ -58,11 +119,21 @@ public sealed class SyncAgent : IAsyncDisposable
     // ── One-off runs ──────────────────────────────────────────────────────────
 
     /// <summary>Syncs (or backs up) one folder now and reports the outcome to the server.</summary>
-    public async Task<FolderRunResult> RunFolderAsync(DeviceFolderDto folder, CancellationToken ct = default)
+    /// <param name="progress">Filled in while the run goes (see <see cref="RunProgress"/>).</param>
+    /// <param name="allowMassDeletion">For this run, instead of <see cref="AllowMassDeletion"/>.</param>
+    public async Task<FolderRunResult> RunFolderAsync(DeviceFolderDto folder, CancellationToken ct = default, RunProgress? progress = null,
+        bool? allowMassDeletion = null)
     {
         if (folder.Paused) return new FolderRunResult(folder.FolderId, folder.Name, true, "Paused", Skipped: true);
         var identity = _api.Identity ?? throw new InvalidOperationException("Not enrolled.");
-        var backend = new RemoteStorageBackend(_api, folder.FolderId) { PartUploaded = UploadProgress };
+        var partUploaded = UploadProgress;
+        if (progress is not null)
+            partUploaded = (path, stored, size) =>
+            {
+                progress.FileBytes(stored);
+                UploadProgress?.Invoke(path, stored, size);
+            };
+        var backend = new RemoteStorageBackend(_api, folder.FolderId) { PartUploaded = partUploaded };
         FolderRunResult outcome;
         SyncReportRequest report;
         try
@@ -70,7 +141,7 @@ public sealed class SyncAgent : IAsyncDisposable
             if (folder.Mode == SyncMode.Backup)
             {
                 var repo = await RepositoryAccess.OpenAsync(_api, _store, folder, backend, ct);
-                var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName).RunAsync(ct: ct);
+                var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName).RunAsync(progress, ct);
                 var s = snapshot.Stats;
                 var message = $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: {s.FilesNew} new, {s.FilesChanged} changed, {s.FilesUnmodified} unchanged, " +
                               $"{Size(s.BytesAdded)} added{(forgotten > 0 ? $", {forgotten} old snapshots forgotten" : "")}" +
@@ -91,8 +162,9 @@ public sealed class SyncAgent : IAsyncDisposable
                         result = await new FolderSyncer(backend, folder.LocalPath, _store.StateDirectory(folder.FolderId), new SyncOptions
                         {
                             Mode = folder.Mode, Direction = folder.Direction, Excludes = folder.Excludes, DeviceName = identity.DeviceName,
-                            VersionsKeepDays = folder.VersionsKeepDays, TrashKeepDays = folder.TrashKeepDays, AllowMassDeletion = AllowMassDeletion,
-                        }).RunAsync(ct);
+                            VersionsKeepDays = folder.VersionsKeepDays, TrashKeepDays = folder.TrashKeepDays,
+                            AllowMassDeletion = allowMassDeletion ?? AllowMassDeletion,
+                        }) { Progress = progress }.RunAsync(ct);
                     }
                     finally
                     {
@@ -239,6 +311,7 @@ public sealed class SyncAgent : IAsyncDisposable
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancel, _stop.Token);
         var ct = linked.Token;
+        SetConnection(AgentConnection.Connecting);
         try
         {
             await ConnectHubAsync(ct);
@@ -269,25 +342,67 @@ public sealed class SyncAgent : IAsyncDisposable
             .WithAutomaticReconnect(new ForeverRetry())
             .Build();
         _hub.On<SyncEvent>("event", e => _ = OnEventAsync(e, ct));
-        _hub.Reconnecting += _ =>
+        _hub.Reconnecting += e =>
         {
             _hubReconnecting = true;
+            SetConnection(AgentConnection.Reconnecting, e?.Message);
             return Task.CompletedTask;
         };
         _hub.Reconnected += _ =>
         {
             _hubReconnecting = false;
+            SetConnection(AgentConnection.Connected);
             return ReloadAsync(ct); // events may have been missed while offline
         };
+        _hub.Closed += e =>
+        {
+            if (!ct.IsCancellationRequested) SetConnection(AgentConnection.Offline, e?.Message);
+            return Task.CompletedTask;
+        };
+        if (!await TryStartHubAsync(ct, logFailure: true))
+            _ = KeepConnectingAsync(ct);
+    }
+
+    private async Task<bool> TryStartHubAsync(CancellationToken ct, bool logFailure)
+    {
         try
         {
-            await _hub.StartAsync(ct);
+            await _hub!.StartAsync(ct);
+            SetConnection(AgentConnection.Connected);
+            return true;
         }
-        catch (Exception e) when (e is HttpRequestException or ApiException)
+        catch (Exception e) when (e is HttpRequestException or ApiException or System.Net.WebSockets.WebSocketException or IOException)
         {
             Observe(e);
-            if (_revoked is null) _logger.LogWarning("Live updates are unavailable ({Message}); folders sync on their schedule.", e.Message);
+            if (_revoked is not null) return false;
+            SetConnection(AgentConnection.Offline, e.Message);
+            if (logFailure) _logger.LogWarning("Live updates are unavailable ({Message}); folders sync on their schedule. Retrying in the background.", e.Message);
+            return false;
         }
+    }
+
+    /// <summary>
+    /// The first connection failed (no network yet at boot, the server down): SignalR only reconnects connections that
+    /// once worked, so keep trying here, and reload the folders once it works.
+    /// </summary>
+    private async Task KeepConnectingAsync(CancellationToken ct)
+    {
+        try
+        {
+            for (var attempt = 0; !ct.IsCancellationRequested && _revoked is null; attempt++)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(Math.Min(300, 10 * Math.Pow(2, Math.Min(attempt, 5)))), ct);
+                if (_hub is null || _hub.State != HubConnectionState.Disconnected) return;
+                if (await TryStartHubAsync(ct, logFailure: false))
+                {
+                    _logger.LogInformation("Live updates connected.");
+                    await ReloadAsync(ct);
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception e) { _logger.LogWarning("Reconnecting failed: {Message}", e.Message); }
     }
 
     private async Task OnEventAsync(SyncEvent e, CancellationToken ct)
@@ -331,27 +446,34 @@ public sealed class SyncAgent : IAsyncDisposable
                 if (_revoked is null) _logger.LogWarning("Could not fetch folders: {Message}", e.Message);
                 return;
             }
+            var changed = false;
 
             foreach (var id in _workers.Keys.Except(folders.Select(f => f.FolderId)))
                 if (_workers.TryRemove(id, out var gone))
                 {
                     _logger.LogInformation("Stopped syncing \"{Name}\".", gone.Folder.Name);
                     await gone.DisposeAsync();
+                    changed = true;
                 }
 
             foreach (var folder in folders)
             {
+                FolderWorker? previous = null;
                 if (_workers.TryGetValue(folder.FolderId, out var existing))
                 {
                     if (existing.Folder.Revision == folder.Revision) continue;
+                    previous = existing;
                     await existing.DisposeAsync();
                 }
-                var worker = new FolderWorker(this, folder, _logger, ct);
+                // Keeps the last result, and the requests that were waiting for a run, of the worker it replaces.
+                var worker = new FolderWorker(this, folder, _logger, ct, previous);
+                changed = true;
                 _workers[folder.FolderId] = worker;
                 _logger.LogInformation("Syncing \"{Name}\" ({Mode}) at {Path}{Paused}.", folder.Name, folder.Mode, folder.LocalPath,
                     folder.Paused ? " — paused" : "");
                 worker.Trigger("started");
             }
+            if (changed) Raise(StatusChanged);
         }
         finally
         {
@@ -392,14 +514,59 @@ public sealed class SyncAgent : IAsyncDisposable
         private readonly Task _loop;
         private readonly FileSystemWatcher? _watcher;
         private readonly Timer _debounce;
+        private readonly Lock _requestsGate = new();
+        private List<TaskCompletionSource<FolderRunResult>> _requests = [];
+        private bool _allowMassDeletionNext;
+        private volatile WorkerActivity _activity;
+        private volatile RunProgress? _progress;
+        private volatile FolderRunResult? _lastResult;
+        private DateTimeOffset? _lastRunAt;
+        private DateTimeOffset? _nextRunAt;
 
         public DeviceFolderDto Folder { get; }
 
-        public FolderWorker(SyncAgent agent, DeviceFolderDto folder, ILogger logger, CancellationToken ct)
+        public FolderState State() => new(Folder, _activity, _progress?.Snapshot(), _lastResult, _lastRunAt, _nextRunAt);
+
+        /// <summary>A run that starts after now; its result.</summary>
+        public Task<FolderRunResult> Request(bool allowMassDeletion)
+        {
+            var request = new TaskCompletionSource<FolderRunResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_requestsGate)
+            {
+                if (_cts.IsCancellationRequested)
+                {
+                    request.TrySetCanceled();
+                    return request.Task;
+                }
+                _requests.Add(request);
+                _allowMassDeletionNext |= allowMassDeletion;
+                Trigger("requested");
+            }
+            return request.Task;
+        }
+
+        private (List<TaskCompletionSource<FolderRunResult>> Requests, bool AllowMassDeletion) TakeRequests()
+        {
+            lock (_requestsGate)
+            {
+                var taken = (_requests, _allowMassDeletionNext);
+                _requests = [];
+                _allowMassDeletionNext = false;
+                return taken;
+            }
+        }
+
+        public FolderWorker(SyncAgent agent, DeviceFolderDto folder, ILogger logger, CancellationToken ct, FolderWorker? previous = null)
         {
             _agent = agent;
             Folder = folder;
             _logger = logger;
+            if (previous is not null)
+            {
+                _lastResult = previous._lastResult;
+                _lastRunAt = previous._lastRunAt;
+                (_requests, _allowMassDeletionNext) = previous.TakeRequests();
+            }
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _debounce = new Timer(_ => Trigger("files changed"));
             if (!folder.Paused && folder.Mode != SyncMode.Backup && folder.Direction != MirrorDirection.Download && Directory.Exists(folder.LocalPath))
@@ -432,19 +599,53 @@ public sealed class SyncAgent : IAsyncDisposable
                 try
                 {
                     // Wait for a trigger or the interval, whichever comes first.
-                    await _signal.WaitAsync(TimeSpan.FromMinutes(Folder.IntervalMinutes), ct);
-                    var result = await _agent.RunFolderAsync(Folder, ct);
+                    var interval = TimeSpan.FromMinutes(Folder.IntervalMinutes);
+                    _nextRunAt = Folder.Paused ? null : DateTimeOffset.UtcNow + interval;
+                    await _signal.WaitAsync(interval, ct);
+                    var (requests, allowMassDeletion) = TakeRequests();
+                    FolderRunResult result;
+                    var progress = new RunProgress();
+                    _progress = progress;
+                    _nextRunAt = null;
+                    _activity = Folder.Paused ? WorkerActivity.Idle : Folder.Mode == SyncMode.Backup ? WorkerActivity.BackingUp : WorkerActivity.Syncing;
+                    _agent.RaiseFolder(Folder.FolderId);
+                    try
+                    {
+                        result = await _agent.RunFolderAsync(Folder, ct, progress, allowMassDeletion ? true : null);
+                    }
+                    catch (Exception e)
+                    {
+                        foreach (var r in requests)
+                            if (e is OperationCanceledException) r.TrySetCanceled();
+                            else r.TrySetException(e);
+                        throw;
+                    }
+                    finally
+                    {
+                        _activity = WorkerActivity.Idle;
+                        _progress = null;
+                    }
+                    _lastResult = result;
+                    _lastRunAt = DateTimeOffset.UtcNow;
+                    foreach (var r in requests) r.TrySetResult(result);
+                    _agent.RaiseFolder(Folder.FolderId);
                     if (result.Skipped) _logger.LogDebug("\"{Name}\": {Message}.", Folder.Name, result.Message);
                     else if (result.Ok) _logger.LogInformation("\"{Name}\": {Message}.", Folder.Name, result.Message);
                     else _logger.LogWarning("\"{Name}\" failed: {Message}", Folder.Name, result.Message);
                     if (result.Skipped && !Folder.Paused)
                     {
+                        _nextRunAt = DateTimeOffset.UtcNow.AddSeconds(30);
                         await Task.Delay(TimeSpan.FromSeconds(30), ct); // busy elsewhere: try again soon
                         Trigger("retry");
                     }
                     else if (!result.Skipped)
                     {
-                        foreach (var (kind, outcome) in await _agent.RunDueMaintenanceAsync(Folder, ct))
+                        List<(MaintenanceKind Kind, MaintenanceOutcome Outcome)> maintained;
+                        _activity = WorkerActivity.Maintenance;
+                        try { maintained = await _agent.RunDueMaintenanceAsync(Folder, ct); }
+                        finally { _activity = WorkerActivity.Idle; }
+                        if (maintained.Count > 0) _agent.RaiseFolder(Folder.FolderId);
+                        foreach (var (kind, outcome) in maintained)
                         {
                             var what = kind == MaintenanceKind.Prune ? "prune" : "check";
                             if (outcome.Busy) _logger.LogInformation("\"{Name}\": {What} postponed: {Message}", Folder.Name, what, outcome.Message);
@@ -467,10 +668,12 @@ public sealed class SyncAgent : IAsyncDisposable
 
         public async ValueTask DisposeAsync()
         {
-            await _cts.CancelAsync();
+            lock (_requestsGate) _cts.Cancel();
             _watcher?.Dispose();
             await _debounce.DisposeAsync();
             try { await _loop; } catch (OperationCanceledException) { }
+            // Requests nobody took over (see the constructor's previous) end here.
+            foreach (var r in TakeRequests().Requests) r.TrySetCanceled();
             _cts.Dispose();
             _signal.Dispose();
         }

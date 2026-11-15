@@ -73,6 +73,36 @@ jobs:
           npx tsc --noEmit -p tsconfig.app.json
           npx eslint .
 
+  # The agent on the desktop systems: builds async-cli, the agent and the tests there (DPAPI, named pipes, the Keychain
+  # binding and launchd/Task Scheduler code only compile on Linux) and runs the agent's unit tests, which need no Docker:
+  # the control protocol over a named pipe (Windows) or a Unix socket (macOS), the single-instance lock, CLI routing,
+  # the service files, secrets (DPAPI on Windows). Installing a real service is only exercised on Linux (smoke test).
+  agent-desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Build agent, CLI and tests (warnings are errors)
+        run: |
+          dotnet build src/ASync.Cli/ASync.Cli.csproj --configuration Release -warnaserror
+          dotnet build src/ASync.Tests/ASync.Tests.csproj --configuration Release -warnaserror
+
+      - name: Agent unit tests
+        run: >
+          dotnet test src/ASync.Tests/ASync.Tests.csproj --configuration Release --no-build
+          --filter "FullyQualifiedName~ASync.Tests.Agent"
+          --logger "GitHubActions;summary-include-passed=false"
+
   # The real server stack (docker compose) with two async-cli agents plus one in the async-cli image: TwoWay, Mirror,
   # Backup (Transport and end-to-end), live updates and revocation. See scripts/e2e-sync.cs.
   e2e:
@@ -90,7 +120,7 @@ jobs:
         run: scripts/e2e-sync.sh
 
   build-and-push:
-    needs: [test, e2e]
+    needs: [test, e2e, agent-desktop]
     # Pull requests only run the tests; images are published from version tags (and manual runs).
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
