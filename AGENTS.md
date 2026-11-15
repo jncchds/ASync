@@ -137,6 +137,14 @@ Implemented (gap item 4, deleting folders and users), in `src/ASync.Core/Models/
   BytesDeleted, FilesLeft, Message, CreatedAt, StartedAt, FinishedAt, UpdatedAt. No foreign keys: it outlives
   the folder and, after an account deletion, the owner's back-ends. Finished jobs are deleted after 30 days.
 
+Implemented (gap item 6, large files), in `src/ASync.Core/Models/UploadSession.cs` (see "Large files"):
+
+- **UploadSession**: Id (Guid v7), FolderId and DeviceId (both cascade), Path (unique per folder and device),
+  Size, LastModified (Unix ms, nullable), PartSize, Handle (what the back-end returned when it began: an S3
+  upload id, or a staging name), BackendVersion (the back-end row's `UpdatedAt` then), CreatedAt, UpdatedAt
+  (the last acknowledged part; idle sessions are aborted after `Uploads__AbandonAfterHours`).
+- **UploadSessionPart** (key SessionId + Number, cascade): Size, Sha256, Token (the S3 ETag), CreatedAt.
+
 The server keeps no index of file contents: snapshots live in the repository on the back-end, and Mirror/TwoWay
 state lives in each device's `sync-state.json`.
 
@@ -246,12 +254,27 @@ users").
 - Directories are implicit: writing creates parents.
 - Writes are atomic: back-ends write to a temporary name (`*.async-tmp`, hidden from listings) and then
   rename, or use atomic uploads (S3).
-- Every back-end passes the same conformance suite (`BackendConformanceTests`).
+- **Part uploads** (`IPartUploadBackend`, optional, `src/ASync.Engine/Storage/PartUploads.cs`): Begin (→ a
+  handle), WritePart (number, offset; writing a part again replaces it), Complete (all parts, in order; the file
+  appears at once, like a write), Abort, and AbortStaleParts (leftovers no listing shows). No state in memory
+  between calls: the caller keeps the handle and the parts, so an upload continues on another connection or
+  after a restart. Local, SFTP and SMB write each part at its offset into a hidden
+  `.<handle>.async-tmp` next to the target and rename it at the end; S3 uses a multipart upload; any other
+  back-end (WebDAV) gets `StagedPartUploads` from `PartUploads.For`: parts as files in a hidden
+  `.<handle>.async-tmp/` directory, joined by streaming them into one ordinary write at the end (one more read
+  and write of the file on the back-end). `PrefixedBackend` passes them through.
+- **Streaming:** no back-end holds a whole file in memory or on the server's disk. SFTP and SMB read in 4 MB
+  chunks (`RangeReadStream`), each under the connection's gate, instead of copying the file to a temp file
+  first; writes stream from the caller's stream (S3's `TransferUtility` sends 16 MB parts, even for streams of
+  unknown length).
+- Every back-end passes the same conformance suite (`BackendConformanceTests`), including part uploads and a
+  large object (24 MB by default; `ASYNC_TEST_LARGE_MB` raises it, e.g. 6000 to go past S3's 5 GB copy limit
+  on a server with the space for it).
 
 | Type | Implementation | Notes |
 |---|---|---|
 | `Local` | `LocalBackend` | Admin-only, and only under `Storage:LocalRoots` (default `/data`, the Docker volume) |
-| `S3` | `S3Backend` (AWSSDK.S3 4) | Any S3-compatible service. The SDK's default request checksums are turned off for compatibility. The file mtime is kept in `x-amz-meta-mtime`. Move = copy + delete (objects up to 5 GB). A missing bucket is reported clearly; ASync never creates buckets |
+| `S3` | `S3Backend` (AWSSDK.S3 4) | Any S3-compatible service. The SDK's default request checksums are turned off for compatibility. The file mtime is kept in `x-amz-meta-mtime`. Move = copy + delete; objects over 5 GiB (`MultipartCopyThreshold`) are copied with UploadPartCopy in 512 MB parts (4 at a time, at most 10,000), metadata included. A missing bucket is reported clearly; ASync never creates buckets |
 | `WebDav` | `WebDavBackend` (HttpClient) | PROPFIND Depth 1, walked level by level. Uploads go to a temporary name, then MOVE with `Overwrite: T`. MKCOL creates parents. `X-OC-Mtime` sets the mtime on Nextcloud. Automatic redirects are off, because HttpClient drops the auth header on redirect |
 | `Sftp` | `SftpBackend` (SSH.NET) | Password or OpenSSH key. Host key pinned by SHA-256 fingerprint: trusted on first use, and pinned on the first successful test of a saved back-end. Writes use posix-rename |
 | `Smb` | `SmbBackend` (SMBLibrary) | Managed SMB 2/3, no mount needed. Always port 445. Rename uses `FileRenameInformation` with replace |
@@ -404,7 +427,9 @@ still shows normal folders:
 .async/incoming/<id>               uploads in progress; moved into place when complete
 ```
 
-- `PutAsync` uploads to `incoming`, moves the old file to `versions`, then moves the new one into place.
+- `PutAsync` uploads to `incoming`, moves the old file to `versions`, then moves the new one into place. The
+  incoming name is random, or the caller's `uploadKey` (the sync engine derives it from path, size and mtime, so
+  an interrupted upload is continued; see "Large files" under "Sync").
 - Deletions go to the trash. Versions and trashed files can be restored, and the current file then becomes a
   version.
 - `CleanUpAsync(versionsAge, trashAge, maxVersionsPerFile)` enforces retention and removes abandoned uploads.
@@ -426,11 +451,15 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
 - storage credentials never leave the server.
 
 **Gateway details:**
-- **Endpoints:** stat, list, ranged GET, PUT (`mtime` query parameter), DELETE and move.
+- **Endpoints:** stat, list, ranged GET, PUT (`mtime` query parameter), DELETE and move, plus resumable
+  uploads (`uploads`, see "Large files" below).
 - **Errors:** a 404 with `X-Storage-Error: not-found` maps back to `StorageNotFoundException`, a 400 to
-  `ArgumentException`, and a 502 to `IOException`.
-- **Uploads** are buffered (in memory up to 32 MB, otherwise in a temp file), because S3 needs the length up
-  front.
+  `ArgumentException`, and a 502 to `IOException` (S3 service errors included). A 404 with
+  `X-Upload-Error: gone` means the upload session is unknown or expired.
+- **Uploads:** files up to 32 MB (`RemoteStorageBackend.PartUploadThreshold`) go in one PUT, which the gateway
+  buffers (in memory up to 32 MB, otherwise in a temp file) because S3 needs the length up front. A PUT needs a
+  Content-Length and is refused above `Uploads__MaxSinglePutMB` (256) with a 413 that says to use parts, which
+  bounds the server's temp disk. Larger files go in parts.
 - **Connections** are reused per folder (`FolderBackendCache`, closed after 3 idle minutes) and replaced when
   the back-end changes.
 
@@ -528,6 +557,67 @@ locked by a prune is not a failed run: the agent retries it after 30 seconds and
 - `state/<folder>/`: sync state.
 
 The apps will keep the same data in the OS keystore.
+
+### Large files (resumable transfers)
+
+Measured before this was built (v0.1.4, Local back-end, server in Docker): a 1 GB TwoWay upload took 14 s and
+the gateway held all of it in a temp file on the server; killing the agent half-way and syncing again sent the
+whole gigabyte again (94 s, the server's temp file growing from zero). S3 moves used `CopyObject`, which S3
+refuses over 5 GB; SFTP and SMB reads copied the file to the server's disk before sending the first byte.
+The same measurement afterwards: the server's temp disk stays empty (1 MiB) and, after a kill with 640 MB
+stored, the next sync sends only the missing 384 MB (11 s). An uninterrupted 1 GB upload takes longer than
+before (27 s against 14 s on that machine): parts go one after the other, and each is hashed on both sides and
+flushed to disk before it is acknowledged. Sending the next part while the server stores the previous one
+would win most of that back; it is not done yet.
+
+**Uploads in parts** (`UploadService`, `FolderStorageController`, `RemoteStorageBackend.WritePartsAsync`):
+- `POST storage/uploads {path, size, mtime}` starts an upload, or returns the device's unfinished one with the
+  same path, size and mtime (one `UploadSession` per device and path; anything else replaces it, aborting the
+  old one). The answer is `{id, partSize, partCount, receivedParts}`.
+- `PUT storage/uploads/{id}/parts/{n}`: exactly that part (`Uploads__PartSizeMB`, 16 by default, 5–64; the last
+  is shorter), with `X-Content-SHA256`. The server reads the part into memory (at most `Uploads__MaxParallelParts`
+  = 4 parts at once, so 64 MB; nothing is written to the server's disk), checks its length and hash, writes it
+  to the back-end (`IPartUploadBackend.WritePartAsync`) and only then records it. A part that fails is sent
+  again (three tries); a part sent twice replaces the first.
+- `POST storage/uploads/{id}/complete`: with every part recorded, `CompletePartsAsync` puts the file in place at
+  once (rename, or S3 CompleteMultipartUpload) and the session is deleted. `DELETE storage/uploads/{id}` abandons.
+- A session whose back-end was changed meanwhile, or that the back-end no longer knows, answers "gone"; the
+  client then starts once more from zero.
+- **Resuming needs no state on the device.** `FolderSyncer` names the upload in `.async/incoming/` after the file
+  (`PlainStore.PutAsync(…, uploadKey)` = SHA-256 of path, size and mtime), so the next run after an interruption
+  (a lost connection, a killed agent, a restart of either side) writes the same incoming path with the same size
+  and mtime, gets the same session back and sends only the parts not in `receivedParts`. The incoming → place
+  move is unchanged, so the commit stays atomic. The run's message says how much was continued
+  (`continued 1 upload(s): N bytes were already on the server, M sent`); `async-cli sync --progress` prints a line
+  per stored part.
+- **Clean-up:** `CleanupService` (hourly) aborts sessions without a new part for `Uploads__AbandonAfterHours`
+  (24) on the back-end (staging file removed, S3 upload aborted) and deletes them; deleting the folder or device
+  deletes them with it, and a purge also aborts every S3 multipart upload under the folder's root.
+  `PlainStore.CleanUpAsync` keeps removing abandoned `.async/incoming` files and, when run on a back-end itself,
+  S3 multipart uploads older than a day (`AbortStalePartsAsync`).
+- Repositories are unchanged: packs (16 MB) are below the threshold and keep using one PUT.
+
+**Downloads** (`FolderSyncer.DownloadAsync`): the file is fetched into `.async/tmp/<key>.part`, named after the
+remote version (path, size, LastModified), with ranged reads. A download that breaks off is continued from the
+partial file's length, up to three times within the run and otherwise in the next run (also after a restart);
+the run's message says `continued download(s): N bytes were already here`. A partial file of a version that is
+gone is deleted after a day. Only a complete, size-checked file is moved into place.
+
+**Back-ends:** S3 multipart upload for parts and for large writes, multipart copy for moves over 5 GiB; Local,
+SFTP, SMB offset writes into a hidden staging file; WebDAV staged part files joined at the end (Nextcloud's own
+chunked-upload API is not used). See "Storage back-ends".
+
+**Tests:** `UploadTests` (the real controller and service behind a fake HTTP handler that breaks off after N parts:
+only the missing parts are sent the second time; changed files start over; damaged and wrong-sized parts are
+refused; idle sessions are aborted on the back-end; a forgotten session starts once more), `DownloadResumeTests`,
+the conformance cases, and `scripts/e2e-sync.cs` (a TwoWay file of `ASYNC_E2E_LARGE_MB`, default 200, whose
+upload and download are each killed part-way and continued, ending byte-identical).
+
+**Known limits:** WebDAV completes by reading the parts back and writing the file once more, inside the
+`complete` request, and an S3 move over 5 GiB copies on the S3 side inside the `move` request: both take a while
+for very large files, so a reverse proxy in front of the server needs a generous read timeout. A partial download
+is trusted by its length: after a power cut (not a killed process) its last bytes could be wrong, and such a file
+fails no check until it is opened. Parts go one at a time (no parallel uploads per file).
 
 ## Deleting folders and users
 
@@ -980,7 +1070,7 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 3. **M2 — sync over the CLI (done).** The sync protocol (storage gateway, leases, live events) and `async-cli`
    (enroll, Backup, Mirror, TwoWay, end-to-end encryption, restore), the `async-cli` Docker image, the
    end-to-end test in CI, and the web UI for folders and for browsing and downloading snapshots.
-   **← current stage; next is "Before M3: gaps to close" (items 1–5 are done).**
+   **← current stage; next is "Before M3: gaps to close" (items 1–6 are done).**
 4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
    overdue devices.
@@ -1019,13 +1109,15 @@ app starts after them, because it would otherwise be built on the same holes.
    folders". Left open: a Mirror Upload device undoes a restore on its next run (only warned about); no
    restore of a whole directory as of a point in time (files are restored one by one or by trash group); the
    listing is per directory, with no search.
-6. **Large files in plain folders.**
-   - An upload is one PUT: the device sends the whole file, the gateway buffers all of it (in memory up to
-     32 MB, otherwise in a temp file on the server) and then writes it to the back-end.
-   - There is no resume: an interrupted upload starts again from zero.
-   - On S3, `PlainStore` moves files (incoming → place, place → versions) and `S3Backend.MoveAsync` uses
-     `CopyObject`, which is limited to 5 GB.
-   - Repositories are not affected: packs are 16 MB.
+6. **Large files in plain folders. — Done.** Files over 32 MB go through the gateway in 16 MB parts, each
+   stored on the back-end as it arrives and acknowledged (S3 multipart uploads; offset writes into a hidden file
+   on Local, SFTP and SMB; staged part files on WebDAV), and are put in place atomically at the end. An
+   interrupted upload continues with the missing parts, also after an agent or server restart (sessions in the
+   database, keyed by device, path, size and mtime); idle ones are aborted after a day. Downloads continue from
+   their partial file. S3 moves over 5 GiB use a multipart copy; SFTP and SMB reads stream. The plain PUT stays
+   for small files and is capped (`Uploads__MaxSinglePutMB`). See "Large files" under "Sync". Left open: WebDAV
+   and >5 GiB S3 moves do their long work inside one request (proxy timeouts); one part at a time per file, so an
+   uninterrupted upload is slower than the old single PUT (27 s against 14 s for 1 GB on a local server).
 7. **Quotas, usage, health and role tests.**
    - No quotas and no storage-usage figures, per user, folder or back-end.
    - No periodic back-end health checks: `LastCheckedAt`/`LastCheckOk` change only on a manual test.

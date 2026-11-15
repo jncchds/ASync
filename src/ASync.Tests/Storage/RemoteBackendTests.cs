@@ -17,13 +17,49 @@ internal static class TestServers
 
 public sealed class S3BackendTests : BackendConformanceTests
 {
-    protected override async Task<IStorageBackend?> CreateAsync()
+    protected override async Task<IStorageBackend?> CreateAsync() => await CreateS3Async(s => new S3Backend(s));
+
+    private static async Task<IStorageBackend?> CreateS3Async(Func<S3StorageSettings, S3Backend> create)
     {
         if (TestServers.Env("ASYNC_TEST_S3") is not { } endpoint) return null;
         var settings = new S3StorageSettings(endpoint, "us-east-1", "async-test", null, "asynctest", "asynctest-secret");
-        var s3 = new S3Backend(settings);
+        var s3 = create(settings);
         await s3.EnsureBucketAsync();
         return new PrefixedBackend(s3, TestServers.RunPrefix());
+    }
+
+    /// <summary>Moves past CopyObject's 5 GB limit take the multipart copy; here with a threshold small enough for CI.</summary>
+    [SkippableFact]
+    public async Task Move_OverTheThreshold_CopiesInParts_KeepingMetadata()
+    {
+        await using var backend = await CreateS3Async(s => new S3Backend(s) { MultipartCopyThreshold = 6 * 1024 * 1024, CopyPartSize = 5 * 1024 * 1024 });
+        Skip.If(backend is null, "S3 test server not configured.");
+        var size = Math.Max(LargeSize, 12 * 1024 * 1024 + 5);
+        var mtime = new DateTimeOffset(2024, 3, 4, 5, 6, 7, TimeSpan.Zero);
+        await using (var source = new GeneratedStream(size, seed: 11)) await backend.WriteAsync("c/src.bin", source, mtime);
+        await backend.MoveAsync("c/src.bin", "c/dst.bin");
+        Assert.Null(await backend.StatAsync("c/src.bin"));
+        Assert.Equal(size, (await backend.StatAsync("c/dst.bin"))!.Size);
+        await using (var read = await backend.OpenReadAsync("c/dst.bin"))
+            Assert.Equal(GeneratedStream.Hash(size, 11), await GeneratedStream.HashAsync(read));
+        var inner = (S3Backend)((PrefixedBackend)backend).Inner;
+        Assert.Equal(mtime.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            await inner.GetMetadataAsync(((PrefixedBackend)backend).Prefix + "/c/dst.bin", "x-amz-meta-mtime"));
+        await backend.DeleteAsync("c/dst.bin");
+    }
+
+    /// <summary>Unfinished multipart uploads never show in a listing; clean-up aborts them by age.</summary>
+    [SkippableFact]
+    public async Task StaleMultipartUploads_AreAborted()
+    {
+        Skip.If(!Configured, "S3 test server not configured.");
+        var parts = PartUploads.For(Backend);
+        var handle = await parts.BeginPartsAsync("s/abandoned.bin", null);
+        await parts.WritePartAsync("s/abandoned.bin", handle, 0, 0, new MemoryStream(new byte[1000]), 1000);
+        Assert.Equal(0, await parts.AbortStalePartsAsync("s", DateTimeOffset.UtcNow.AddHours(-1)));
+        Assert.Equal(1, await parts.AbortStalePartsAsync("s", DateTimeOffset.UtcNow.AddMinutes(5)));
+        await Assert.ThrowsAsync<StorageNotFoundException>(() =>
+            parts.WritePartAsync("s/abandoned.bin", handle, 1, 1000, new MemoryStream(new byte[10]), 10));
     }
 }
 

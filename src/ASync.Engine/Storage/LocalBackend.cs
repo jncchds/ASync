@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 namespace ASync.Engine.Storage;
 
 /// <summary>A directory on a local or mounted file system (a Docker volume, a NAS mount, an external disk).</summary>
-public sealed class LocalBackend : IStorageBackend
+public sealed class LocalBackend : IStorageBackend, IPartUploadBackend
 {
     private const string TempSuffix = ".async-tmp";
     private readonly string _root;
@@ -115,6 +115,49 @@ public sealed class LocalBackend : IStorageBackend
         // Left-over temporary files of interrupted writes (hidden from listings) do not keep a directory alive.
         foreach (var temp in Directory.EnumerateFiles(full, "*" + TempSuffix)) File.Delete(temp);
         if (!Directory.EnumerateFileSystemEntries(full).Any()) Directory.Delete(full);
+        return Task.CompletedTask;
+    }
+
+    // ── Part uploads: each part is written at its offset into a hidden file, renamed into place at the end ──
+
+    public Task<string> BeginPartsAsync(string path, DateTimeOffset? lastModified, CancellationToken ct = default)
+    {
+        var handle = PartUploads.NewHandle();
+        var staging = Full(PartUploads.StagingPath(path, handle));
+        Directory.CreateDirectory(Path.GetDirectoryName(staging)!);
+        using (new FileStream(staging, FileMode.CreateNew, FileAccess.Write)) { }
+        return Task.FromResult(handle);
+    }
+
+    public async Task<string?> WritePartAsync(string path, string handle, int number, long offset, Stream content, long length, CancellationToken ct = default)
+    {
+        var staging = Full(PartUploads.StagingPath(path, handle));
+        if (!File.Exists(staging)) throw new StorageNotFoundException(path);
+        await using var file = new FileStream(staging, FileMode.Open, FileAccess.Write, FileShare.ReadWrite, 81920, useAsync: true);
+        file.Seek(offset, SeekOrigin.Begin);
+        await new BoundedStream(content, length).CopyToAsync(file, ct);
+        await file.FlushAsync(ct);
+        file.Flush(flushToDisk: true);
+        return null;
+    }
+
+    public Task CompletePartsAsync(string path, string handle, IReadOnlyList<UploadedPart> parts, long size, DateTimeOffset? lastModified,
+        CancellationToken ct = default)
+    {
+        PartUploads.CheckComplete(parts, size);
+        var staging = Full(PartUploads.StagingPath(path, handle));
+        var info = new FileInfo(staging);
+        if (!info.Exists) throw new StorageNotFoundException(path);
+        if (info.Length != size) throw new IOException($"The upload holds {info.Length} bytes, not {size}.");
+        if (lastModified is { } mtime) File.SetLastWriteTimeUtc(staging, mtime.UtcDateTime);
+        File.Move(staging, Full(path), overwrite: true);
+        return Task.CompletedTask;
+    }
+
+    public Task AbortPartsAsync(string path, string handle, CancellationToken ct = default)
+    {
+        var staging = Full(PartUploads.StagingPath(path, handle));
+        if (File.Exists(staging)) File.Delete(staging);
         return Task.CompletedTask;
     }
 

@@ -198,6 +198,8 @@ public class PurgeService(
                     await reporter;
                 }
 
+                // Unfinished uploads no listing shows (S3 multipart uploads) under the root go too.
+                await PartUploads.For(raw).AbortStalePartsAsync(job.RootPath, DateTimeOffset.MaxValue, ct);
                 job.FilesDeleted = baseFiles + result.Files;
                 job.BytesDeleted = baseBytes + result.Bytes;
                 job.FilesLeft = result.Left;

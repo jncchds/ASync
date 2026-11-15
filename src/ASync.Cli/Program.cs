@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.CommandLine;
 using ASync.Cli;
 using ASync.Client.Core;
@@ -18,6 +19,7 @@ var verboseOption = new Option<bool>("--verbose", "-v") { Description = "More de
 var folderOption = new Option<int>("--folder", "-f") { Description = "Folder id (see `folders`).", Required = true };
 var optionalFolderOption = new Option<int?>("--folder", "-f") { Description = "Only this folder." };
 var massDeleteOption = new Option<bool>("--allow-mass-delete") { Description = "Allow a sync to delete more than half of a folder's files." };
+var progressOption = new Option<bool>("--progress") { Description = "Print a line for every part of a large upload the server has stored." };
 var passphraseFileOption = new Option<string?>("--passphrase-file") { Description = "Read the passphrase from this file (else ASYNC_PASSPHRASE, else ask)." };
 
 var root = new RootCommand("ASync agent: syncs and backs up this machine's folders through an ASync server.");
@@ -139,7 +141,11 @@ void PrintFolders(List<DeviceFolderDto> folders, CliContext ctx)
 // ── sync / run ────────────────────────────────────────────────────────────────
 Define("sync", "Sync (or back up) folders once, now.", async (ctx, p, ct) =>
 {
-    await using var agent = new SyncAgent(ctx.Api, ctx.Store, ctx.Loggers.CreateLogger("sync")) { AllowMassDeletion = p.GetValue(massDeleteOption) };
+    await using var agent = new SyncAgent(ctx.Api, ctx.Store, ctx.Loggers.CreateLogger("sync"))
+    {
+        AllowMassDeletion = p.GetValue(massDeleteOption),
+        UploadProgress = p.GetValue(progressOption) ? (_, stored, size) => Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"  upload: {stored:N0} of {size:N0} bytes stored")) : null,
+    };
     var only = p.GetValue(optionalFolderOption);
     var folders = (await ctx.Api.GetFoldersAsync(ct)).Where(f => only is null || f.FolderId == only).ToList();
     if (folders.Count == 0)
@@ -155,7 +161,7 @@ Define("sync", "Sync (or back up) folders once, now.", async (ctx, p, ct) =>
         if (!result.Ok) failed++;
     }
     return failed == 0 ? 0 : 1;
-}, optionalFolderOption, massDeleteOption);
+}, optionalFolderOption, massDeleteOption, progressOption);
 
 Define("run", "Keep syncing: on schedule, on file changes and when other devices change folders. Enrolls first from ASYNC_SERVER/ASYNC_ENROLL_CODE if needed.",
     async (ctx, p, ct) =>

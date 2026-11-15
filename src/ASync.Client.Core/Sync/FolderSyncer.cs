@@ -18,6 +18,8 @@ public sealed record SyncOptions
     public int TrashKeepDays { get; init; } = 30;
     /// <summary>Skip the mass-deletion safety check (see <see cref="FolderSyncer"/>).</summary>
     public bool AllowMassDeletion { get; init; }
+    /// <summary>Wait before continuing a broken-off download (times the attempt number; three attempts per run).</summary>
+    public TimeSpan RetryDelay { get; init; } = TimeSpan.FromSeconds(2);
 }
 
 public sealed record SyncResult
@@ -28,6 +30,8 @@ public sealed record SyncResult
     public int DeletedRemote { get; set; }
     public int Conflicts { get; set; }
     public long Bytes { get; set; }
+    /// <summary>Bytes of downloads that continued an interrupted one (already on this device, not fetched again).</summary>
+    public long BytesResumed { get; set; }
     public List<string> Errors { get; } = [];
     /// <summary>True when this run changed the storage (other devices should sync).</summary>
     public bool ChangedRemote => Uploaded > 0 || DeletedRemote > 0;
@@ -205,10 +209,18 @@ public sealed class FolderSyncer
         }
     }
 
+    /// <summary>
+    /// The same name for the same file (path, size, modification time): an interrupted upload or download of it is
+    /// continued next time (the gateway keeps acknowledged parts per upload name; downloads keep their partial file).
+    /// </summary>
+    private static string TransferKey(string path, long size, long modified) =>
+        Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes($"{path}\n{size}\n{modified}")))[..32];
+
     private async Task UploadAsync(string path, LocalFile l, SyncResult result, CancellationToken ct)
     {
         await using (var stream = OpenLocal(path))
-            await _remote.PutAsync(path, stream, DateTimeOffset.FromUnixTimeMilliseconds(l.Modified), ct: ct);
+            await _remote.PutAsync(path, stream, DateTimeOffset.FromUnixTimeMilliseconds(l.Modified), ct: ct,
+                uploadKey: TransferKey(path, l.Size, l.Modified));
         var stat = await _remote.Backend.StatAsync(path, ct) ?? throw new IOException("The uploaded file is not on the storage.");
         // The local values from the scan: if the file changed during the upload, the next run sees it as changed.
         _state.Files[path] = new BaseEntry(l.Size, l.Modified, stat.Size, stat.LastModified?.ToUnixTimeMilliseconds() ?? 0);
@@ -219,13 +231,39 @@ public sealed class FolderSyncer
     private async Task DownloadAsync(string path, RemoteFile r, LocalFile? expected, SyncResult result, CancellationToken ct)
     {
         var target = LocalPath(path);
-        var temp = Path.Combine(_root, LocalMeta, "tmp", Guid.NewGuid().ToString("N"));
+        // Named after the remote version, and kept when the download breaks off: the next attempt (in this run, or the
+        // next one, even after a restart) continues from what is already here with a ranged read.
+        var temp = Path.Combine(_root, LocalMeta, "tmp", TransferKey(path, r.Size, r.Modified) + ".part");
         Directory.CreateDirectory(Path.GetDirectoryName(temp)!);
+        var done = false;
         try
         {
-            await using (var input = await _remote.OpenReadAsync(path, ct))
-            await using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true))
-                await input.CopyToAsync(output, ct);
+            for (var attempt = 1; ; attempt++)
+            {
+                var have = File.Exists(temp) ? new FileInfo(temp).Length : 0;
+                if (have > r.Size) { File.Delete(temp); have = 0; }
+                if (attempt == 1 && have > 0) result.BytesResumed += have;
+                try
+                {
+                    if (have < r.Size || r.Size == 0)
+                    {
+                        await using var input = await _remote.Backend.OpenReadAsync(PlainStore.CheckPath(path), have, ct: ct);
+                        await using var output = new FileStream(temp, FileMode.Append, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true);
+                        await input.CopyToAsync(output, ct);
+                    }
+                    break;
+                }
+                catch (Exception e) when (attempt < 3 && e is IOException or HttpRequestException && e is not StorageNotFoundException
+                                          && !ct.IsCancellationRequested)
+                {
+                    await Task.Delay(_options.RetryDelay * attempt, ct);
+                }
+            }
+            if (new FileInfo(temp).Length != r.Size)
+            {
+                File.Delete(temp);
+                throw new IOException("The download did not match the size on the storage; it will be tried again next time.");
+            }
             if (r.Modified > 0) File.SetLastWriteTimeUtc(temp, DateTimeOffset.FromUnixTimeMilliseconds(r.Modified).UtcDateTime);
 
             // Someone edited the local file while we downloaded: leave it, the next run sees a conflict.
@@ -234,10 +272,12 @@ public sealed class FolderSyncer
 
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Move(temp, target, overwrite: true);
+            done = true;
         }
         finally
         {
-            if (File.Exists(temp)) File.Delete(temp);
+            // A complete download that could not be put in place is of no use later; a partial one is.
+            if (!done && File.Exists(temp) && new FileInfo(temp).Length >= r.Size) File.Delete(temp);
         }
         var written = Stat(path)!;
         _state.Files[path] = new BaseEntry(written.Size, written.Modified, r.Size, r.Modified);
@@ -302,6 +342,12 @@ public sealed class FolderSyncer
             foreach (var dir in Directory.EnumerateDirectories(localTrash))
                 if (Directory.GetCreationTimeUtc(dir) < DateTime.UtcNow.AddDays(-_options.TrashKeepDays))
                     Directory.Delete(dir, recursive: true);
+        // Partial downloads nobody continued (the file changed or went away on the storage meanwhile).
+        var localTemp = Path.Combine(_root, LocalMeta, "tmp");
+        if (Directory.Exists(localTemp))
+            foreach (var file in Directory.EnumerateFiles(localTemp))
+                if (File.GetLastWriteTimeUtc(file) < DateTime.UtcNow.AddDays(-1))
+                    File.Delete(file);
         _state.LastCleanUp = DateTimeOffset.UtcNow;
     }
 

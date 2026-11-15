@@ -33,7 +33,7 @@ public sealed class PlainStore(IStorageBackend backend)
     public const string MetaDirectory = ".async";
     public const string Versions = MetaDirectory + "/versions";
     public const string Trash = MetaDirectory + "/trash";
-    private const string Incoming = MetaDirectory + "/incoming";
+    public const string Incoming =MetaDirectory + "/incoming";
     private const string StampFormat = "yyyyMMdd'T'HHmmssfff'Z'";
 
     public IStorageBackend Backend => backend;
@@ -52,12 +52,19 @@ public sealed class PlainStore(IStorageBackend backend)
     /// Stores a file. An existing file at <paramref name="path"/> becomes a version (unless
     /// <paramref name="keepVersion"/> is false). The new content is uploaded first under <c>.async/incoming</c>,
     /// so the old file is only moved aside once the new one is complete.
+    /// <para>
+    /// <paramref name="uploadKey"/> (letters and digits, at most 64) names the upload in <c>incoming</c> instead of a random
+    /// id. A caller that derives it from what it uploads (the sync engine: path, size and modification time) writes the
+    /// same name again after an interruption, which lets a resumable back-end (the gateway's part uploads) continue.
+    /// </para>
     /// </summary>
     public async Task PutAsync(string path, Stream content, DateTimeOffset? lastModified = null, bool keepVersion = true,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? uploadKey = null)
     {
         path = CheckPath(path);
-        var incoming = $"{Incoming}/{Guid.NewGuid():N}";
+        if (uploadKey is not null && (uploadKey.Length is 0 or > 64 || !uploadKey.All(char.IsAsciiLetterOrDigit)))
+            throw new ArgumentException("An upload key is letters and digits only.", nameof(uploadKey));
+        var incoming = $"{Incoming}/{uploadKey ?? Guid.NewGuid().ToString("N")}";
         await backend.WriteAsync(incoming, content, lastModified, ct);
         if (keepVersion && await backend.StatAsync(path, ct) is { IsDirectory: false })
             await backend.MoveAsync(path, VersionPath(path, DateTimeOffset.UtcNow), ct);
@@ -182,6 +189,8 @@ public sealed class PlainStore(IStorageBackend backend)
             await backend.DeleteAsync(upload.Path, ct);
             deleted++;
         }
+        // Unfinished part uploads that no listing shows (S3 multipart uploads), when this runs on the back-end itself.
+        if (backend is IPartUploadBackend parts) deleted += await parts.AbortStalePartsAsync(Incoming, now - TimeSpan.FromDays(1), ct);
         return deleted;
     }
 

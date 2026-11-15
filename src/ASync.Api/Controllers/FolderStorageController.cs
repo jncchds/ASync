@@ -4,6 +4,7 @@ using ASync.Api.Auth;
 using ASync.Api.Services;
 using ASync.Contracts;
 using ASync.Core.Interfaces;
+using ASync.Core.Models;
 using ASync.Engine.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -27,19 +28,73 @@ public class FolderStorageController : ControllerBase
     private readonly IFolderRepository _folders;
     private readonly FolderBackendCache _backends;
     private readonly SnapshotService _snapshots;
+    private readonly UploadService _uploads;
+    private readonly UploadLimits _limits;
 
-    public FolderStorageController(IFolderRepository folders, FolderBackendCache backends, SnapshotService snapshots)
+    public FolderStorageController(IFolderRepository folders, FolderBackendCache backends, SnapshotService snapshots, UploadService uploads,
+        UploadLimits limits)
     {
         _folders = folders;
         _backends = backends;
         _snapshots = snapshots;
+        _uploads = uploads;
+        _limits = limits;
     }
 
-    private async Task<IStorageBackend?> BackendAsync(int folderId, CancellationToken ct)
+    private async Task<IStorageBackend?> BackendAsync(int folderId, CancellationToken ct) =>
+        await MemberAsync(folderId, ct) is { } member ? member.Backend : null;
+
+    private async Task<(Folder Folder, Guid DeviceId, IStorageBackend Backend)?> MemberAsync(int folderId, CancellationToken ct)
     {
         if (User.DeviceId() is not Guid deviceId) return null;
         var membership = await _folders.GetMembershipAsync(folderId, deviceId);
-        return membership is null ? null : await _backends.GetAsync(membership.Folder!, ct);
+        return membership is null ? null : (membership.Folder!, deviceId, await _backends.GetAsync(membership.Folder!, ct));
+    }
+
+    // ── Resumable uploads (UploadService; protocol in ASync.Contracts next to StartUploadRequest) ──
+
+    [HttpPost("uploads")]
+    public async Task<IActionResult> StartUpload(int folderId, [FromBody] StartUploadRequest req, CancellationToken ct)
+    {
+        if (await MemberAsync(folderId, ct) is not var (folder, deviceId, backend)) return NotFound();
+        return await Guard(async () => Ok(UploadService.Dto(await _uploads.StartAsync(folder, deviceId, backend, req, ct))));
+    }
+
+    [HttpPut("uploads/{uploadId:guid}/parts/{number:int}")]
+    [DisableRequestSizeLimit]
+    public async Task<IActionResult> WritePart(int folderId, Guid uploadId, int number, CancellationToken ct)
+    {
+        if (await MemberAsync(folderId, ct) is not var (folder, deviceId, backend)) return NotFound();
+        if (Request.ContentLength is long length && length > _limits.PartSize)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new { message = $"A part is at most {_limits.PartSize} bytes." });
+        var sha256 = Request.Headers["X-Content-SHA256"].FirstOrDefault();
+        return await Guard(async () =>
+        {
+            await _uploads.WritePartAsync(folder, deviceId, backend, uploadId, number, Request.Body, sha256, ct);
+            return NoContent();
+        });
+    }
+
+    [HttpPost("uploads/{uploadId:guid}/complete")]
+    public async Task<IActionResult> CompleteUpload(int folderId, Guid uploadId, CancellationToken ct)
+    {
+        if (await MemberAsync(folderId, ct) is not var (folder, deviceId, backend)) return NotFound();
+        return await Guard(async () =>
+        {
+            await _uploads.CompleteAsync(folder, deviceId, backend, uploadId, ct);
+            return NoContent();
+        });
+    }
+
+    [HttpDelete("uploads/{uploadId:guid}")]
+    public async Task<IActionResult> AbortUpload(int folderId, Guid uploadId, CancellationToken ct)
+    {
+        if (await MemberAsync(folderId, ct) is not var (folder, deviceId, backend)) return NotFound();
+        return await Guard(async () =>
+        {
+            await _uploads.AbortAsync(folder, deviceId, backend, uploadId);
+            return NoContent();
+        });
     }
 
     [HttpGet("stat")]
@@ -90,6 +145,11 @@ public class FolderStorageController : ControllerBase
     public async Task<IActionResult> Write(int folderId, [FromQuery] string path, [FromQuery] long? mtime, CancellationToken ct)
     {
         if (await BackendAsync(folderId, ct) is not { } backend) return NotFound();
+        if (Request.ContentLength is not long size || size > _limits.MaxSinglePut)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new
+            {
+                message = $"A single upload is limited to {_limits.MaxSinglePut / 1024 / 1024} MB and needs a Content-Length; send larger files in parts (POST uploads).",
+            });
         return await Guard(async () =>
         {
             await using var buffer = Request.ContentLength is long len and <= MemoryBufferLimit
@@ -143,6 +203,11 @@ public class FolderStorageController : ControllerBase
         {
             return await action();
         }
+        catch (UploadGoneException e)
+        {
+            Response.Headers["X-Upload-Error"] = "gone";
+            return NotFound(new { message = e.Message });
+        }
         catch (StorageNotFoundException e)
         {
             Response.Headers["X-Storage-Error"] = "not-found";
@@ -152,7 +217,7 @@ public class FolderStorageController : ControllerBase
         {
             return BadRequest(new { message = e.Message });
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or HttpRequestException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or HttpRequestException or Amazon.Runtime.AmazonServiceException)
         {
             return StatusCode(StatusCodes.Status502BadGateway, new { message = $"Storage error: {e.Message}" });
         }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Collections.Concurrent;
 using ASync.Client.Core.Sync;
 using ASync.Contracts;
@@ -48,6 +49,9 @@ public sealed class SyncAgent : IAsyncDisposable
 
     public bool AllowMassDeletion { get; init; }
 
+    /// <summary>Called after each stored part of a large upload: path (on the storage), bytes stored, size.</summary>
+    public Action<string, long, long>? UploadProgress { get; init; }
+
     /// <summary>Raised after every folder run (for UIs and logs).</summary>
     public event Action<FolderRunResult>? FolderRan;
 
@@ -58,7 +62,7 @@ public sealed class SyncAgent : IAsyncDisposable
     {
         if (folder.Paused) return new FolderRunResult(folder.FolderId, folder.Name, true, "Paused", Skipped: true);
         var identity = _api.Identity ?? throw new InvalidOperationException("Not enrolled.");
-        var backend = new RemoteStorageBackend(_api, folder.FolderId);
+        var backend = new RemoteStorageBackend(_api, folder.FolderId) { PartUploaded = UploadProgress };
         FolderRunResult outcome;
         SyncReportRequest report;
         try
@@ -100,6 +104,14 @@ public sealed class SyncAgent : IAsyncDisposable
                 if (result.ChangedRemote) await _api.NotifyChangedAsync(folder.FolderId, ct);
                 var message = $"{result.Uploaded} up, {result.Downloaded} down, {result.DeletedLocal + result.DeletedRemote} deleted" +
                               (result.Conflicts > 0 ? $", {result.Conflicts} conflicts" : "") +
+                              // Interrupted transfers that were continued, with exact byte counts (the e2e test reads them).
+                              (backend.UploadsResumed > 0
+                                  ? $", continued {backend.UploadsResumed} upload(s): {backend.BytesResumed.ToString(CultureInfo.InvariantCulture)} bytes were already " +
+                                    $"on the server, {backend.BytesSent.ToString(CultureInfo.InvariantCulture)} sent"
+                                  : "") +
+                              (result.BytesResumed > 0
+                                  ? $", continued download(s): {result.BytesResumed.ToString(CultureInfo.InvariantCulture)} bytes were already here"
+                                  : "") +
                               (result.Errors.Count > 0 ? $", {result.Errors.Count} errors: {result.Errors[0]}" : "");
                 outcome = new FolderRunResult(folder.FolderId, folder.Name, result.Ok, message);
                 report = new SyncReportRequest(result.Ok, message, result.Uploaded, result.Downloaded, result.DeletedLocal + result.DeletedRemote,

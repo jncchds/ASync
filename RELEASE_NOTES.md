@@ -1,6 +1,17 @@
 # Release notes
 
-## v0.1.4 — 2026-11-14
+## v0.1.4 — 2026-11-15
+
+- feat: **Large files in Mirror and two-way folders are transferred in parts and resume after an interruption.**
+  Files over 32 MB go to the server in 16 MB parts, each stored on the storage as soon as it arrives; if the
+  connection drops, the agent is stopped or either side restarts, the next sync sends only the parts that are
+  missing, and the file appears on the storage only once it is complete. Downloads continue from what is already
+  on the device. The server no longer keeps a copy of an upload on its own disk, and holds at most a few parts in
+  memory. On S3, files over 5 GB can now be moved (versions, trash, putting an upload in place) with a multipart
+  copy; SFTP and SMB stream large files instead of copying them to the server's disk first. Unfinished uploads
+  are thrown away after a day without progress. `async-cli sync --progress` shows each stored part. New server
+  settings: `Uploads__PartSizeMB`, `Uploads__MaxParallelParts`, `Uploads__AbandonAfterHours`,
+  `Uploads__MaxSinglePutMB` (files sent in one piece, by older agents, are limited to 256 MB by default).
 
 - feat: **Dropped snapshots now free their space, and backups are verified.** Every Backup folder is pruned
   every 7 days and verified every 30 days (nothing missing, and 10% of the stored data read back), without

@@ -12,7 +12,7 @@ namespace ASync.Storage;
 /// mount). One session per back-end, used by one operation at a time; it reconnects when dropped.
 /// Writes go to a temporary name and are renamed with replace, so readers never see partial files.
 /// </summary>
-public sealed class SmbBackend : IStorageBackend
+public sealed class SmbBackend : IStorageBackend, IPartUploadBackend
 {
     private readonly SmbStorageSettings _settings;
     private readonly string _root;
@@ -153,41 +153,121 @@ public sealed class SmbBackend : IStorageBackend
         }
     }
 
-    public async Task<Stream> OpenReadAsync(string path, long offset = 0, long? length = null, CancellationToken ct = default)
+    public Task<Stream> OpenReadAsync(string path, long offset = 0, long? length = null, CancellationToken ct = default)
     {
-        return await RunAsync<Stream>(share =>
+        // One operation at a time on the session: the file is read chunk by chunk (4 MB), each chunk under the gate, so
+        // a large file streams without being copied to memory or disk first.
+        var remote = Remote(path);
+        return RangeReadStream.OpenAsync((at, count, c) => RunAsync(share =>
         {
-            var handle = Open(share, Remote(path), AccessMask.GENERIC_READ, CreateDisposition.FILE_OPEN, directory: false, out var status);
+            var handle = Open(share, remote, AccessMask.GENERIC_READ, CreateDisposition.FILE_OPEN, directory: false, out var status);
             if (handle is null) Check(status, "read", path);
             try
             {
-                var total = length ?? long.MaxValue;
-                Stream sink = new MemoryStream();
+                var chunk = new MemoryStream(count);
                 var max = (int)_client!.MaxReadSize;
-                for (long position = offset, left = total; left > 0;)
+                for (long position = at, left = count; left > 0;)
                 {
                     var s = share.ReadFile(out var data, handle, position, (int)Math.Min(max, left));
                     if (s == NTStatus.STATUS_END_OF_FILE || data is null || data.Length == 0) break;
                     Check(s, "read", path);
-                    if (sink.Length + data.Length > 64 * 1024 * 1024 && sink is MemoryStream memory)
-                    {
-                        // Large files spill to a temporary file instead of memory.
-                        var file = new FileStream(Path.GetTempFileName(), FileMode.Create, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose);
-                        memory.Position = 0;
-                        memory.CopyTo(file);
-                        sink = file;
-                    }
-                    sink.Write(data);
+                    chunk.Write(data);
                     position += data.Length;
                     left -= data.Length;
                 }
-                sink.Position = 0;
-                return sink;
+                return chunk.ToArray();
             }
             finally
             {
                 share.CloseFile(handle!);
             }
+        }, c), offset, length, ct: ct);
+    }
+
+    // ── Part uploads: each part is written at its offset into a hidden file, renamed into place at the end ──
+
+    public async Task<string> BeginPartsAsync(string path, DateTimeOffset? lastModified, CancellationToken ct = default)
+    {
+        var handle = PartUploads.NewHandle();
+        var staging = Remote(PartUploads.StagingPath(path, handle));
+        await RunAsync(share =>
+        {
+            EnsureDirectory(share, staging.Contains('\\') ? staging[..staging.LastIndexOf('\\')] : "");
+            var file = Open(share, staging, AccessMask.GENERIC_WRITE, CreateDisposition.FILE_CREATE, directory: false, out var status);
+            if (file is null) Check(status, "write", path);
+            share.CloseFile(file!);
+        }, ct);
+        return handle;
+    }
+
+    public async Task<string?> WritePartAsync(string path, string handle, int number, long offset, Stream content, long length, CancellationToken ct = default)
+    {
+        var staging = Remote(PartUploads.StagingPath(path, handle));
+        await RunAsync(share =>
+        {
+            var file = Open(share, staging, AccessMask.GENERIC_WRITE, CreateDisposition.FILE_OPEN, directory: false, out var status);
+            if (file is null) Check(status, "write", path);
+            try
+            {
+                var buffer = new byte[(int)_client!.MaxWriteSize];
+                var position = offset;
+                for (var left = length; left > 0;)
+                {
+                    var n = content.Read(buffer, 0, (int)Math.Min(buffer.Length, left));
+                    if (n == 0) throw new IOException("The part ended early.");
+                    Check(share.WriteFile(out var written, file, position, n == buffer.Length ? buffer : buffer[..n]), "write", path);
+                    position += written;
+                    left -= written;
+                }
+            }
+            finally
+            {
+                share.CloseFile(file!);
+            }
+        }, ct);
+        return null;
+    }
+
+    public Task CompletePartsAsync(string path, string handle, IReadOnlyList<UploadedPart> parts, long size, DateTimeOffset? lastModified,
+        CancellationToken ct = default)
+    {
+        PartUploads.CheckComplete(parts, size);
+        var staging = Remote(PartUploads.StagingPath(path, handle));
+        var target = Remote(path);
+        return RunAsync(share =>
+        {
+            var file = Open(share, staging, AccessMask.GENERIC_WRITE | AccessMask.GENERIC_READ | AccessMask.DELETE, CreateDisposition.FILE_OPEN,
+                directory: false, out var status);
+            if (file is null) Check(status, "complete", path);
+            try
+            {
+                share.GetFileInformation(out var standard, file, FileInformationClass.FileStandardInformation);
+                var actual = ((FileStandardInformation)standard).EndOfFile;
+                if (actual != size) throw new IOException($"The upload holds {actual} bytes, not {size}.");
+                if (lastModified is { } mtime)
+                    share.SetFileInformation(file, new FileBasicInformation
+                    {
+                        CreationTime = new SetFileTime(true), LastAccessTime = new SetFileTime(true), ChangeTime = new SetFileTime(true),
+                        LastWriteTime = mtime.UtcDateTime,
+                    });
+                Check(share.SetFileInformation(file, new FileRenameInformationType2 { FileName = target, ReplaceIfExists = true }), "rename", path);
+            }
+            finally
+            {
+                share.CloseFile(file!);
+            }
+        }, ct);
+    }
+
+    public Task AbortPartsAsync(string path, string handle, CancellationToken ct = default)
+    {
+        var staging = Remote(PartUploads.StagingPath(path, handle));
+        return RunAsync(share =>
+        {
+            var file = Open(share, staging, AccessMask.DELETE, CreateDisposition.FILE_OPEN, directory: false, out _);
+            if (file is null) return;
+            try { share.SetFileInformation(file, new FileDispositionInformation { DeletePending = true }); }
+            finally { share.CloseFile(file); }
         }, ct);
     }
 

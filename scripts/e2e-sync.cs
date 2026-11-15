@@ -179,6 +179,70 @@ async Task<int> RunAsync()
     var nothing = await Sync(a, two, "A syncs again");
     Check(nothing.Output.Contains("0 up, 0 down, 0 deleted"), "a sync without changes transfers nothing", nothing.Output);
 
+    // ── A large file whose upload and download are interrupted (the agent is killed) and continued ──
+    Section("TwoWay large file: interrupted upload and download continue");
+    var largeMb = int.TryParse(Environment.GetEnvironmentVariable("ASYNC_E2E_LARGE_MB"), out var mb) && mb > 0 ? mb : 200;
+    var largeSize = (long)largeMb * 1024 * 1024 + 4321;
+    var large = await Folder("large", "TwoWay", "Transport", (a, "large", null), (b, "large", null));
+    var largeHash = WriteRandomFile(a.Path("large", "big.bin"), largeSize);
+
+    // A's upload goes in parts (16 MB); the agent is killed once the server has stored two of them.
+    var upload = Start(a, ["sync", "--folder", $"{large}", "--progress"]);
+    var stored = 0L;
+    var killedUpload = await WaitForAsync(() => Task.FromResult(UploadCut()), 120, 0.05);
+    bool UploadCut()
+    {
+        var last = upload.Log.ToString().Split('\n').LastOrDefault(l => l.Contains("upload: "));
+        if (last is null) return upload.Process.HasExited;
+        stored = long.Parse(last.Split("upload: ")[1].Split(' ')[0].Replace(",", ""), System.Globalization.CultureInfo.InvariantCulture);
+        return stored >= 2 * 16 * 1024 * 1024 || upload.Process.HasExited;
+    }
+    var cutShort = !upload.Process.HasExited;
+    if (cutShort) { upload.Process.Kill(entireProcessTree: true); await upload.Process.WaitForExitAsync(); }
+    Check(killedUpload && cutShort && stored < largeSize, $"A's agent is killed during the upload of {largeMb} MB, with {stored:N0} bytes stored",
+        upload.Log.ToString());
+    if (serverContainer is not null)
+    {
+        var placed = await Docker(["exec", serverContainer, "sh", "-c", $"test -e '{storageRoot}/large/big.bin' && echo yes || echo no"]);
+        Check(placed.Output.Trim() == "no", "the file is not in place on the storage yet", placed.Output);
+    }
+
+    var resumedUpload = await Sync(a, large, "A syncs again");
+    var resumedLine = resumedUpload.Output.Split("continued 1 upload(s): ").ElementAtOrDefault(1) ?? "";
+    var already = long.TryParse(resumedLine.Split(' ')[0], out var x1) ? x1 : -1;
+    var sent = long.TryParse(resumedLine.Split(", ").ElementAtOrDefault(1)?.Split(' ')[0], out var x2) ? x2 : -1;
+    Check(already >= stored && already < largeSize, $"the upload continues: {already:N0} bytes were already on the server (≥ {stored:N0} acknowledged)", resumedUpload.Output);
+    Check(sent == largeSize - already, $"only the rest is sent: {sent:N0} bytes, none of the acknowledged parts again", resumedUpload.Output);
+    if (serverContainer is not null)
+    {
+        var left = await Docker(["exec", serverContainer, "sh", "-c", $"find '{storageRoot}/large' -name '*.async-tmp' | wc -l; stat -c %s '{storageRoot}/large/big.bin'"]);
+        Check(left.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries) is [var tmp, var len] && tmp.Trim() == "0" && long.Parse(len.Trim()) == largeSize,
+            "on the storage: the whole file, and no staging files left", left.Output);
+    }
+
+    // B's download is killed part-way and continues from the partial file in .async/tmp.
+    var download = Start(b, ["sync", "--folder", $"{large}"]);
+    var partialDir = b.Path("large", ".async", "tmp");
+    var have = 0L;
+    var killedDownload = await WaitForAsync(() => Task.FromResult(DownloadCut()), 120, 0.05);
+    bool DownloadCut()
+    {
+        if (download.Process.HasExited) return true;
+        var part = Directory.Exists(partialDir) ? Directory.GetFiles(partialDir, "*.part").FirstOrDefault() : null;
+        have = part is null ? 0 : new FileInfo(part).Length;
+        return have >= largeSize / 4;
+    }
+    var downloadCut = !download.Process.HasExited;
+    if (downloadCut) { download.Process.Kill(entireProcessTree: true); await download.Process.WaitForExitAsync(); }
+    Check(killedDownload && downloadCut && !File.Exists(b.Path("large", "big.bin")), $"B's agent is killed during the download, with {have:N0} bytes here",
+        download.Log.ToString());
+    var downloaded = await Sync(b, large, "B syncs again");
+    var hereLine = downloaded.Output.Split("continued download(s): ").ElementAtOrDefault(1) ?? "";
+    var here = long.TryParse(hereLine.Split(' ')[0], out var x3) ? x3 : -1;
+    Check(here >= have && here < largeSize, $"the download continues: {here:N0} bytes were already on B", downloaded.Output);
+    Check(File.Exists(b.Path("large", "big.bin")) && HashFile(b.Path("large", "big.bin")) == largeHash, "B's copy is byte-identical to A's");
+    Check(!Directory.Exists(partialDir) || Directory.GetFiles(partialDir).Length == 0, "no partial download is left on B");
+
     Section("pause, set-path, mass-deletion guard");
     var pause = await Cli(b, ["pause", "--folder", $"{two}"]);
     var paused = await Cli(b, ["sync", "--folder", $"{two}"]);
@@ -1021,6 +1085,30 @@ async Task<(HttpStatusCode Status, JsonNode? Body, string Raw)> Send(HttpMethod 
 }
 
 static byte[] RandomBytes(int length) => RandomNumberGenerator.GetBytes(length);
+
+/// <summary>Writes <paramref name="length"/> random bytes without holding them in memory; returns their SHA-256.</summary>
+static string WriteRandomFile(string path, long length)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+    using var file = File.Create(path);
+    var buffer = new byte[1 << 20];
+    for (var left = length; left > 0;)
+    {
+        var n = (int)Math.Min(buffer.Length, left);
+        RandomNumberGenerator.Fill(buffer.AsSpan(0, n));
+        file.Write(buffer, 0, n);
+        hash.AppendData(buffer, 0, n);
+        left -= n;
+    }
+    return Convert.ToHexString(hash.GetHashAndReset());
+}
+
+static string HashFile(string path)
+{
+    using var file = File.OpenRead(path);
+    return Convert.ToHexString(SHA256.HashData(file));
+}
 
 /// <summary>The snapshot id in a backup's result line ("Snapshot 1a2b3c4d: …").</summary>
 static string ShortId(string syncOutput)

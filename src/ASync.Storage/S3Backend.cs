@@ -16,7 +16,7 @@ namespace ASync.Storage;
 /// in S3: a "directory" is a key prefix, listed through the <c>/</c> delimiter. The file modification time is
 /// kept in object metadata (<c>x-amz-meta-mtime</c>, Unix ms) because S3's own LastModified is the upload time.
 /// </summary>
-public sealed class S3Backend : IStorageBackend
+public sealed class S3Backend : IStorageBackend, IPartUploadBackend
 {
     private const string MtimeMetadata = "x-amz-meta-mtime";
     private readonly AmazonS3Client _client;
@@ -68,6 +68,13 @@ public sealed class S3Backend : IStorageBackend
     }
 
     public string Bucket => _bucket;
+
+    /// <summary>One user-metadata value of an object (null when unset), for tests and diagnostics.</summary>
+    public async Task<string?> GetMetadataAsync(string path, string name, CancellationToken ct = default)
+    {
+        var meta = await _client.GetObjectMetadataAsync(_bucket, Key(path), ct);
+        return meta.Metadata.Keys.Contains(name) ? meta.Metadata[name] : null;
+    }
 
     private static string Key(string path) => StoragePath.Normalize(path);
 
@@ -151,21 +158,155 @@ public sealed class S3Backend : IStorageBackend
 
     public async Task MoveAsync(string from, string to, CancellationToken ct = default)
     {
-        // S3 has no rename: copy, then delete. CopyObject handles objects up to 5 GB; the repository's packs
-        // (16 MB) and most synced files are far below that.
+        // S3 has no rename: copy, then delete. CopyObject is limited to 5 GB; larger objects are copied part by part
+        // (UploadPartCopy), still entirely inside the S3 service.
         try
         {
-            await _client.CopyObjectAsync(new CopyObjectRequest
-            {
-                SourceBucket = _bucket, SourceKey = Key(from), DestinationBucket = _bucket, DestinationKey = Key(to),
-                MetadataDirective = S3MetadataDirective.COPY,
-            }, ct);
+            var meta = await _client.GetObjectMetadataAsync(_bucket, Key(from), ct);
+            if (meta.ContentLength > MultipartCopyThreshold)
+                await MultipartCopyAsync(Key(from), Key(to), meta, ct);
+            else
+                await _client.CopyObjectAsync(new CopyObjectRequest
+                {
+                    SourceBucket = _bucket, SourceKey = Key(from), DestinationBucket = _bucket, DestinationKey = Key(to),
+                    MetadataDirective = S3MetadataDirective.COPY,
+                }, ct);
         }
         catch (AmazonS3Exception e) when (e.StatusCode == HttpStatusCode.NotFound)
         {
             throw new StorageNotFoundException(from);
         }
         await _client.DeleteObjectAsync(_bucket, Key(from), ct);
+    }
+
+    /// <summary>Objects larger than this are moved with a multipart copy (S3's CopyObject stops at 5 GiB). Settable for tests.</summary>
+    public long MultipartCopyThreshold { get; init; } = 5L * 1024 * 1024 * 1024;
+
+    /// <summary>The part size of a multipart copy (at least 5 MiB, the S3 minimum; grown so there are at most 10,000 parts).</summary>
+    public long CopyPartSize { get; init; } = 512L * 1024 * 1024;
+
+    private async Task MultipartCopyAsync(string from, string to, GetObjectMetadataResponse source, CancellationToken ct)
+    {
+        var size = source.ContentLength;
+        var partSize = Math.Max(Math.Max(CopyPartSize, 5L * 1024 * 1024), (size + 9_999) / 10_000);
+        var start = new InitiateMultipartUploadRequest { BucketName = _bucket, Key = to };
+        foreach (var name in source.Metadata.Keys) start.Metadata.Add(name, source.Metadata[name]);
+        if (!string.IsNullOrEmpty(source.Headers.ContentType)) start.ContentType = source.Headers.ContentType;
+        var upload = (await _client.InitiateMultipartUploadAsync(start, ct)).UploadId;
+        try
+        {
+            var count = (int)((size + partSize - 1) / partSize);
+            var etags = new PartETag[count];
+            using var parallel = new SemaphoreSlim(4);
+            await Task.WhenAll(Enumerable.Range(0, count).Select(async i =>
+            {
+                await parallel.WaitAsync(ct);
+                try
+                {
+                    var first = i * partSize;
+                    var response = await _client.CopyPartAsync(new CopyPartRequest
+                    {
+                        SourceBucket = _bucket, SourceKey = from, DestinationBucket = _bucket, DestinationKey = to, UploadId = upload,
+                        PartNumber = i + 1, FirstByte = first, LastByte = Math.Min(size, first + partSize) - 1,
+                    }, ct);
+                    etags[i] = new PartETag(i + 1, response.ETag);
+                }
+                finally
+                {
+                    parallel.Release();
+                }
+            }));
+            await _client.CompleteMultipartUploadAsync(new CompleteMultipartUploadRequest
+            {
+                BucketName = _bucket, Key = to, UploadId = upload, PartETags = [.. etags],
+            }, ct);
+        }
+        catch
+        {
+            await AbortQuietlyAsync(to, upload);
+            throw;
+        }
+    }
+
+    // ── Part uploads: S3 multipart uploads; the object appears only when completed ──
+
+    public async Task<string> BeginPartsAsync(string path, DateTimeOffset? lastModified, CancellationToken ct = default)
+    {
+        var request = new InitiateMultipartUploadRequest { BucketName = _bucket, Key = Key(path) };
+        if (lastModified is { } mtime) request.Metadata.Add(MtimeMetadata, mtime.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture));
+        return (await _client.InitiateMultipartUploadAsync(request, ct)).UploadId;
+    }
+
+    public async Task<string?> WritePartAsync(string path, string handle, int number, long offset, Stream content, long length, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _client.UploadPartAsync(new UploadPartRequest
+            {
+                BucketName = _bucket, Key = Key(path), UploadId = handle, PartNumber = number + 1,
+                InputStream = content, PartSize = length, DisablePayloadSigning = _https,
+            }, ct);
+            return response.ETag;
+        }
+        catch (AmazonS3Exception e) when (e.ErrorCode == "NoSuchUpload")
+        {
+            throw new StorageNotFoundException(path);
+        }
+    }
+
+    public async Task CompletePartsAsync(string path, string handle, IReadOnlyList<UploadedPart> parts, long size, DateTimeOffset? lastModified,
+        CancellationToken ct = default)
+    {
+        PartUploads.CheckComplete(parts, size);
+        if (parts.Any(p => string.IsNullOrEmpty(p.Token))) throw new ArgumentException("Every part needs its ETag.", nameof(parts));
+        if (parts.Count == 0)
+        {
+            // S3 cannot complete an upload without parts: an empty file is an ordinary write.
+            await AbortQuietlyAsync(Key(path), handle);
+            await WriteAsync(path, new MemoryStream(), lastModified, ct);
+            return;
+        }
+        try
+        {
+            await _client.CompleteMultipartUploadAsync(new CompleteMultipartUploadRequest
+            {
+                BucketName = _bucket, Key = Key(path), UploadId = handle,
+                PartETags = [.. parts.Select(p => new PartETag(p.Number + 1, p.Token))],
+            }, ct);
+        }
+        catch (AmazonS3Exception e) when (e.ErrorCode == "NoSuchUpload")
+        {
+            throw new StorageNotFoundException(path);
+        }
+    }
+
+    public Task AbortPartsAsync(string path, string handle, CancellationToken ct = default) => AbortQuietlyAsync(Key(path), handle, ct);
+
+    public async Task<int> AbortStalePartsAsync(string directory, DateTimeOffset startedBefore, CancellationToken ct = default)
+    {
+        var request = new ListMultipartUploadsRequest { BucketName = _bucket, Prefix = DirPrefix(directory) };
+        var stale = new List<(string Key, string Id)>();
+        ListMultipartUploadsResponse response;
+        do
+        {
+            response = await _client.ListMultipartUploadsAsync(request, ct);
+            foreach (var upload in response.MultipartUploads ?? [])
+                if (upload.Initiated is { } at && at.ToUniversalTime() < startedBefore.UtcDateTime)
+                    stale.Add((upload.Key, upload.UploadId));
+            request.KeyMarker = response.NextKeyMarker;
+            request.UploadIdMarker = response.NextUploadIdMarker;
+        } while (response.IsTruncated == true);
+        foreach (var (key, id) in stale) await AbortQuietlyAsync(key, id, ct);
+        return stale.Count;
+    }
+
+    private async Task AbortQuietlyAsync(string key, string uploadId, CancellationToken ct = default)
+    {
+        try
+        {
+            await _client.AbortMultipartUploadAsync(new AbortMultipartUploadRequest { BucketName = _bucket, Key = key, UploadId = uploadId }, ct);
+        }
+        catch (AmazonS3Exception e) when (e.StatusCode == HttpStatusCode.NotFound || e.ErrorCode == "NoSuchUpload") { }
     }
 
 
