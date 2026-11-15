@@ -1,0 +1,92 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ASync.App.ViewModels"
+             x:Class="ASync.App.Views.DashboardView"
+             x:DataType="vm:DashboardViewModel">
+  <StackPanel Spacing="12">
+    <!-- This device and its server. -->
+    <Border Classes="card">
+      <StackPanel Spacing="10">
+        <WrapPanel ItemSpacing="8" LineSpacing="4">
+          <TextBlock Classes="h1" Name="DeviceName" Text="{Binding DeviceName}" />
+          <Border Classes="pill" Classes.success="{Binding State.IsSuccess}" Classes.warning="{Binding State.IsWarning}"
+                  Classes.danger="{Binding State.IsDanger}">
+            <TextBlock Name="ConnectionState" Text="{Binding State.Text}" />
+          </Border>
+        </WrapPanel>
+        <TextBlock Classes="muted">
+          <Run Text="{Binding Account}" /><Run Text=" on " /><Run Text="{Binding ServerUrl}" />
+        </TextBlock>
+        <Border Classes="notice danger" IsVisible="{Binding Problem, Converter={x:Static ObjectConverters.IsNotNull}}">
+          <TextBlock Text="{Binding Problem}" />
+        </Border>
+        <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <Button Name="SyncAll" Content="Sync all now" Command="{Binding Shell.SyncAllCommand}" />
+          <Button Classes="secondary" Name="PauseAll" Content="{Binding Shell.PauseAllText}" Command="{Binding Shell.PauseAllCommand}" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
+
+    <TextBlock Classes="h2" Text="Folders" Margin="2,6,0,0" />
+    <Border Classes="card" IsVisible="{Binding HasNoFolders}">
+      <StackPanel Spacing="6">
+        <TextBlock Text="No folders on this device yet." FontWeight="SemiBold" />
+        <TextBlock Classes="muted" Text="Attach folders to this device in the web UI (Folders → a folder → Devices). They appear here at once." />
+        <Button Classes="secondary" Content="Open the web UI" Command="{Binding Shell.OpenWebUiCommand}" HorizontalAlignment="Left" Margin="0,4,0,0" />
+      </StackPanel>
+    </Border>
+
+    <ItemsControl Name="FolderList" ItemsSource="{Binding Folders}">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate><StackPanel Spacing="12" /></ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate DataType="vm:FolderViewModel">
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <WrapPanel ItemSpacing="6" LineSpacing="4">
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="15.5" Margin="0,0,4,0" />
+                <Border Classes="pill" Classes.success="{Binding State.IsSuccess}" Classes.warning="{Binding State.IsWarning}"
+                        Classes.danger="{Binding State.IsDanger}" Classes.accent="{Binding State.IsAccent}">
+                  <TextBlock Text="{Binding State.Text}" />
+                </Border>
+                <Border Classes="pill"><TextBlock Text="{Binding ModeText}" /></Border>
+                <Border Classes="pill accent" IsVisible="{Binding IsEndToEnd}"><TextBlock Text="🔒 End-to-end" /></Border>
+              </WrapPanel>
+
+              <TextBlock Classes="muted small mono" Text="{Binding LocalPath}" TextWrapping="Wrap" />
+
+              <StackPanel Spacing="4" IsVisible="{Binding IsBusy}">
+                <ProgressBar Value="{Binding ProgressPercent}" IsIndeterminate="{Binding IsProgressIndeterminate}" Maximum="100" />
+                <TextBlock Classes="muted small" Text="{Binding ProgressText}" />
+                <TextBlock Classes="muted small" Text="{Binding CurrentFile}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                           IsVisible="{Binding CurrentFile, Converter={x:Static ObjectConverters.IsNotNull}}" />
+              </StackPanel>
+
+              <TextBlock Classes="small" Classes.error="{Binding !LastResultOk}" Classes.muted="{Binding LastResultOk}">
+                <Run Text="{Binding LastRunText}" /><Run Text=" · " /><Run Text="{Binding LastResultText}" />
+              </TextBlock>
+              <TextBlock Classes="muted small" Text="{Binding NextRunText}" />
+
+              <Border Classes="notice" IsVisible="{Binding AlertText, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <TextBlock Classes="small" Text="{Binding AlertText}" />
+              </Border>
+              <Border Classes="notice" IsVisible="{Binding Locked}">
+                <TextBlock Classes="small" Text="End-to-end encrypted and locked on this device: unlock it with the passphrase or the recovery key to back it up here." />
+              </Border>
+
+              <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,2,0,0">
+                <Button Classes="small" Content="Unlock…" Command="{Binding UnlockCommand}" IsVisible="{Binding Locked}" />
+                <Button Classes="small" Content="Choose folder…" Command="{Binding ChooseFolderCommand}" IsVisible="{Binding NeedsPath}" />
+                <Button Classes="small" Content="Sync now" Command="{Binding SyncNowCommand}" IsVisible="{Binding HasLocalPath}" />
+                <Button Classes="small secondary" Content="{Binding PauseText}" Command="{Binding TogglePauseCommand}" />
+                <Button Classes="small secondary" Content="Open folder" Command="{Binding OpenFolderCommand}" IsVisible="{Binding HasLocalPath}" />
+                <Button Classes="small secondary" Content="Change folder…" Command="{Binding ChooseFolderCommand}" IsVisible="{Binding HasLocalPath}" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,69 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ASync.App.ViewModels"
+             xmlns:views="using:ASync.App.Views"
+             x:Class="ASync.App.App"
+             Name="ASync"
+             RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://ASync.App/Theme/Tokens.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+      <!-- Fluent's own keys, so stock controls use the ASync palette (inputs, check boxes, toggles, radio buttons). -->
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="TextControlBackground" Color="#fdf9fd" />
+          <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#fdf9fd" />
+          <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#fdf9fd" />
+          <SolidColorBrush x:Key="TextControlBorderBrush" Color="#e9d8ed" />
+          <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#d8bfde" />
+          <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#a21caf" />
+          <SolidColorBrush x:Key="TextControlForeground" Color="#2a1530" />
+          <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#2a1530" />
+          <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#2a1530" />
+          <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#9a869f" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="TextControlBackground" Color="#160e1b" />
+          <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#160e1b" />
+          <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#160e1b" />
+          <SolidColorBrush x:Key="TextControlBorderBrush" Color="#392841" />
+          <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#55405f" />
+          <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#c026d3" />
+          <SolidColorBrush x:Key="TextControlForeground" Color="#f2e8f4" />
+          <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#f2e8f4" />
+          <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#f2e8f4" />
+          <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#8a7691" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Light" Accent="#a21caf" RegionColor="#faf5fb" AltHigh="#ffffff" BaseHigh="#2a1530"
+                               BaseMedium="#77607d" ChromeMediumLow="#f4eaf6" ErrorText="#c8233f" />
+        <ColorPaletteResources x:Key="Dark" Accent="#c026d3" RegionColor="#130c17" AltHigh="#130c17" BaseHigh="#f2e8f4"
+                               BaseMedium="#b39fba" ChromeMediumLow="#281b30" ErrorText="#ff7a85" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+    <StyleInclude Source="avares://ASync.App/Theme/Controls.axaml" />
+  </Application.Styles>
+
+  <Application.DataTemplates>
+    <DataTemplate DataType="vm:DashboardViewModel"><views:DashboardView /></DataTemplate>
+    <DataTemplate DataType="vm:EnrollViewModel"><views:EnrollView /></DataTemplate>
+    <DataTemplate DataType="vm:ServiceSetupViewModel"><views:ServiceSetupView /></DataTemplate>
+    <DataTemplate DataType="vm:SettingsViewModel"><views:SettingsView /></DataTemplate>
+    <DataTemplate DataType="vm:UnlockViewModel"><views:UnlockView /></DataTemplate>
+    <DataTemplate DataType="vm:ConnectingViewModel">
+      <StackPanel Margin="24,64" Spacing="8" HorizontalAlignment="Center" MaxWidth="420">
+        <ProgressBar IsIndeterminate="True" Width="160" HorizontalAlignment="Center" Margin="0,0,0,12" />
+        <TextBlock Classes="h2" Text="{Binding Title}" TextAlignment="Center" />
+        <TextBlock Classes="muted" Text="{Binding Detail}" TextAlignment="Center" IsVisible="{Binding Detail, Converter={x:Static ObjectConverters.IsNotNull}}" />
+      </StackPanel>
+    </DataTemplate>
+  </Application.DataTemplates>
+</Application>

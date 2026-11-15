@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The Avalonia UI shared by every head: the desktop app (ASync.App.Desktop) now, the iOS and Android heads in M4.
+    Views and view models only; whatever differs per platform (the agent service, notifications, start at login, the
+    file manager) sits behind the interfaces in Services/, implemented by the heads. It talks to the agent through
+    IAgentConnector: over the local control channel (ASync.Agent.Control) on the desktop.
+  -->
+  <PropertyGroup>
+    <RootNamespace>ASync.App</RootNamespace>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ASync.Agent.Control\ASync.Agent.Control.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ASync.App.Tests" />
+  </ItemGroup>
+</Project>

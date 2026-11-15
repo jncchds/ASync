@@ -12,6 +12,9 @@
     <Project Path="src/ASync.Client.Core/ASync.Client.Core.csproj" />
     <Project Path="src/ASync.Agent.Control/ASync.Agent.Control.csproj" />
     <Project Path="src/ASync.Agent/ASync.Agent.csproj" />
+    <Project Path="src/ASync.App.Desktop/ASync.App.Desktop.csproj" />
+    <Project Path="src/ASync.App.Tests/ASync.App.Tests.csproj" />
+    <Project Path="src/ASync.App/ASync.App.csproj" />
     <Project Path="src/ASync.Cli/ASync.Cli.csproj" />
     <Project Path="src/ASync.Infrastructure/ASync.Infrastructure.csproj" />
     <Project Path="src/ASync.Api/ASync.Api.csproj" />

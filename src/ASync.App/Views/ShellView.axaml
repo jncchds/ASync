@@ -1,0 +1,64 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ASync.App.ViewModels"
+             x:Class="ASync.App.Views.ShellView"
+             x:DataType="vm:ShellViewModel"
+             Background="{DynamicResource Bg}">
+  <Grid RowDefinitions="Auto,Auto,*">
+    <!-- Top bar: app name and version pill (like the web UI's sidebar head), web UI and settings. -->
+    <Border Grid.Row="0" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"
+            Padding="14,8">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <Border Width="26" Height="26" CornerRadius="7" Background="{DynamicResource Accent}">
+            <PathIcon Data="{StaticResource SyncGlyph}" Width="16" Height="16" Foreground="{DynamicResource AccentContrast}" />
+          </Border>
+          <TextBlock Text="ASync" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" TextWrapping="NoWrap" />
+          <Border Classes="pill accent">
+            <TextBlock Text="{Binding AppVersion}" />
+          </Border>
+        </StackPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <Button Classes="icon" Content="Web UI" Command="{Binding OpenWebUiCommand}" ToolTip.Tip="Open the web UI in the browser" />
+          <Button Classes="icon" Name="SettingsButton" Content="⚙ Settings" Command="{Binding OpenSettingsCommand}" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- What the last action did, or why it failed. -->
+    <Border Grid.Row="1" IsVisible="{Binding HasMessage}" Padding="14,8" BorderThickness="0,0,0,1"
+            Classes.error="{Binding MessageIsError}" Classes="banner">
+      <Border.Styles>
+        <Style Selector="Border.banner">
+          <Setter Property="Background" Value="{DynamicResource AccentFaint}" />
+          <Setter Property="BorderBrush" Value="{DynamicResource AccentSoft}" />
+        </Style>
+        <Style Selector="Border.banner.error">
+          <Setter Property="Background" Value="{DynamicResource DangerFaint}" />
+          <Setter Property="BorderBrush" Value="{DynamicResource DangerLine}" />
+        </Style>
+      </Border.Styles>
+      <Grid ColumnDefinitions="*,Auto">
+        <SelectableTextBlock Name="MessageText" Text="{Binding Message}" VerticalAlignment="Center" TextWrapping="Wrap" FontSize="13.5" />
+        <Button Grid.Column="1" Classes="icon small" Content="✕" Command="{Binding DismissMessageCommand}" ToolTip.Tip="Dismiss" />
+      </Grid>
+    </Border>
+
+    <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
+      <ContentControl Name="PageHost" Content="{Binding Page}" MaxWidth="860" Padding="16" />
+    </ScrollViewer>
+
+    <!-- Settings cover the page while open. -->
+    <Border Grid.Row="2" Background="{DynamicResource Bg}" IsVisible="{Binding SettingsPage, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+        <ContentControl Name="SettingsHost" Content="{Binding SettingsPage}" MaxWidth="860" Padding="16" />
+      </ScrollViewer>
+    </Border>
+
+    <!-- Dialogs (unlock) over everything. -->
+    <Border Grid.Row="0" Grid.RowSpan="3" Background="{DynamicResource Backdrop}"
+            IsVisible="{Binding Dialog, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <ContentControl Name="DialogHost" Content="{Binding Dialog}" VerticalAlignment="Center" HorizontalAlignment="Stretch" MaxWidth="460" Margin="16" />
+    </Border>
+  </Grid>
+</UserControl>

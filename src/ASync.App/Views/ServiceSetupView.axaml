@@ -1,0 +1,27 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ASync.App.ViewModels"
+             x:Class="ASync.App.Views.ServiceSetupView"
+             x:DataType="vm:ServiceSetupViewModel">
+  <StackPanel Spacing="12" MaxWidth="560">
+    <StackPanel Spacing="4" Margin="2,8,0,4">
+      <TextBlock Classes="h1" Name="Title" Text="{Binding Title}" />
+    </StackPanel>
+    <Border Classes="card">
+      <StackPanel Spacing="12">
+        <TextBlock Text="{Binding Text}" />
+        <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <Button Name="Install" Content="Install and start the agent" Command="{Binding InstallCommand}" IsVisible="{Binding CanInstall}" />
+          <Button Name="Start" Content="Start the agent" Command="{Binding StartCommand}" IsVisible="{Binding CanStart}" />
+          <Button Classes="secondary" Content="Look again" Command="{Binding RetryCommand}" />
+        </WrapPanel>
+        <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+        <Border Classes="notice danger" IsVisible="{Binding HasError}">
+          <TextBlock Text="{Binding Error}" />
+        </Border>
+        <TextBlock Classes="muted small"
+                   Text="The agent is the same as `async-cli service install`: a systemd user unit on Linux, a LaunchAgent on macOS, a logon task on Windows." />
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

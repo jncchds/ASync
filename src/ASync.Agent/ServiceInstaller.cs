@@ -177,6 +177,30 @@ public static class ServiceInstaller
         return new ServiceResult(false, "Not supported on this OS.");
     }
 
+    /// <summary>Starts an installed service that is not running (the desktop app does this when it finds it stopped).</summary>
+    public static async Task<ServiceResult> StartAsync(bool system, CancellationToken ct = default)
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            await RunChecked("systemctl", [.. Scope(system), "start", SystemdUnitName], ct);
+            return new ServiceResult(true, "Started the agent.");
+        }
+        if (OperatingSystem.IsMacOS())
+        {
+            // Loaded (bootstrapped) but stopped: kickstart; not loaded (after a bootout): bootstrap again.
+            var kick = await Run("launchctl", ["kickstart", $"{LaunchdDomain(system)}/{LaunchdLabel}"], ct);
+            if (kick.Exit != 0) await RunChecked("launchctl", ["bootstrap", LaunchdDomain(system), PlistPath(system)], ct);
+            return new ServiceResult(true, "Started the agent.");
+        }
+        if (OperatingSystem.IsWindows())
+        {
+            if (system) await RunChecked("sc.exe", ["start", AgentHost.WindowsServiceName], ct);
+            else await RunChecked("schtasks.exe", ["/Run", "/TN", WindowsTaskName], ct);
+            return new ServiceResult(true, "Started the agent.");
+        }
+        return new ServiceResult(false, "Not supported on this OS.");
+    }
+
     /// <summary>What the service manager says: installed, running.</summary>
     public static async Task<(bool Installed, bool Running, string Detail)> StatusAsync(bool system, CancellationToken ct = default)
     {

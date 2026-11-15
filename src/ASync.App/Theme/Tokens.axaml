@@ -1,0 +1,69 @@
+<!--
+  The web UI's tokens (src/async-ui/src/index.css) as Avalonia brushes, one dictionary per theme: lilac-white by day,
+  deep plum at night, fuchsia accent. Same names in PascalCase (- -text-muted → TextMuted). The derived colour-mix tokens
+  are written out with their alpha (#AARRGGBB here, #RRGGBBAA in CSS). Views never hard-code a colour; new UI uses these.
+  The Fluent keys at the end make the stock controls (text boxes, check boxes, toggles) use the same palette.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Light">
+      <Color x:Key="AccentColor">#a21caf</Color>
+      <SolidColorBrush x:Key="Bg" Color="#faf5fb" />
+      <SolidColorBrush x:Key="Surface" Color="#ffffff" />
+      <SolidColorBrush x:Key="Surface2" Color="#f4eaf6" />
+      <SolidColorBrush x:Key="BorderBrush" Color="#e9d8ed" />
+      <SolidColorBrush x:Key="Text" Color="#2a1530" />
+      <SolidColorBrush x:Key="TextMuted" Color="#77607d" />
+      <SolidColorBrush x:Key="InputBg" Color="#fdf9fd" />
+      <SolidColorBrush x:Key="Accent" Color="#a21caf" />
+      <SolidColorBrush x:Key="AccentHover" Color="#86198f" />
+      <SolidColorBrush x:Key="AccentContrast" Color="#ffffff" />
+      <SolidColorBrush x:Key="AccentFaint" Color="#14a21caf" />
+      <SolidColorBrush x:Key="AccentSoft" Color="#29a21caf" />
+      <SolidColorBrush x:Key="Success" Color="#15803d" />
+      <SolidColorBrush x:Key="Warning" Color="#b45309" />
+      <SolidColorBrush x:Key="Danger" Color="#c8233f" />
+      <SolidColorBrush x:Key="SuccessFaint" Color="#2115803d" />
+      <SolidColorBrush x:Key="WarningFaint" Color="#21b45309" />
+      <SolidColorBrush x:Key="DangerFaint" Color="#1fc8233f" />
+      <SolidColorBrush x:Key="WarningLine" Color="#59b45309" />
+      <SolidColorBrush x:Key="DangerLine" Color="#59c8233f" />
+      <SolidColorBrush x:Key="MutedFaint" Color="#2177607d" />
+      <SolidColorBrush x:Key="Backdrop" Color="#662a1530" />
+      <SolidColorBrush x:Key="Shadow" Color="#332a1530" />
+    </ResourceDictionary>
+    <ResourceDictionary x:Key="Dark">
+      <Color x:Key="AccentColor">#c026d3</Color>
+      <SolidColorBrush x:Key="Bg" Color="#130c17" />
+      <SolidColorBrush x:Key="Surface" Color="#1d1323" />
+      <SolidColorBrush x:Key="Surface2" Color="#281b30" />
+      <SolidColorBrush x:Key="BorderBrush" Color="#392841" />
+      <SolidColorBrush x:Key="Text" Color="#f2e8f4" />
+      <SolidColorBrush x:Key="TextMuted" Color="#b39fba" />
+      <SolidColorBrush x:Key="InputBg" Color="#160e1b" />
+      <SolidColorBrush x:Key="Accent" Color="#c026d3" />
+      <SolidColorBrush x:Key="AccentHover" Color="#d946ef" />
+      <SolidColorBrush x:Key="AccentContrast" Color="#ffffff" />
+      <SolidColorBrush x:Key="AccentFaint" Color="#24c026d3" />
+      <SolidColorBrush x:Key="AccentSoft" Color="#40c026d3" />
+      <SolidColorBrush x:Key="Success" Color="#5fd49a" />
+      <SolidColorBrush x:Key="Warning" Color="#f3b65a" />
+      <SolidColorBrush x:Key="Danger" Color="#ff7a85" />
+      <SolidColorBrush x:Key="SuccessFaint" Color="#215fd49a" />
+      <SolidColorBrush x:Key="WarningFaint" Color="#21f3b65a" />
+      <SolidColorBrush x:Key="DangerFaint" Color="#1fff7a85" />
+      <SolidColorBrush x:Key="WarningLine" Color="#59f3b65a" />
+      <SolidColorBrush x:Key="DangerLine" Color="#59ff7a85" />
+      <SolidColorBrush x:Key="MutedFaint" Color="#21b39fba" />
+      <SolidColorBrush x:Key="Backdrop" Color="#99000000" />
+      <SolidColorBrush x:Key="Shadow" Color="#80000000" />
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+
+  <!-- Inter from Avalonia.Fonts.Inter (registered by WithInterFont()), falling back to the system's sans-serif. -->
+  <FontFamily x:Key="AppFont">fonts:Inter#Inter, $Default</FontFamily>
+
+  <!-- The logo and tray glyph: two arrows chasing each other (24 × 24). -->
+  <StreamGeometry x:Key="SyncGlyph">M12 4a8 8 0 0 1 7.4 5h-2.2A6 6 0 0 0 7.3 8.7L9.6 11H3.5V4.9l2.4 2.4A8 8 0 0 1 12 4zM20.5 13v6.1l-2.4-2.4A8 8 0 0 1 4.6 15h2.2a6 6 0 0 0 9.9 1.3L14.4 13h6.1z</StreamGeometry>
+</ResourceDictionary>

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The app's tests: view models against a fake agent (no Avalonia), and the views in Avalonia.Headless (real layout and
+    rendering with Skia, no display). xunit v3, separate from ASync.Tests (xunit v2), because Avalonia.Headless.XUnit 12
+    is built on v3.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Avalonia.Headless.XUnit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ASync.App\ASync.App.csproj" />
+    <ProjectReference Include="..\ASync.App.Desktop\ASync.App.Desktop.csproj" />
+  </ItemGroup>
+</Project>
