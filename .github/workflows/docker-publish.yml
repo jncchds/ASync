@@ -9,15 +9,16 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Runners are pinned to an Ubuntu release (ubuntu-latest moves to a new one on GitHub's schedule): move them on purpose.
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.x'
 
@@ -26,19 +27,40 @@ jobs:
 
       # Real S3 (SeaweedFS), SFTP, WebDAV and Samba servers for the storage back-end conformance tests, and the
       # PostgreSQL of the API-level tests (src/ASync.Tests/Api: role separation and ownership on every endpoint).
+      # --wait returns once every container's health check passes (each one checks that the server serves requests).
       - name: Start test servers
-        run: |
-          docker compose -f docker-compose.test.yml -p async-test up -d
-          until docker exec async-test-postgres-1 pg_isready -U async; do sleep 1; done
+        run: docker compose -f docker-compose.test.yml -p async-test up -d --wait --wait-timeout 180
 
+      # Failed tests show as annotations and in the job summary (GitHubActionsTestLogger); the TRX is an artifact.
       - name: Run tests
         run: |
           eval "$(scripts/test-backends-env.sh)"
-          dotnet test src/ASync.Tests/ASync.Tests.csproj --configuration Release --no-build
+          dotnet test src/ASync.Tests/ASync.Tests.csproj --configuration Release --no-build \
+            --logger "GitHubActions;summary-include-passed=false" \
+            --logger "trx;LogFileName=tests.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: TestResults/
+          if-no-files-found: warn
+
+      - name: Test server logs
+        if: failure()
+        run: docker compose -f docker-compose.test.yml -p async-test logs --no-color --tail 200 > test-servers.log; cat test-servers.log
+
+      - name: Upload test server logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-server-logs
+          path: test-servers.log
 
       # The Docker image build runs `vite build` only, which does not type-check.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -54,13 +76,13 @@ jobs:
   # The real server stack (docker compose) with two async-cli agents plus one in the async-cli image: TwoWay, Mirror,
   # Backup (Transport and end-to-end), live updates and revocation. See scripts/e2e-sync.cs.
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.x'
 
@@ -71,7 +93,7 @@ jobs:
     needs: [test, e2e]
     # Pull requests only run the tests; images are published from version tags (and manual runs).
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     strategy:
@@ -84,16 +106,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -111,7 +133,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}
           tags: |
@@ -122,7 +144,7 @@ jobs:
             org.opencontainers.image.version=${{ steps.version.outputs.value }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}

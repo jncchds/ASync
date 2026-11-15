@@ -116,6 +116,12 @@
 - docs: **ASync is MIT-licensed** (`LICENSE`).
 - chore: the version check-bump rule in `CLAUDE.md` looks for the release tag `v<VERSION>`, not for `VERSION` on
   origin, since pushing `main` no longer releases anything.
+- ci: **the test job passes reliably again.** It had failed on most runs since the storage tests came in: it
+  started the tests right after `docker compose up -d`, while SeaweedFS still refused connections (about 10 s
+  after a cold start), so the S3 tests failed whenever they ran early. Every test server now has a health check
+  that passes only once it serves requests, and CI (and `CLAUDE.md`) start the stack with `up -d --wait`. Failed
+  tests now appear as annotations and in the job summary, the TRX and the test servers' logs are uploaded as
+  artifacts, all actions are on their Node 24 versions, and the runners are pinned to `ubuntu-24.04`.
 
 ## v0.1.3 — 2026-11-12
 
