@@ -1,4 +1,4 @@
-import type { DevicePlatform } from '../api'
+import type { DevicePlatform, QuotaStatus } from '../api'
 
 export const PLATFORM_LABELS: Record<DevicePlatform, string> = {
   Unknown: 'Unknown',
@@ -47,3 +47,11 @@ export function formatMinutes(minutes: number): string {
  * digits are a timestamp shared by snapshots made around the same time, the trailing ones are random.
  */
 export const shortSnapshotId = (id: string) => id.replace(/-/g, '').slice(-8)
+
+export const isFuture = (iso: string) => Date.parse(iso) > Date.now()
+
+/** "1.2 GB of 10 GB (12%)", or "1.2 GB" without a limit. */
+export function quotaText(q: QuotaStatus): string {
+  if (q.quotaBytes === null) return formatBytes(q.usedBytes)
+  return `${formatBytes(q.usedBytes)} of ${formatBytes(q.quotaBytes)} (${Math.round(q.percent ?? 0)}%)`
+}

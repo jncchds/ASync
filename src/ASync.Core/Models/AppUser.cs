@@ -11,6 +11,8 @@ public class AppUser
     /// <summary>The OIDC <c>sub</c> claim of the linked identity-provider account, if any.</summary>
     public string? OidcSubject { get; set; }
     public DateTime CreatedAt { get; set; }
+    /// <summary>The most this person may store, over all their folders (null = no limit). Set by an admin.</summary>
+    public long? QuotaBytes { get; set; }
 
     public List<Device> Devices { get; set; } = [];
 }

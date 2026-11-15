@@ -1,7 +1,24 @@
 import { useCallback, useEffect, useState } from 'react'
-import { createUser, errorMessage, getUsers, setUserPassword, setUserRole, type AdminUser } from '../api'
+import { createUser, errorMessage, getUsers, requestUsageScan, setUserPassword, setUserQuota, setUserRole, type AdminUser } from '../api'
 import { useAuth } from '../hooks/useAuth'
-import { formatDate } from '../utils/format'
+import { formatBytes, formatDate } from '../utils/format'
+import { parseQuota } from '../utils/storage'
+import { QuotaMeter } from '../components/UsageSummary'
+
+const WARN_PERCENT = 90
+
+/** "1.2 GB of 10 GB" with a meter, or just the size without a quota. */
+function UserStorage({ u }: { u: AdminUser }) {
+  if (u.quotaBytes === null) return <span>{formatBytes(u.usedBytes)} <span className="muted">· no quota</span></span>
+  const percent = u.quotaBytes > 0 ? 100 * u.usedBytes / u.quotaBytes : 100
+  const state = u.usedBytes > u.quotaBytes ? 'Over' : percent >= WARN_PERCENT ? 'Warning' : 'Ok'
+  return (
+    <span className="usage-cell">
+      <span className={state === 'Over' ? 'error-text' : undefined}>{formatBytes(u.usedBytes)} of {formatBytes(u.quotaBytes)}</span>
+      <QuotaMeter quota={{ usedBytes: u.usedBytes, quotaBytes: u.quotaBytes, percent, state }} label={`Quota of ${u.username}`} />
+    </span>
+  )
+}
 import DeleteUserPanel from '../components/DeleteUserPanel'
 import PurgeList from '../components/PurgeList'
 
@@ -40,6 +57,20 @@ export default function AdminUsers() {
     try { await setUserPassword(u.id, pw); await load() } catch (err) { setError(errorMessage(err)) }
   }
 
+  const setQuota = async (u: AdminUser) => {
+    const answer = prompt(`Storage quota for ${u.username}, over all their folders, in GB (e.g. 100 or 0.5). Leave empty for no limit.`,
+      u.quotaBytes === null ? '' : String(+(u.quotaBytes / 1024 ** 3).toFixed(2)))
+    if (answer === null) return
+    const quota = parseQuota(answer)
+    if (quota === undefined) { setError('Enter a size in GB, or leave it empty for no limit.'); return }
+    try { await setUserQuota(u.id, quota); await load() } catch (err) { setError(errorMessage(err)) }
+  }
+
+  const recount = async () => {
+    try { await requestUsageScan(true); setNotice('Counting everyone\'s storage in the background; reload in a minute.') }
+    catch (err) { setError(errorMessage(err)) }
+  }
+
   const toggleAdmin = async (u: AdminUser) => {
     try { await setUserRole(u.id, !u.isAdmin); await load() } catch (err) { setError(errorMessage(err)) }
   }
@@ -49,7 +80,10 @@ export default function AdminUsers() {
 
   return (
     <>
-      <div className="header"><h1>Users</h1></div>
+      <div className="header">
+        <h1>Users</h1>
+        <button className="secondary small" onClick={recount} title="Lists every folder on its storage again (in the background).">Count storage again</button>
+      </div>
       {error && <p className="error-msg">{error}</p>}
       {notice && <p className="success-msg">{notice}</p>}
 
@@ -65,7 +99,7 @@ export default function AdminUsers() {
       {users === null ? <div className="loading">Loading…</div> : (
         <div className="table-wrap">
           <table className="stack">
-            <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Sign-in</th><th>Created</th><th></th></tr></thead>
+            <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Sign-in</th><th>Storage</th><th>Created</th><th></th></tr></thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.id}>
@@ -79,10 +113,12 @@ export default function AdminUsers() {
                       {!u.hasPassword && !u.hasOidc && <span className="muted">—</span>}
                     </span>
                   </td>
-                  <td data-label="Created" className="muted nowrap"><span>{formatDate(u.createdAt)}</span></td>
-                  <td className="actions-cell">
+                  <td data-label="Storage"><UserStorage u={u} /></td>
+                  <td data-label="Created" className="muted nowrap"><span title={formatDate(u.createdAt)}>{new Date(u.createdAt).toLocaleDateString()}</span></td>
+                  <td className="actions-cell wrapping">
                     <div className="row-actions">
                       <button className="secondary small" onClick={() => resetPassword(u)}>Set password</button>
+                      <button className="secondary small" onClick={() => setQuota(u)}>Quota</button>
                       {u.id !== me?.id && (
                         <button className="secondary small" onClick={() => toggleAdmin(u)}>{u.isAdmin ? 'Make user' : 'Make admin'}</button>
                       )}

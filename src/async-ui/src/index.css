@@ -196,6 +196,18 @@ label.checkbox input { width: auto; margin: 0; flex-shrink: 0; }
 .pill-danger { background: var(--danger-faint); color: var(--danger); }
 .pills { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; vertical-align: middle; }
 
+/* ── Storage usage and quotas ── */
+.meter { height: 6px; border-radius: 999px; background: var(--muted-faint); overflow: hidden; }
+.meter > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.meter.warning > span { background: var(--warning); }
+.meter.over > span { background: var(--danger); }
+.usage-summary { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1.25rem; }
+.usage-figure { font-size: 1.15rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-backend { display: flex; flex-direction: column; gap: 0.35rem; }
+.usage-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.5rem; font-size: 0.875rem; min-width: 0; }
+.usage-line > * { overflow-wrap: anywhere; }
+.usage-cell { display: flex; flex-direction: column; gap: 0.3rem; min-width: 8rem; white-space: nowrap; }
+
 /* ── App shell ── */
 /* The panes scroll inside the viewport; the document itself never does (and so never scrolls sideways). */
 .app-layout { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
@@ -276,6 +288,9 @@ td.wrap { overflow-wrap: anywhere; min-width: 12rem; }
 td.actions-cell { width: 1%; white-space: nowrap; }
 td.title-cell { font-weight: 600; overflow-wrap: break-word; min-width: 9rem; }
 td.actions-cell .row-actions { flex-wrap: nowrap; }
+/* Many buttons (Users): two rows rather than a table wider than the page. */
+td.actions-cell.wrapping { width: 15rem; white-space: normal; }
+td.actions-cell.wrapping .row-actions { flex-wrap: wrap; }
 
 /* Narrow screens: each row of a .stack table becomes a small card with labelled values. */
 @media (max-width: 700px) {

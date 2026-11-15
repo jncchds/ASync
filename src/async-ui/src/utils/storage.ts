@@ -9,3 +9,11 @@ export const STORAGE_TYPES: { type: StorageType; label: string; blurb: string }[
 ]
 
 export const typeLabel = (t: StorageType) => STORAGE_TYPES.find(x => x.type === t)?.label ?? t
+
+/** A quota typed in GB ("50", "0.5", "1,5"): bytes, null for an empty answer (no limit), undefined when it is not a size. */
+export function parseQuota(answer: string): number | null | undefined {
+  const text = answer.trim().replace(',', '.').replace(/\s*gb$/i, '')
+  if (text === '') return null
+  const gb = Number(text)
+  return Number.isFinite(gb) && gb >= 0 ? Math.round(gb * 1024 ** 3) : undefined
+}

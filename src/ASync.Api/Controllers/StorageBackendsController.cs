@@ -24,9 +24,29 @@ public class StorageBackendsController : ControllerBase
 
     private bool IsAdmin => User.IsInRole(Roles.Admin);
 
+    /// <summary>The caller's back-ends and the shared ones, with how much the caller (and, for admins, everyone) stores on each.</summary>
     [HttpGet]
-    public async Task<ActionResult<List<StorageBackendDto>>> GetAll() =>
-        (await _backends.GetVisibleAsync(User.UserId())).Select(b => _service.ToDto(b, User.UserId(), IsAdmin)).ToList();
+    public async Task<ActionResult<List<StorageBackendDto>>> GetAll([FromServices] UsageService usage)
+    {
+        var (mine, all) = await usage.UsedByBackendAsync(User.UserId(), IsAdmin);
+        return (await _backends.GetVisibleAsync(User.UserId()))
+            .Select(b => _service.ToDto(b, User.UserId(), IsAdmin, mine.GetValueOrDefault(b.Id), all?.GetValueOrDefault(b.Id)))
+            .ToList();
+    }
+
+    /// <summary>Admins: how much each user may keep on a shared back-end (null = no limit of its own).</summary>
+    [HttpPut("{id:int}/quota")]
+    [Authorize(Roles = Roles.Admin)]
+    public async Task<ActionResult<StorageBackendDto>> SetQuota(int id, [FromBody] SetQuotaRequest req)
+    {
+        var backend = await _backends.GetAsync(id);
+        if (backend is null || !StorageBackendService.CanUse(backend, User.UserId())) return NotFound();
+        if (!backend.IsShared) return BadRequest(new { message = "Only shared back-ends have a quota of their own; set the user's quota instead." });
+        if (req.QuotaBytes is < 0) return BadRequest(new { message = "A quota cannot be negative." });
+        backend.UserQuotaBytes = req.QuotaBytes;
+        await _backends.UpdateAsync(backend);
+        return _service.ToDto(backend, User.UserId(), IsAdmin);
+    }
 
     /// <summary>What the add-back-end form needs to know: where Local back-ends may live.</summary>
     [HttpGet("options")]

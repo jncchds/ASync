@@ -15,9 +15,11 @@ public sealed record AlertPolicy(double GraceFactor, TimeSpan MinimumGrace, int 
 }
 
 /// <summary>A problem found by one scan. <see cref="Subject"/> identifies what it is about across scans.</summary>
-public sealed record AlertFinding(AlertKind Kind, int FolderId, Guid? DeviceId, string FolderName, string? DeviceName, string Detail)
+public sealed record AlertFinding(
+    AlertKind Kind, int? FolderId, Guid? DeviceId, string FolderName, string? DeviceName, string Detail, int? StorageBackendId = null,
+    string? StorageBackendName = null)
 {
-    public string Subject => AlertRules.SubjectOf(Kind, FolderId, DeviceId);
+    public string Subject => AlertRules.SubjectOf(Kind, FolderId, DeviceId, StorageBackendId);
 }
 
 /// <summary>
@@ -42,14 +44,64 @@ public sealed record AlertScan(List<AlertFinding> Findings, HashSet<string> Watc
 /// </summary>
 public static class AlertRules
 {
-    public static string SubjectOf(AlertKind kind, int folderId, Guid? deviceId) => kind switch
+    /// <summary>
+    /// What an incident is about, across scans. Quota warnings and being over quota are separate subjects (going over
+    /// is announced even after the warning was), per limit: the person's own (<c>all</c>) or one shared back-end's.
+    /// </summary>
+    public static string SubjectOf(AlertKind kind, int? folderId, Guid? deviceId, int? storageBackendId = null) => kind switch
     {
         AlertKind.Overdue or AlertKind.Failing => $"device:{folderId}:{deviceId:N}",
         AlertKind.CheckFailed => $"check:{folderId}",
-        _ => $"prune:{folderId}",
+        AlertKind.PruneFailed => $"prune:{folderId}",
+        AlertKind.QuotaWarning => $"quota-warning:{storageBackendId?.ToString() ?? "all"}",
+        AlertKind.OverQuota => $"quota-over:{storageBackendId?.ToString() ?? "all"}",
+        _ => $"storage:{storageBackendId}",
     };
 
-    public static string SubjectOf(AlertIncident incident) => SubjectOf(incident.Kind, incident.FolderId, incident.DeviceId);
+    public static string SubjectOf(AlertIncident incident) =>
+        SubjectOf(incident.Kind, incident.FolderId, incident.DeviceId, incident.StorageBackendId);
+
+    /// <summary>
+    /// Quota findings for one person: per limit, <see cref="AlertKind.OverQuota"/> when over it, otherwise
+    /// <see cref="AlertKind.QuotaWarning"/> at or above <paramref name="warnPercent"/>. While over, the warning is not
+    /// watched (an open warning closes quietly: the over-quota alert replaces it); below the threshold both are watched,
+    /// so they resolve with a "back to normal" message.
+    /// </summary>
+    public static void ScanQuotas(IEnumerable<QuotaUse> uses, int warnPercent, AlertScan scan)
+    {
+        foreach (var use in uses)
+        {
+            scan.Watched.Add(SubjectOf(AlertKind.OverQuota, null, null, use.StorageBackendId));
+            var state = QuotaRules.State(use.UsedBytes, use.QuotaBytes, warnPercent);
+            if (state != QuotaState.Over) scan.Watched.Add(SubjectOf(AlertKind.QuotaWarning, null, null, use.StorageBackendId));
+            if (state == QuotaState.Ok) continue;
+            var where = use.StorageBackendName is { } name ? $" on \"{name}\"" : "";
+            var used = $"{Sizes.Format(use.UsedBytes)} of {Sizes.Format(use.QuotaBytes)} used{where} ({QuotaRules.Percent(use.UsedBytes, use.QuotaBytes):0}%).";
+            scan.Findings.Add(state == QuotaState.Over
+                ? new AlertFinding(AlertKind.OverQuota, null, null, "", null,
+                    $"{used} New uploads are refused until files are deleted (they count again after the next usage scan) or the quota is raised.",
+                    use.StorageBackendId, use.StorageBackendName)
+                : new AlertFinding(AlertKind.QuotaWarning, null, null, "", null,
+                    $"{used} Uploads will be refused once it is full.", use.StorageBackendId, use.StorageBackendName));
+        }
+    }
+
+    /// <summary>
+    /// A back-end whose last <paramref name="failuresBeforeAlert"/> (or more) connection tests failed is a
+    /// <see cref="AlertKind.StorageFailing"/> finding. Every back-end given is watched, so one that works again resolves it.
+    /// </summary>
+    public static void ScanStorage(IEnumerable<StorageBackend> backends, int failuresBeforeAlert, AlertScan scan)
+    {
+        foreach (var backend in backends)
+        {
+            scan.Watched.Add(SubjectOf(AlertKind.StorageFailing, null, null, backend.Id));
+            if (backend.LastCheckOk != false || backend.CheckFailures < Math.Max(1, failuresBeforeAlert)) continue;
+            var tests = backend.CheckFailures == 1 ? "The connection test" : $"{backend.CheckFailures} connection tests in a row";
+            scan.Findings.Add(new AlertFinding(AlertKind.StorageFailing, null, null, "", null,
+                $"{tests} failed{(backend.LastCheckedAt is { } at ? $" (the last on {Format(at)})" : "")}: {backend.LastCheckError ?? "no details"}",
+                backend.Id, backend.Name));
+        }
+    }
 
     /// <param name="folders">One person's folders, with <c>Devices</c> and each membership's <c>Device</c> loaded.</param>
     /// <param name="openSubjects">Subjects with an open incident.</param>
@@ -140,12 +192,13 @@ public static class IncidentTracker
             if (bySubject.TryGetValue(finding.Subject, out var incident))
             {
                 if (incident.Kind != finding.Kind || incident.Detail != finding.Detail || incident.FolderName != finding.FolderName
-                    || incident.DeviceName != finding.DeviceName)
+                    || incident.DeviceName != finding.DeviceName || incident.StorageBackendName != finding.StorageBackendName)
                 {
                     incident.Kind = finding.Kind;
                     incident.Detail = finding.Detail;
                     incident.FolderName = finding.FolderName;
                     incident.DeviceName = finding.DeviceName;
+                    incident.StorageBackendName = finding.StorageBackendName;
                     incident.UpdatedAt = now;
                     changes.Updated.Add(incident);
                 }
@@ -155,6 +208,7 @@ public static class IncidentTracker
             {
                 UserId = userId, FolderId = finding.FolderId, DeviceId = finding.DeviceId, Kind = finding.Kind,
                 FolderName = finding.FolderName, DeviceName = finding.DeviceName, Detail = Trim(finding.Detail),
+                StorageBackendId = finding.StorageBackendId, StorageBackendName = finding.StorageBackendName,
                 OpenedAt = now, UpdatedAt = now,
             });
         }

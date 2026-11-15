@@ -176,6 +176,9 @@ export interface AdminUser {
   hasPassword: boolean
   hasOidc: boolean
   createdAt: string
+  /** The most they may store over all their folders (null = no limit), and what they use (last count + uploads since). */
+  quotaBytes: number | null
+  usedBytes: number
 }
 
 export const getUsers = () => api.get<AdminUser[]>('/users').then(r => r.data)
@@ -183,6 +186,7 @@ export const createUser = (username: string, password: string, isAdmin: boolean)
   api.post<AdminUser>('/users', { username, password, isAdmin }).then(r => r.data)
 export const setUserPassword = (id: number, newPassword: string) => api.put(`/users/${id}/password`, { newPassword })
 export const setUserRole = (id: number, isAdmin: boolean) => api.put<AdminUser>(`/users/${id}/role`, { isAdmin }).then(r => r.data)
+export const setUserQuota = (id: number, quotaBytes: number | null) => api.put<AdminUser>(`/users/${id}/quota`, { quotaBytes }).then(r => r.data)
 
 /** What deleting a user removes, for the confirmation. */
 export interface UserDeletionPreview {
@@ -251,6 +255,13 @@ export interface StorageBackend {
   lastCheckedAt: string | null
   lastCheckOk: boolean | null
   lastCheckError: string | null
+  /** Failed connection tests in a row (the server tests every back-end hourly, and sooner after a failure). */
+  checkFailures: number
+  /** Shared back-ends: how much each user may keep there (null = no limit of its own). */
+  userQuotaBytes: number | null
+  /** What your folders use on it; `totalUsedBytes`: everyone's (admins only). */
+  usedBytes: number
+  totalUsedBytes: number | null
 }
 
 export interface StorageOptions { localRoots: string[]; canCreateLocal: boolean; canCreateShared: boolean }
@@ -267,6 +278,8 @@ export const deleteStorageBackend = (id: number) => api.delete(`/storage-backend
 export const testStorageSettings = (settings: StorageSettings, backendId?: number) =>
   api.post<StorageTestResult>('/storage-backends/test', { settings, backendId }).then(r => r.data)
 export const testStorageBackend = (id: number) => api.post<StorageTestResult>(`/storage-backends/${id}/test`).then(r => r.data)
+export const setStorageQuota = (id: number, quotaBytes: number | null) =>
+  api.put<StorageBackend>(`/storage-backends/${id}/quota`, { quotaBytes }).then(r => r.data)
 
 // ── Folders ───────────────────────────────────────────────────────────────────
 
@@ -328,7 +341,60 @@ export interface Folder {
   recoveryKeyCreatedAt: string | null
   /** Only in the answer that created the folder: its recovery key, shown once. */
   recoveryKey?: string | null
+  /** What it takes on its storage, as last counted (null = not counted yet). */
+  usage: FolderUsage | null
 }
+
+/**
+ * A folder's size on its storage from the last usage scan, plus uploads accepted since (`pendingBytes`). Plain folders:
+ * `historyBytes` of it is versions, trash and unfinished uploads. Standard-encryption Backup folders: `dataBytes` is the
+ * deduplicated content, `snapshots` how many there are.
+ */
+export interface FolderUsage {
+  folderId: number
+  bytes: number
+  files: number
+  historyBytes: number | null
+  dataBytes: number | null
+  snapshots: number | null
+  pendingBytes: number
+  scannedAt: string | null
+  scanError: string | null
+}
+
+export type QuotaState = 'Ok' | 'Warning' | 'Over'
+
+export interface QuotaStatus {
+  usedBytes: number
+  quotaBytes: number | null
+  percent: number | null
+  state: QuotaState
+}
+
+export interface BackendUsage {
+  storageBackendId: number
+  name: string
+  shared: boolean
+  folders: number
+  quota: QuotaStatus
+  totalUsedBytes: number | null
+}
+
+export interface Usage {
+  total: QuotaStatus
+  backends: BackendUsage[]
+  folders: FolderUsage[]
+  /** The oldest folder count (null when a folder was never counted). */
+  lastScanAt: string | null
+  nextScanAt: string | null
+  scanQueued: boolean
+  warnPercent: number
+  scanIntervalHours: number
+}
+
+export const getUsage = () => api.get<Usage>('/usage').then(r => r.data)
+/** Counts your folders again now (admins: everyone's with `all`); `usage.changed` follows when done. */
+export const requestUsageScan = (all = false) => api.post(`/usage/scan${all ? '?all=true' : ''}`)
 
 /** A new recovery key, shown once, and where the repository is on the folder's storage (for an offline restore). */
 export interface RecoveryKey {
@@ -484,7 +550,7 @@ export async function downloadPlain(folderId: number, source: PlainSource, path:
 
 // ── Alerts ────────────────────────────────────────────────────────────────────
 
-export type AlertKind = 'Overdue' | 'Failing' | 'CheckFailed' | 'PruneFailed'
+export type AlertKind = 'Overdue' | 'Failing' | 'CheckFailed' | 'PruneFailed' | 'QuotaWarning' | 'OverQuota' | 'StorageFailing'
 export type AlertChannelType = 'Webhook' | 'Ntfy' | 'Email'
 
 export type AlertChannelSettings = { type: AlertChannelType } & Record<string, string | null | undefined>
@@ -526,8 +592,11 @@ export type SaveAlertSettings = Pick<AlertSettings, 'graceFactor' | 'minimumGrac
 export interface AlertIncident {
   id: number
   kind: AlertKind
-  folderId: number
+  /** Null (and `folderName` empty) for quota and storage problems. */
+  folderId: number | null
   folderName: string
+  storageBackendId: number | null
+  storageBackendName: string | null
   deviceId: string | null
   deviceName: string | null
   detail: string

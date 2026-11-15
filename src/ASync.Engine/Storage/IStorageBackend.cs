@@ -49,6 +49,9 @@ public record StorageEntry(string Path, bool IsDirectory, long Size, DateTimeOff
     public string Name => Path[(Path.LastIndexOf('/') + 1)..];
 }
 
+/// <summary>The storage refused a write because its owner is over a quota (the message says how much is used).</summary>
+public class StorageQuotaExceededException(string message) : IOException(message);
+
 public class StorageNotFoundException(string path) : IOException($"'{path}' does not exist.")
 {
     public string Path { get; } = path;

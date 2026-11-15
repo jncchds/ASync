@@ -27,7 +27,7 @@ public record FolderDto(
     int PruneIntervalDays = MaintenanceDefaults.PruneIntervalDays, int CheckIntervalDays = MaintenanceDefaults.CheckIntervalDays,
     int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent,
     MaintenanceStatusDto? LastPrune = null, MaintenanceStatusDto? LastCheck = null,
-    DateTime? RecoveryKeyCreatedAt = null, string? RecoveryKey = null);
+    DateTime? RecoveryKeyCreatedAt = null, string? RecoveryKey = null, FolderUsageDto? Usage = null);
 
 /// <summary>Defaults of a Backup folder's housekeeping schedule (days between runs; 0 = off).</summary>
 public static class MaintenanceDefaults
@@ -139,6 +139,8 @@ public static class SyncEvents
     public const string AlertsChanged = "alerts.changed";
     /// <summary>Args: purge job id. A purge of deleted folder data started, progressed or finished (for web UIs).</summary>
     public const string PurgeChanged = "purge.changed";
+    /// <summary>No args. A usage scan of the person's folders finished: fetch <c>GET /api/usage</c> (and folders) again.</summary>
+    public const string UsageChanged = "usage.changed";
 }
 
 // ── Purging a deleted folder's stored data ───────────────────────────────────

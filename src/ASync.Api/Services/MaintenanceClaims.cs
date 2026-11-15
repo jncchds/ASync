@@ -35,6 +35,10 @@ public class MaintenanceClaims(TimeProvider clock)
         }
     }
 
+    /// <summary>True while the device holds the job (the gateway lets a pruning device repack over its quota).</summary>
+    public bool Holds(int folderId, MaintenanceKind kind, Guid deviceId) =>
+        _claims.TryGetValue((folderId, kind), out var current) && current.DeviceId == deviceId && current.ExpiresAt > Now;
+
     public void Release(int folderId, MaintenanceKind kind, Guid deviceId)
     {
         if (_claims.TryGetValue((folderId, kind), out var current) && current.DeviceId == deviceId)

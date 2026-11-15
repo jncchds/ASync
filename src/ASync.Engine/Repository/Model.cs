@@ -87,3 +87,6 @@ public sealed record LockFile(bool Exclusive, string Owner, DateTimeOffset Creat
 [JsonSerializable(typeof(Snapshot))]
 [JsonSerializable(typeof(LockFile))]
 internal partial class EngineJson : JsonSerializerContext;
+
+/// <summary>What a repository's index lists: packs and their stored size, distinct blobs and their size before compression.</summary>
+public sealed record RepositoryStats(int Packs, long PackBytes, int Blobs, long DataBytes);

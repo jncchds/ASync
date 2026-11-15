@@ -31,3 +31,19 @@ services:
   samba:
     image: dperson/samba:latest
     command: -u "test;test" -s "share;/share;yes;no;no;test" -p
+
+  # PostgreSQL for the API-level tests (src/ASync.Tests/Api): each test class makes and drops a database of its own.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: async
+      POSTGRES_PASSWORD: async
+    tmpfs:
+      - /var/lib/postgresql/data
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U async"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

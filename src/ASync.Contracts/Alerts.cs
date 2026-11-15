@@ -13,6 +13,12 @@ public enum AlertKind
     CheckFailed,
     /// <summary>A Backup folder's last prune failed.</summary>
     PruneFailed,
+    /// <summary>A person's storage use passed the warning threshold of their quota (<c>Quotas:WarnPercent</c>).</summary>
+    QuotaWarning,
+    /// <summary>A person is over their quota: new uploads are refused.</summary>
+    OverQuota,
+    /// <summary>A storage back-end fails its periodic health check.</summary>
+    StorageFailing,
 }
 
 public enum AlertChannelType { Webhook, Ntfy, Email }
@@ -95,9 +101,14 @@ public record AlertSettingsDto(
     double? GraceFactor, double? MinimumGraceHours, int? FailureThreshold, int? ReminderHours, AlertDefaultsDto Defaults,
     bool EmailAvailable, string PushMode);
 
+/// <summary>
+/// <paramref name="FolderId"/> is null for problems that are not about one folder (quota, storage); then
+/// <paramref name="FolderName"/> is empty. <paramref name="StorageBackendId"/>/<paramref name="StorageBackendName"/>: the
+/// back-end of a <see cref="AlertKind.StorageFailing"/> incident, or of a quota of one shared back-end.
+/// </summary>
 public record AlertIncidentDto(
-    int Id, AlertKind Kind, int FolderId, string FolderName, Guid? DeviceId, string? DeviceName, string Detail,
-    DateTime OpenedAt, DateTime? ResolvedAt, DateTime? NotifiedAt);
+    int Id, AlertKind Kind, int? FolderId, string FolderName, Guid? DeviceId, string? DeviceName, string Detail,
+    DateTime OpenedAt, DateTime? ResolvedAt, DateTime? NotifiedAt, int? StorageBackendId = null, string? StorageBackendName = null);
 
 // ── What webhooks receive ─────────────────────────────────────────────────────
 
@@ -111,6 +122,11 @@ public record AlertPayload(
     int Version, string Event, string Title, string Text, string? Server, string User, DateTime SentAt, bool Reminder,
     AlertPayloadIncident[] Opened, AlertPayloadIncident[] Resolved, AlertPayloadIncident[] Open);
 
-/// <summary><paramref name="Kind"/>: <c>overdue</c>, <c>failing</c>, <c>checkFailed</c> or <c>pruneFailed</c>.</summary>
+/// <summary>
+/// <paramref name="Kind"/>: <c>overdue</c>, <c>failing</c>, <c>checkFailed</c>, <c>pruneFailed</c>, <c>quotaWarning</c>,
+/// <c>overQuota</c> or <c>storageFailing</c>. <paramref name="FolderId"/> is null (and <paramref name="FolderName"/> empty)
+/// for the last three.
+/// </summary>
 public record AlertPayloadIncident(
-    int Id, string Kind, int FolderId, string FolderName, Guid? DeviceId, string? DeviceName, string Detail, DateTime OpenedAt, DateTime? ResolvedAt);
+    int Id, string Kind, int? FolderId, string FolderName, Guid? DeviceId, string? DeviceName, string Detail, DateTime OpenedAt, DateTime? ResolvedAt,
+    int? StorageBackendId = null, string? StorageBackendName = null);

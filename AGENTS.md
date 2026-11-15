@@ -93,7 +93,9 @@ Implemented (M0):
 Implemented (M1):
 
 - **StorageBackend**: UserId (null = shared), Name, Type, ProtectedSettings (Data Protection, purpose
-  `ASync.StorageBackend.Settings.v1`), CreatedAt, UpdatedAt, LastCheckedAt, LastCheckOk, LastCheckError.
+  `ASync.StorageBackend.Settings.v1`), CreatedAt, UpdatedAt, LastCheckedAt, LastCheckOk, LastCheckError, and (gap
+  item 7) CheckFailures (failed connection tests in a row, periodic or manual; 0 after a success or an edit) and
+  UserQuotaBytes (shared back-ends only: the most each user may keep on it; null = no limit of its own).
 
 Implemented (M2), both in `src/ASync.Core/Models/Folder.cs`:
 
@@ -145,13 +147,22 @@ Implemented (gap item 6, large files), in `src/ASync.Core/Models/UploadSession.c
   (the last acknowledged part; idle sessions are aborted after `Uploads__AbandonAfterHours`).
 - **UploadSessionPart** (key SessionId + Number, cascade): Size, Sha256, Token (the S3 ETag), CreatedAt.
 
+Implemented (gap item 7, usage, quotas and health), see "Storage usage, quotas and health":
+
+- **FolderUsage** (key FolderId, cascade with the folder; `src/ASync.Core/Models/FolderUsage.cs`): Bytes, Files (the
+  last usage scan: everything under the folder's root), HistoryBytes (plain folders: the part under `.async/`),
+  DataBytes and Snapshots (standard-encryption Backup folders: distinct chunk content before compression, from the
+  index), PendingBytes (uploads the gateway accepted since the scan), ScannedAt (null = never counted), ScanError,
+  UpdatedAt. Used = Bytes + PendingBytes.
+- **AppUser.QuotaBytes**: the most the person may store over all their folders (null = no limit).
+- **AlertIncident**: FolderId is now nullable (quota and storage problems are not about one folder), plus
+  StorageBackendId (cascade with the back-end) and StorageBackendName.
+
 The server keeps no index of file contents: snapshots live in the repository on the back-end, and Mirror/TwoWay
 state lives in each device's `sync-state.json`.
 
 Planned (none of this exists yet):
 
-- **StorageBackend.Quota** and stored usage; periodic health checks (today `LastChecked*` is only set by a
-  manual connection test).
 - **FolderDevice**: metered-network and battery rules.
 - **Device.PushTarget**: relay token / APNs / FCM / UnifiedPush endpoint.
 
@@ -455,7 +466,8 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
   uploads (`uploads`, see "Large files" below).
 - **Errors:** a 404 with `X-Storage-Error: not-found` maps back to `StorageNotFoundException`, a 400 to
   `ArgumentException`, and a 502 to `IOException` (S3 service errors included). A 404 with
-  `X-Upload-Error: gone` means the upload session is unknown or expired.
+  `X-Upload-Error: gone` means the upload session is unknown or expired. A 507 with `X-Storage-Error: quota` is an
+  upload over the owner's quota (`StorageQuotaExceededException`, an `IOException`, with the server's message).
 - **Uploads:** files up to 32 MB (`RemoteStorageBackend.PartUploadThreshold`) go in one PUT, which the gateway
   buffers (in memory up to 32 MB, otherwise in a temp file) because S3 needs the length up front. A PUT needs a
   Content-Length and is refused above `Uploads__MaxSinglePutMB` (256) with a 413 that says to use parts, which
@@ -568,7 +580,15 @@ The same measurement afterwards: the server's temp disk stays empty (1 MiB) and,
 stored, the next sync sends only the missing 384 MB (11 s). An uninterrupted 1 GB upload takes longer than
 before (27 s against 14 s on that machine): parts go one after the other, and each is hashed on both sides and
 flushed to disk before it is acknowledged. Sending the next part while the server stores the previous one
-would win most of that back; it is not done yet.
+would win most of that back.
+
+Gap item 7 pipelines the parts (3 in flight, see below). Measured on the same machine afterwards, 1 GB TwoWay
+uploads to a Local back-end with the server in Docker, alternating builds on stacks running side by side (the host
+disk was 95% full and runs vary a lot, so medians): the sequential parts of v0.1.4 before this change 17.3 s (11.5–45.2
+over 6 runs; two runs stalled over 40 s), pipelined 12.8 s (8.8–18.3 over 6 runs, no stall); the single PUT from
+before resumable uploads 36 s (17.6–57.4 over 4 runs) against 18.2 s pipelined in the same session (16.6–85.6, one
+stall). On this host the server's disk (one flush per part) is the limit, so pipelining wins less than on a link with
+real latency, where it hides the round trip of every part.
 
 **Uploads in parts** (`UploadService`, `FolderStorageController`, `RemoteStorageBackend.WritePartsAsync`):
 - `POST storage/uploads {path, size, mtime}` starts an upload, or returns the device's unfinished one with the
@@ -579,6 +599,14 @@ would win most of that back; it is not done yet.
   = 4 parts at once, so 64 MB; nothing is written to the server's disk), checks its length and hash, writes it
   to the back-end (`IPartUploadBackend.WritePartAsync`) and only then records it. A part that fails is sent
   again (three tries); a part sent twice replaces the first.
+- **The client keeps up to 3 parts in flight** (`RemoteStorageBackend.MaxPartsInFlight`, gap item 7): parts are read
+  from the file in order, one buffer per part in flight (48 MB on the device), and the next one travels while the
+  server hashes, stores and flushes the previous. Each part is acknowledged on its own, so resuming is unchanged; when
+  a part fails for good no new part starts, the ones in flight finish (each stored part is one less next time) and
+  the failure is reported. The server's bound is unchanged: `Uploads__MaxParallelParts` (4) parts in memory at once
+  over all uploads; parts beyond that wait for a slot. Concurrent parts of one upload are safe on every back-end
+  (offset writes into one staging file opened for shared writing, S3 multipart, staged part files) and in the database
+  (each part is its own row).
 - `POST storage/uploads/{id}/complete`: with every part recorded, `CompletePartsAsync` puts the file in place at
   once (rename, or S3 CompleteMultipartUpload) and the session is deleted. `DELETE storage/uploads/{id}` abandons.
 - A session whose back-end was changed meanwhile, or that the back-end no longer knows, answers "gone"; the
@@ -609,7 +637,9 @@ chunked-upload API is not used). See "Storage back-ends".
 
 **Tests:** `UploadTests` (the real controller and service behind a fake HTTP handler that breaks off after N parts:
 only the missing parts are sent the second time; changed files start over; damaged and wrong-sized parts are
-refused; idle sessions are aborted on the back-end; a forgotten session starts once more), `DownloadResumeTests`,
+refused; idle sessions are aborted on the back-end; a forgotten session starts once more; parts go up to three at a
+time, and a pipelined upload that breaks off keeps every part that arrived; the quota cases of "Storage usage,
+quotas and health"), `DownloadResumeTests`,
 the conformance cases, and `scripts/e2e-sync.cs` (a TwoWay file of `ASYNC_E2E_LARGE_MB`, default 200, whose
 upload and download are each killed part-way and continued, ending byte-identical).
 
@@ -617,7 +647,7 @@ upload and download are each killed part-way and continued, ending byte-identica
 `complete` request, and an S3 move over 5 GiB copies on the S3 side inside the `move` request: both take a while
 for very large files, so a reverse proxy in front of the server needs a generous read timeout. A partial download
 is trusted by its length: after a power cut (not a killed process) its last bytes could be wrong, and such a file
-fails no check until it is opened. Parts go one at a time (no parallel uploads per file).
+fails no check until it is opened. Parallel files are not uploaded at once (one file at a time, up to 3 parts of it).
 
 ## Deleting folders and users
 
@@ -674,6 +704,70 @@ lists what goes, for the confirmation):
   them on the Users page). They work after the personal back-ends are gone (each job has its own copy of the
   protected settings) and wait — rather than being refused — for the revoked devices' leases (2 minutes) and
   locks (30 minutes) to run out. Overlap with a folder outside the account refuses the whole deletion (400).
+
+## Storage usage, quotas and health
+
+Gap item 7. Code: `Services/UsageService.cs` (+ `UsageOptions`, `UsageScanSignal`), `HostedServices/UsageScanner.cs`,
+`Services/StorageHealthService.cs` (+ `HealthOptions`), `HostedServices/StorageHealthScheduler.cs`,
+`Core/Alerts/QuotaRules.cs`, `Infrastructure/Repositories/UsageRepository.cs`, `Controllers/UsageController.cs`.
+
+**Counting usage** (never on a page load: listing a large folder on S3 or SFTP takes a while):
+- `UsageScanner` lists every folder's root on its back-end (`FolderBackendCache.OpenDedicatedAsync`, one folder at a
+  time) every `Usage__ScanIntervalHours` (6; the first pass `Usage__FirstScanSeconds` = 120 after start), and at once
+  when asked (`POST /api/usage/scan`: the person's folders; `?all=true` for admins: everyone's). Owners' pages get
+  `usage.changed` afterwards. `Usage__Enabled=false` turns scans off (usage then only grows with uploads).
+- Per folder it stores the total size and file count; for plain folders also the part under `.async/` (versions,
+  trash, unfinished uploads); for standard-encryption Backup folders also the deduplicated content (`Repository.StatsAsync`:
+  every distinct blob once, before compression, from the index files only, no pack is read) and the snapshot count.
+  End-to-end repositories cannot be read by the server: only their size on storage is known. A failed scan keeps the
+  previous counts and records the error.
+- **Between scans** every upload the gateway accepts is added to the folder's `PendingBytes` with one SQL upsert
+  (`AddPendingAsync`), so parallel uploads never lose counts: a plain PUT after it succeeded, a part upload when it
+  *starts* (its whole size; a resumed upload is neither checked nor counted again). A scan subtracts what was pending
+  when it started (it saw those files) and keeps what arrived while it ran.
+- **Accuracy:** usage = last scan + uploads since, so it errs on the high side and never on the low: deletions,
+  overwrites (the old version moves to `.async/versions` anyway) and abandoned part uploads count only from the next
+  scan, and an overwrite is counted twice until then. Writes that bypass the gateway (the server's own prunes and
+  checks, web-UI restores and trash emptying) are only seen by the next scan. A quota can therefore be overrun at most
+  by the uploads in flight at the moment it fills, never by more.
+- Totals: per person = the sum of their folders; per back-end = the folders on it (the caller's, and everyone's for
+  admins). They are summed when asked (`UsageRow`s), not stored.
+
+**Quotas** (`UsageService.CheckUploadAsync`, called by `FolderStorageController.Write` and `UploadService.StartAsync`):
+- `AppUser.QuotaBytes` (all their folders) and, on a shared back-end, `StorageBackend.UserQuotaBytes` (each user's
+  share of it; one user filling a shared disk cannot lock the others out). Set by admins: `PUT /api/users/{id}/quota`,
+  `PUT /api/storage-backends/{id}/quota` (shared only) with `{quotaBytes}` (null = none).
+- An upload that would take usage past either limit is refused with 507 + `X-Storage-Error: quota` and a message
+  saying how much is used. Devices map it to `StorageQuotaExceededException`: the run fails with that message (so
+  the device's Failing alert follows the usual rules), and `FolderSyncer` stops trying further uploads in that run
+  (`N file(s) not uploaded: over the storage quota.`) while downloads and deletions go on.
+- Never refused: reads, deletes, moves, restores (web UI and device), and in Backup folders everything but packs
+  (`data/`: snapshots, indexes, locks and keys are small, and refusing them would stop forget and prune, the way back
+  under). A device holding the folder's prune claim (`MaintenanceClaims.Holds`) may also write packs, because a prune
+  repacks before it deletes; `async-cli prune` by hand claims too (`POST maintenance/claim?manual=Prune`).
+  Transport folders are pruned by the server directly on the back-end, outside the gateway.
+- `QuotaRules` (pure): states Ok / Warning (from `Quotas__WarnPercent`, 90) / Over; what a write may add; which paths
+  count. Alerts: QuotaWarning and OverQuota (see "Overdue detection and alerts").
+- **Known gap:** a modified agent could claim a prune to write packs past its quota. Quotas guard against accidents
+  and fair sharing, not against a person's own hostile device.
+
+**Health checks** (`StorageHealthService`, run by `StorageHealthScheduler` every minute or `Health__RetryMinutes` if
+shorter; the first pass 30 s after start):
+- Each back-end's connection test (the Storage page's "Test": write, read, list, rename, delete under `.async-check/`)
+  runs every `Health__IntervalMinutes` (60), and `Health__RetryMinutes` (5) after a failure, so a blip is over before
+  anyone is told and a real outage is reported within minutes. A test that does not answer within
+  `Health__TimeoutSeconds` (60) fails. Results go to `LastCheckedAt`/`LastCheckOk`/`LastCheckError`/`CheckFailures`.
+- After `Health__FailuresBeforeAlert` (2) failures in a row the owner gets a StorageFailing incident (admins for
+  shared back-ends); the next working test resolves it. `Health__Enabled=false` turns the checks off.
+
+**API:** `GET /api/usage` (people: totals, per back-end, per folder, last and next scan), `POST /api/usage/scan`;
+`GET /api/folders` carries each folder's `usage`; `GET /api/storage-backends` carries `usedBytes` (the caller's),
+`totalUsedBytes` (admins), `userQuotaBytes` and `checkFailures`; `GET /api/users` carries `quotaBytes` and `usedBytes`.
+
+**Web UI:** a "Storage used" card (total against the quota with a meter, each shared back-end's limit, when it was
+counted, "Count again") on the Folders and Storage pages; each folder's size (with versions and trash, or the
+deduplicated data and snapshots); each back-end's use and health (tested automatically, failures in a row); a
+Storage column and a Quota button on the Users page, and a Quota button on shared back-ends for admins.
 
 ## Web UI style
 
@@ -953,11 +1047,17 @@ report, so it needs no push channel, no relay and nothing on the device.
   - **Failing:** the last run failed, and either `FailureThreshold` (3) runs in a row failed or the streak began
     longer than the grace ago. Failing wins over Overdue.
   - **CheckFailed / PruneFailed:** a Backup folder's last check or prune failed (results from "Prune and check").
+  - **QuotaWarning / OverQuota** (gap item 7): per limit (the person's own, and their share of each shared back-end
+    with a limit), from the stored usage: over it, or at `Quotas__WarnPercent` (90) of it. Separate subjects, so going
+    over is announced even after the warning; while over, an open warning closes quietly.
+  - **StorageFailing** (gap item 7): a back-end whose last `Health__FailuresBeforeAlert` (2) connection tests failed.
+    A person's own back-ends alert them; shared ones alert every admin. A working test resolves it ("works again").
   - Time before the server process started (`ServerStarted`) does not count towards a *new* Overdue incident:
     devices cannot sync while the server is down, so a restart must not raise a wave of alerts. Open incidents
     stay open.
 - **Incidents** (`IncidentTracker`): at most one open per subject: folder + device for Overdue/Failing (one can
-  turn into the other without a new alert), folder + kind for the others. A problem that is gone resolves the
+  turn into the other without a new alert), folder + kind for check and prune, the limit (`all` or a back-end) for
+  quota kinds, the back-end for StorageFailing. A problem that is gone resolves the
   incident. If its subject is no longer watched (device detached, paused or revoked, folder not a Backup any
   more), or it was never announced (it lasted less than a scan), it closes quietly.
 - **Messages** (`AlertDispatch`): at most one per person and scan, covering every folder: new problems,
@@ -1053,6 +1153,20 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
   - Image tags are `latest`, the `VERSION` value and `sha-…`.
   - Pushes to branches publish nothing. Pull requests run the tests and the end-to-end test, and a manual run
     (`workflow_dispatch`) builds the chosen ref.
+- **API-level tests** (`src/ASync.Tests/Api`, `[Trait("Category", "Api")]`): `WebApplicationFactory<Program>` runs the
+  real server (every controller, the auth pipeline, EF Core, migrations) against a database of its own on the
+  PostgreSQL of `docker-compose.test.yml` (`ASYNC_TEST_POSTGRES`, printed by `scripts/test-backends-env.sh`; dropped
+  afterwards; skipped without the variable, like the storage tests). A real PostgreSQL rather than an in-memory
+  provider because the usage upserts, constraints and queries are the production ones; the container is part of the
+  test stack CI already starts, so Testcontainers would add a dependency without adding coverage. Background jobs
+  are off, and so are the automatic 400s for invalid bodies, so each action's own ownership check is what answers.
+  `ApiSecurityTests` reads the routing table (`EndpointDataSource`), classifies every endpoint by its `[Authorize]`
+  roles (anonymous, any signed-in caller, people, admins, devices; an endpoint for both people and devices fails the
+  test) and checks: anonymous → 401 except the listed open endpoints; a device token → 403 on every people's
+  endpoint; a person's token → 403 on every device endpoint; a non-admin → 403 on admin endpoints; another person
+  (or their device) → 404 on every endpoint with an id of someone else's folder, back-end, device, code, channel,
+  purge, snapshot or upload. A new route parameter fails the test until it is mapped to another user's resource, a
+  new anonymous endpoint until it is listed. `ApiQuotaTests` covers quotas over HTTP.
 - **Windows x64/ARM64:** MSIX, or Velopack with auto-update, plus winget.
 - **macOS ARM64:** a signed and notarized dmg, with Velopack updates.
 - **Linux x64/ARM64:** AppImage, deb and rpm, with a systemd unit for the agent.
@@ -1070,7 +1184,7 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
 3. **M2 — sync over the CLI (done).** The sync protocol (storage gateway, leases, live events) and `async-cli`
    (enroll, Backup, Mirror, TwoWay, end-to-end encryption, restore), the `async-cli` Docker image, the
    end-to-end test in CI, and the web UI for folders and for browsing and downloading snapshots.
-   **← current stage; next is "Before M3: gaps to close" (items 1–6 are done).**
+   "Before M3: gaps to close" is done too (items 1–7). **← current stage; next is M3.**
 4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
    overdue devices.
@@ -1116,13 +1230,21 @@ app starts after them, because it would otherwise be built on the same holes.
    database, keyed by device, path, size and mtime); idle ones are aborted after a day. Downloads continue from
    their partial file. S3 moves over 5 GiB use a multipart copy; SFTP and SMB reads stream. The plain PUT stays
    for small files and is capped (`Uploads__MaxSinglePutMB`). See "Large files" under "Sync". Left open: WebDAV
-   and >5 GiB S3 moves do their long work inside one request (proxy timeouts); one part at a time per file, so an
-   uninterrupted upload is slower than the old single PUT (27 s against 14 s for 1 GB on a local server).
-7. **Quotas, usage, health and role tests.**
-   - No quotas and no storage-usage figures, per user, folder or back-end.
-   - No periodic back-end health checks: `LastCheckedAt`/`LastCheckOk` change only on a manual test.
-   - No API-level tests of role separation. The rule that a device token never reaches people's endpoints
-     is checked by the smoke scripts against a running server, not by `ASync.Tests` (which has no HTTP-level tests).
+   and >5 GiB S3 moves do their long work inside one request (proxy timeouts). (Parts went one at a time, slower
+   than the old single PUT; item 7 pipelines them.)
+7. **Quotas, usage, health and role tests. — Done.** Usage per folder (size and files on storage; versions and trash;
+   deduplicated data and snapshots of standard-encryption Backup folders), summed per person and back-end, counted by a
+   background scan and kept current between scans by counting accepted uploads; quotas per person and per user of a
+   shared back-end, enforced in the gateway (507, a failed sync, QuotaWarning/OverQuota alerts) without ever blocking
+   deletes, prunes, restores or reads; periodic connection tests of every back-end with StorageFailing alerts and
+   recovery; API-level tests (`src/ASync.Tests/Api`, the real server on PostgreSQL) that walk the routing table and
+   check role separation and ownership on every endpoint, which found two endpoints that did not check the folder
+   (lease renew and release) and one that validated before checking ownership (device rename). Part uploads are
+   pipelined again (3 parts in flight). See "Storage usage, quotas and health" and "Large files". Left open: deletions
+   count only after the next scan (usage errs high); a modified agent could use a prune claim to write past its
+   quota; no per-folder quota; no quota on the server's own temp space; parallel uploads of several files.
+
+The gap list is complete: **M3 (desktop app) is next.**
 
 Open questions:
 - Should there be a SQLite option for small installs?
@@ -1153,5 +1275,9 @@ Open questions:
   IP.
 - **Webhook bodies are buffered** (`ByteArrayContent`, not `JsonContent`): `JsonContent` streams with chunked
   transfer encoding, which some receivers (and the e2e test's tiny listener) do not read.
+- **Two `Program` types in the tests:** `ASync.Tests` references both the server and `async-cli`, so the server's
+  project reference has `Aliases="global,server"` and the API tests use `WebApplicationFactory<server::Program>`.
+- **Usage upserts** (`UsageRepository`) are raw SQL (`INSERT … ON CONFLICT DO UPDATE`) on purpose: pending bytes are
+  added by concurrent gateway requests, and an EF read-modify-write would lose some.
 - **SPA:** `vite build` writes to `src/ASync.Api/wwwroot` (gitignored). The Docker image builds the UI
   itself.

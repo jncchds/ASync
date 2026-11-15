@@ -15,7 +15,9 @@ public record OidcInfoDto(bool Enabled, string DisplayName);
 public record UpdateProfileRequest(string? DisplayName);
 
 // ── Admin: users ──────────────────────────────────────────────────────────────
-public record AdminUserDto(int Id, string Username, string DisplayName, bool IsAdmin, bool HasPassword, bool HasOidc, DateTime CreatedAt);
+/// <summary><paramref name="QuotaBytes"/>: null = no limit. <paramref name="UsedBytes"/>: as last counted plus uploads since (see <see cref="QuotaStatusDto"/>).</summary>
+public record AdminUserDto(int Id, string Username, string DisplayName, bool IsAdmin, bool HasPassword, bool HasOidc, DateTime CreatedAt,
+    long? QuotaBytes = null, long UsedBytes = 0);
 
 public record CreateUserRequest(string Username, string Password, bool IsAdmin = false);
 

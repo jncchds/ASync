@@ -50,6 +50,17 @@ services:
       # - Alerts__FailureThreshold=3            # failed runs in a row before a device counts as failing
       # - Alerts__ReminderHours=24              # repeat open problems this often (0 = never)
       # - Alerts__Enabled=true
+      # ── Storage usage, quotas and back-end health (README "Quotas and storage health") ──
+      # Admins set quotas on the Users page (and per user on shared back-ends). Usage is counted by listing every
+      # folder in the background this often; uploads accepted in between count at once.
+      - Usage__ScanIntervalHours=${ASYNC_USAGE_SCAN_HOURS:-6}
+      # - Quotas__WarnPercent=90                 # a quota warning (alert) from this share
+      # Every back-end's connection test runs this often, and again after RetryMinutes when it failed; the owner
+      # (admins, for shared back-ends) gets an alert after FailuresBeforeAlert failures in a row.
+      - Health__IntervalMinutes=${ASYNC_HEALTH_INTERVAL_MINUTES:-60}
+      - Health__RetryMinutes=${ASYNC_HEALTH_RETRY_MINUTES:-5}
+      # - Health__FailuresBeforeAlert=2
+      # - Health__Enabled=true
       # E-mail alerts (optional): the server's SMTP account. Port 465 uses TLS on connect, others STARTTLS.
       # - Smtp__Host=smtp.example.com
       # - Smtp__Port=587

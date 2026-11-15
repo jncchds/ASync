@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 dotnet build ASync.slnx
 dotnet test src/ASync.Tests/ASync.Tests.csproj
 
-# Remote storage back-end tests (skipped without the ASYNC_TEST_* variables):
+# Remote storage back-end tests and the API-level tests on PostgreSQL (skipped without the ASYNC_TEST_* variables):
 docker compose -f docker-compose.test.yml -p async-test up -d
 eval "$(scripts/test-backends-env.sh)" && dotnet test src/ASync.Tests/ASync.Tests.csproj
 ```

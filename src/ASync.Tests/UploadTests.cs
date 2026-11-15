@@ -39,10 +39,13 @@ internal sealed class FakeUploadSessions(Func<int, Folder?> folders) : IUploadSe
 
     public Task SavePartAsync(UploadSessionPart part, DateTime now)
     {
-        var session = Sessions.Single(s => s.Id == part.SessionId);
-        session.Parts.RemoveAll(p => p.Number == part.Number);
-        session.Parts.Add(part);
-        session.UpdatedAt = now;
+        lock (Sessions) // parts of one upload arrive in parallel
+        {
+            var session = Sessions.Single(s => s.Id == part.SessionId);
+            session.Parts.RemoveAll(p => p.Number == part.Number);
+            session.Parts.Add(part);
+            session.UpdatedAt = now;
+        }
         return Task.CompletedTask;
     }
 
@@ -80,6 +83,12 @@ public class UploadTests : IAsyncLifetime
     private UploadService _uploads = null!;
     private Folder _folder = null!;
     private Gateway _gateway = null!;
+    private readonly FakeUserRepository _users = new();
+    private FakeUsageRepository _usage = null!;
+    private UsageService _usageService = null!;
+    private readonly MaintenanceClaims _claims;
+
+    public UploadTests() => _claims = new MaintenanceClaims(_clock);
 
     private string Root => Path.Combine(_storage.Path, "big");
 
@@ -110,7 +119,11 @@ public class UploadTests : IAsyncLifetime
         _folders.Folders.Add(_folder);
         _sessions = new FakeUploadSessions(id => id == _folder.Id ? _folder : null);
         _limits = new UploadLimits(config);
-        _uploads = new UploadService(_sessions, _limits, _cache, _clock, NullLogger<UploadService>.Instance);
+        _users.Add("me");
+        _usage = new FakeUsageRepository(_folders);
+        _usageService = new UsageService(_usage, _users, _folders, _services.GetRequiredService<IStorageBackendRepository>(), _cache, null!, _claims,
+            new UsageOptions(config), new UsageScanSignal(), _clock, NullLogger<UsageService>.Instance);
+        _uploads = new UploadService(_sessions, _limits, _cache, _clock, NullLogger<UploadService>.Instance, _usageService);
         _gateway = new Gateway(this);
     }
 
@@ -158,7 +171,7 @@ public class UploadTests : IAsyncLifetime
         await using (var source = new GeneratedStream(size, seed: 1))
         await using (var file = await Seekable(source))
             await new PlainStore(second).PutAsync("videos/film.mkv", file, mtime, uploadKey: "abc123");
-        Assert.Equal([4, 5, 6, 7, 8, 9], _gateway.PartsReceived);
+        Assert.Equal([4, 5, 6, 7, 8, 9], _gateway.PartsReceived.Order()); // sent up to three at a time
         Assert.Equal(1, second.UploadsResumed);
         Assert.Equal(4L * PartSize, second.BytesResumed);
         Assert.Equal(size - 4L * PartSize, second.BytesSent);
@@ -266,6 +279,187 @@ public class UploadTests : IAsyncLifetime
         Assert.DoesNotContain(_sessions.Sessions, x => x.Id == old.Id);
     }
 
+    [Fact]
+    public async Task Parts_AreSentUpToThreeAtATime_AndTheFileIsComplete()
+    {
+        _gateway.PartDelay = TimeSpan.FromMilliseconds(60);
+        const int size = 8 * PartSize + 777;
+        var data = TestData.Random(size, seed: 11);
+        var client = Client();
+        var acknowledged = new List<long>();
+        client.PartUploaded = (_, stored, _) => { lock (acknowledged) acknowledged.Add(stored); };
+        await client.WriteAsync("pipelined.bin", new MemoryStream(data));
+
+        Assert.Equal(data, await File.ReadAllBytesAsync(Path.Combine(Root, "pipelined.bin")));
+        Assert.InRange(_gateway.MaxInFlight, 2, 3);
+        Assert.Equal(Enumerable.Range(0, 9), _gateway.PartsReceived.Order());
+        Assert.Equal(size, acknowledged.Max());
+        Assert.Equal(9, acknowledged.Count);
+    }
+
+    [Fact]
+    public async Task APipelinedUpload_ThatBreaksOff_KeepsEveryPartThatArrived_AndResumes()
+    {
+        _gateway.PartDelay = TimeSpan.FromMilliseconds(30);
+        _gateway.BreakAfterParts = 5;
+        const int size = 9 * PartSize;
+        var data = TestData.Random(size, seed: 12);
+        await Assert.ThrowsAnyAsync<HttpRequestException>(() => Client().WriteAsync("p.bin", new MemoryStream(data)));
+        // The parts in flight when the sixth failed were let finish: all five are stored.
+        Assert.Equal([0, 1, 2, 3, 4], Assert.Single(_sessions.Sessions).Parts.Select(p => p.Number).Order());
+
+        _gateway.BreakAfterParts = null;
+        _gateway.PartsReceived.Clear();
+        await Client().WriteAsync("p.bin", new MemoryStream(data));
+        Assert.Equal([5, 6, 7, 8], _gateway.PartsReceived.Order());
+        Assert.Equal(data, await File.ReadAllBytesAsync(Path.Combine(Root, "p.bin")));
+    }
+
+    // ── Quotas in the gateway ─────────────────────────────────────────────────
+
+    private const int MB = 1024 * 1024;
+
+    [Fact]
+    public async Task OverQuota_NewUploadsAreRefused_ButDeletesMovesAndReadsWork()
+    {
+        _users.Users[0].QuotaBytes = 10 * MB;
+        var client = Client();
+        await client.WriteAsync("a.bin", new MemoryStream(new byte[6 * MB]));
+        Assert.Equal(6 * MB, _usage.Rows[_folder.Id].PendingBytes);
+
+        var refused = await Assert.ThrowsAsync<StorageQuotaExceededException>(() => client.WriteAsync("b.bin", new MemoryStream(new byte[6 * MB])));
+        Assert.Contains("quota exceeded", refused.Message);
+        Assert.Contains("6 MB of 10 MB used", refused.Message);
+        Assert.False(File.Exists(Path.Combine(Root, "b.bin")));
+        // Large files are refused when they start, before any part is sent.
+        await Assert.ThrowsAsync<StorageQuotaExceededException>(() => client.WriteAsync("big.bin", new MemoryStream(new byte[33 * MB])));
+        Assert.Empty(_gateway.PartsReceived);
+        Assert.Empty(_sessions.Sessions);
+
+        await client.MoveAsync("a.bin", "moved.bin");
+        await using (var read = await client.OpenReadAsync("moved.bin"))
+        {
+            var copy = new MemoryStream();
+            await read.CopyToAsync(copy);
+            Assert.Equal(6 * MB, copy.Length);
+        }
+        await client.DeleteAsync("moved.bin");
+        Assert.False(File.Exists(Path.Combine(Root, "moved.bin")));
+        // Small files still fit.
+        await client.WriteAsync("note.txt", new MemoryStream("hi"u8.ToArray()));
+    }
+
+    [Fact]
+    public async Task AcceptedUploads_CountUntilTheNextScan_WhichSeesDeletions()
+    {
+        _users.Users[0].QuotaBytes = 10 * MB;
+        var client = Client();
+        await client.WriteAsync("one.bin", new MemoryStream(new byte[4 * MB]));
+        await client.WriteAsync("two.bin", new MemoryStream(new byte[4 * MB]));
+        await client.DeleteAsync("one.bin");
+        // Deleting does not count down by itself: usage errs on the high side until the folder is listed again.
+        await Assert.ThrowsAsync<StorageQuotaExceededException>(() => client.WriteAsync("three.bin", new MemoryStream(new byte[4 * MB])));
+
+        Assert.True(await _usageService.ScanFolderAsync(_folder, default));
+        var row = _usage.Rows[_folder.Id];
+        Assert.Equal((4L * MB, 1L, 0L), (row.Bytes, row.Files, row.PendingBytes));
+        Assert.Equal(0, row.HistoryBytes);
+        Assert.NotNull(row.ScannedAt);
+        await client.WriteAsync("three.bin", new MemoryStream(new byte[4 * MB]));
+        Assert.Equal(4 * MB, row.PendingBytes);
+
+        var usage = await _usageService.GetAsync(1, isAdmin: false);
+        Assert.Equal(new QuotaStatusDto(8 * MB, 10 * MB, 80, QuotaState.Ok), usage.Total);
+        Assert.Equal(row.ScannedAt, usage.LastScanAt);
+        _users.Users[0].QuotaBytes = 8 * MB + 1;
+        Assert.Equal(QuotaState.Warning, (await _usageService.GetAsync(1, false)).Total.State);
+    }
+
+    [Fact]
+    public async Task AScan_CountsVersionsAndTrashSeparately()
+    {
+        var store = new PlainStore(Client());
+        await store.PutAsync("doc.txt", new MemoryStream(new byte[1000]));
+        await store.PutAsync("doc.txt", new MemoryStream(new byte[2000])); // the first goes to the versions
+        await store.DeleteAsync("doc.txt"); // and the second to the trash
+        Assert.True(await _usageService.ScanFolderAsync(_folder, default));
+        var row = _usage.Rows[_folder.Id];
+        Assert.Equal(3000, row.HistoryBytes);
+        Assert.Equal(3000, row.Bytes);
+    }
+
+    [Fact]
+    public async Task AScan_KeepsUploadsThatArriveWhileItRuns()
+    {
+        await _usage.AddPendingAsync(_folder.Id, 100, _clock.GetUtcNow().UtcDateTime);
+        // The scan read 100 pending when it started; 50 more arrive before it stores its counts.
+        var pendingAtStart = _usage.Rows[_folder.Id].PendingBytes;
+        await _usage.AddPendingAsync(_folder.Id, 50, _clock.GetUtcNow().UtcDateTime);
+        await _usage.SaveScanAsync(_folder.Id, new FolderScanResult(1000, 3, 0, null, null), pendingAtStart, _clock.GetUtcNow().UtcDateTime);
+        Assert.Equal(1050, _usage.Rows[_folder.Id].Used);
+    }
+
+    [Fact]
+    public async Task AResumedUpload_IsNeitherRefusedNorCountedTwice()
+    {
+        _users.Users[0].QuotaBytes = 40 * MB;
+        _gateway.BreakAfterParts = 2;
+        var data = TestData.Random(35 * MB, seed: 13);
+        await Assert.ThrowsAnyAsync<HttpRequestException>(() => Client().WriteAsync("r.bin", new MemoryStream(data)));
+        Assert.Equal(35 * MB, _usage.Rows[_folder.Id].PendingBytes);
+        _gateway.BreakAfterParts = null;
+        await Client().WriteAsync("r.bin", new MemoryStream(data)); // 35 + 35 would be over 40: it is the same upload
+        Assert.Equal(35 * MB, _usage.Rows[_folder.Id].PendingBytes);
+    }
+
+    [Fact]
+    public async Task InABackupFolder_OnlyPacksAreHeldToTheQuota_AndAPruningDeviceMayRepack()
+    {
+        _folder.Mode = SyncMode.Backup;
+        _users.Users[0].QuotaBytes = 1 * MB;
+        await _usage.AddPendingAsync(_folder.Id, 2 * MB, _clock.GetUtcNow().UtcDateTime);
+        var client = Client();
+        foreach (var small in new[] { "locks/l1", "index/i1", "snapshots/s1", "keys/k1" })
+            await client.WriteAsync(small, new MemoryStream(new byte[1000]));
+        await Assert.ThrowsAsync<StorageQuotaExceededException>(() => client.WriteAsync("data/ab/pack1", new MemoryStream(new byte[1000])));
+
+        Assert.True(_claims.TryClaim(_folder.Id, MaintenanceKind.Prune, _device));
+        await client.WriteAsync("data/ab/pack2", new MemoryStream(new byte[1000]));
+        _claims.Release(_folder.Id, MaintenanceKind.Prune, _device);
+        await Assert.ThrowsAsync<StorageQuotaExceededException>(() => client.WriteAsync("data/ab/pack3", new MemoryStream(new byte[1000])));
+    }
+
+    [Fact]
+    public async Task ASharedBackEnd_HoldsEachUserToItsOwnLimit()
+    {
+        _folder.StorageBackend!.UserId = null; // shared
+        _folder.StorageBackend.UserQuotaBytes = 3 * MB;
+        var client = Client();
+        await client.WriteAsync("a.bin", new MemoryStream(new byte[2 * MB]));
+        var refused = await Assert.ThrowsAsync<StorageQuotaExceededException>(() => client.WriteAsync("b.bin", new MemoryStream(new byte[2 * MB])));
+        Assert.Contains("on \"disk\"", refused.Message);
+        // Another user's folder on the same back-end does not count against this one.
+        _folders.Folders.Add(new Folder { Id = 2, UserId = 2, StorageBackendId = _folder.StorageBackendId });
+        await _usage.AddPendingAsync(2, 50 * MB, _clock.GetUtcNow().UtcDateTime);
+        await client.WriteAsync("c.bin", new MemoryStream(new byte[1 * MB - 1]));
+    }
+
+    [Fact]
+    public async Task AFolderSync_OverQuota_StopsUploadingAndSaysWhy()
+    {
+        _users.Users[0].QuotaBytes = 1 * MB;
+        using var local = new TempDir();
+        using var state = new TempDir();
+        for (var i = 0; i < 5; i++) await File.WriteAllBytesAsync(Path.Combine(local.Path, $"f{i}.bin"), new byte[400 * 1024]);
+        var options = new SyncOptions { Mode = SyncMode.TwoWay, DeviceName = "laptop", RetryDelay = TimeSpan.Zero };
+        var result = await new FolderSyncer(Client(), local.Path, state.Path, options).RunAsync();
+        Assert.False(result.Ok);
+        Assert.Equal(2, result.Uploaded);
+        Assert.StartsWith("Storage quota exceeded", result.Errors[0]);
+        Assert.Equal("3 file(s) not uploaded: over the storage quota.", result.Errors[^1]);
+        Assert.Equal(2, result.Errors.Count);
+    }
+
     private static async Task<Stream> Seekable(Stream source)
     {
         var file = new FileStream(Path.GetTempFileName(), FileMode.Create, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose);
@@ -280,6 +474,10 @@ public class UploadTests : IAsyncLifetime
         public int? BreakAfterParts;
         public bool ForgetSessionBeforeNextPart;
         public readonly List<int> PartsReceived = [];
+        /// <summary>How long the "server" takes to store a part, and the most parts it had at once.</summary>
+        public TimeSpan PartDelay;
+        public int MaxInFlight;
+        private int _inFlight;
 
         public async Task<HttpResponseMessage> RawAsync(HttpMethod method, string relative, HttpContent? content) =>
             await SendAsync(new HttpRequestMessage(method, $"http://server/api/sync/folders/{t._folder.Id}/storage/{relative}") { Content = content },
@@ -298,15 +496,30 @@ public class UploadTests : IAsyncLifetime
 
             if (route is ["uploads", _, "parts", var n] && request.Method == HttpMethod.Put)
             {
-                if (BreakAfterParts is int limit && PartsReceived.Count >= limit) throw new HttpRequestException("Connection reset (test).");
-                if (ForgetSessionBeforeNextPart)
+                lock (PartsReceived)
                 {
-                    ForgetSessionBeforeNextPart = false;
-                    t._sessions.Sessions.Clear();
+                    if (BreakAfterParts is int limit && PartsReceived.Count >= limit) throw new HttpRequestException("Connection reset (test).");
+                    if (ForgetSessionBeforeNextPart)
+                    {
+                        ForgetSessionBeforeNextPart = false;
+                        t._sessions.Sessions.Clear();
+                    }
+                    PartsReceived.Add(int.Parse(n));
+                    MaxInFlight = Math.Max(MaxInFlight, ++_inFlight);
                 }
-                PartsReceived.Add(int.Parse(n));
+                try
+                {
+                    if (PartDelay > TimeSpan.Zero) await Task.Delay(PartDelay, ct);
+                    return await HandleAsync(request, route, query, ct);
+                }
+                finally { lock (PartsReceived) _inFlight--; }
             }
+            return await HandleAsync(request, route, query, ct);
+        }
 
+        private async Task<HttpResponseMessage> HandleAsync(HttpRequestMessage request, string[] route,
+            Dictionary<string, Microsoft.Extensions.Primitives.StringValues> query, CancellationToken ct)
+        {
             var http = new DefaultHttpContext
             {
                 User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(AuthClaims.DeviceId, t._device.ToString())], "test")),
@@ -315,7 +528,7 @@ public class UploadTests : IAsyncLifetime
             http.Request.Body = body;
             http.Request.ContentLength = request.Content is null ? null : body.Length;
             foreach (var h in request.Headers) http.Request.Headers[h.Key] = h.Value.ToArray();
-            var controller = new FolderStorageController(t._folders, t._cache, null!, t._uploads, t._limits)
+            var controller = new FolderStorageController(t._folders, t._cache, null!, t._uploads, t._limits, t._usageService)
             {
                 ControllerContext = new ControllerContext { HttpContext = http },
             };
@@ -325,6 +538,7 @@ public class UploadTests : IAsyncLifetime
                 (["stat"], "GET") => await controller.Stat(id, query["path"]!, ct),
                 (["list"], "GET") => await controller.List(id, query["dir"], query["recursive"] == "true", ct),
                 (["file"], "GET") => await controller.Read(id, query["path"]!, ct),
+                (["file"], "DELETE") => await controller.Delete(id, query["path"]!, ct),
                 (["file"], "PUT") => await controller.Write(id, query["path"]!, query.TryGetValue("mtime", out var m) ? long.Parse(m!) : null, ct),
                 (["move"], "POST") => await controller.Move(id, (await request.Content!.ReadFromJsonAsync<StorageMoveRequest>(AsyncApiClient.Json, ct))!, ct),
                 (["uploads"], "POST") => await controller.StartUpload(id, (await request.Content!.ReadFromJsonAsync<StartUploadRequest>(AsyncApiClient.Json, ct))!, ct),

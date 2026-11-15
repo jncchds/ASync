@@ -24,9 +24,12 @@ jobs:
       - name: Build (warnings are errors)
         run: dotnet build ASync.slnx --configuration Release -warnaserror
 
-      # Real S3 (SeaweedFS), SFTP, WebDAV and Samba servers for the storage back-end conformance tests.
-      - name: Start storage test servers
-        run: docker compose -f docker-compose.test.yml -p async-test up -d
+      # Real S3 (SeaweedFS), SFTP, WebDAV and Samba servers for the storage back-end conformance tests, and the
+      # PostgreSQL of the API-level tests (src/ASync.Tests/Api: role separation and ownership on every endpoint).
+      - name: Start test servers
+        run: |
+          docker compose -f docker-compose.test.yml -p async-test up -d
+          until docker exec async-test-postgres-1 pg_isready -U async; do sleep 1; done
 
       - name: Run tests
         run: |

@@ -32,7 +32,7 @@ public static class AlertMessages
     public static AlertMessage Test(string user, string? server, DateTime now)
     {
         const string title = "ASync: test alert";
-        var text = $"This is a test message from ASync for {user}. Alerts about overdue or failing devices arrive here.";
+        var text = $"This is a test message from ASync for {user}. Alerts about overdue or failing devices, storage quotas and storage health arrive here.";
         return new AlertMessage(title, text, new AlertPayload(PayloadVersion, "test", title, text, server, user, now, false, [], [], []), false,
             server is null ? null : $"{server.TrimEnd('/')}/alerts");
     }
@@ -52,23 +52,33 @@ public static class AlertMessages
     public static string Subject(AlertIncident i) =>
         i.DeviceName is null ? $"\"{i.FolderName}\"" : $"\"{i.FolderName}\" on {i.DeviceName}";
 
+    /// <summary>"Your storage quota" or "Your quota on "Shared S3"".</summary>
+    private static string Quota(AlertIncident i) => i.StorageBackendName is { } name ? $"Your quota on \"{name}\"" : "Your storage quota";
+
     public static string Problem(AlertIncident i) => i.Kind switch
     {
         AlertKind.Overdue => $"{Subject(i)} is overdue. {i.Detail}",
         AlertKind.Failing => $"{Subject(i)} is failing. {i.Detail}",
         AlertKind.CheckFailed => $"{Subject(i)}: integrity check failed. {i.Detail}",
-        _ => $"{Subject(i)}: freeing space failed. {i.Detail}",
+        AlertKind.PruneFailed => $"{Subject(i)}: freeing space failed. {i.Detail}",
+        AlertKind.QuotaWarning => $"{Quota(i)} is nearly full. {i.Detail}",
+        AlertKind.OverQuota => $"{Quota(i)} is full. {i.Detail}",
+        _ => $"Storage \"{i.StorageBackendName}\" is failing. {i.Detail}",
     };
 
     public static string Recovery(AlertIncident i) => i.Kind switch
     {
         AlertKind.Overdue or AlertKind.Failing => $"{Subject(i)} syncs again.",
         AlertKind.CheckFailed => $"{Subject(i)}: the integrity check passes again.",
-        _ => $"{Subject(i)}: freeing space works again.",
+        AlertKind.PruneFailed => $"{Subject(i)}: freeing space works again.",
+        AlertKind.QuotaWarning => $"{Quota(i)} is below the warning level again.",
+        AlertKind.OverQuota => $"{Quota(i)} has room again: uploads are accepted.",
+        _ => $"Storage \"{i.StorageBackendName}\" works again.",
     };
 
     public static AlertPayloadIncident ToPayload(AlertIncident i) =>
-        new(i.Id, KindName(i.Kind), i.FolderId, i.FolderName, i.DeviceId, i.DeviceName, i.Detail, i.OpenedAt, i.ResolvedAt);
+        new(i.Id, KindName(i.Kind), i.FolderId, i.FolderName, i.DeviceId, i.DeviceName, i.Detail, i.OpenedAt, i.ResolvedAt,
+            i.StorageBackendId, i.StorageBackendName);
 
     private static void Section(StringBuilder text, string heading, List<AlertIncident> items, Func<AlertIncident, string> line)
     {
