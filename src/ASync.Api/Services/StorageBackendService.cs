@@ -56,12 +56,14 @@ public class StorageBackendService(
 
     public static bool CanUse(StorageBackend backend, int userId) => backend.IsShared || backend.UserId == userId;
 
-    public StorageBackendDto ToDto(StorageBackend backend, int userId, bool isAdmin)
+    /// <param name="usedBytes">The caller's use of it; <paramref name="totalUsedBytes"/>: everyone's (admins only).</param>
+    public StorageBackendDto ToDto(StorageBackend backend, int userId, bool isAdmin, long usedBytes = 0, long? totalUsedBytes = null)
     {
         var settings = Settings(backend);
         return new StorageBackendDto(backend.Id, backend.Name, backend.Type, settings.WithoutSecrets(), settings.SetSecrets(),
             settings.Describe(), backend.IsShared, CanEdit(backend, userId, isAdmin), backend.CreatedAt, backend.LastCheckedAt,
-            backend.LastCheckOk, backend.LastCheckError);
+            backend.LastCheckOk, backend.LastCheckError, backend.CheckFailures, backend.IsShared ? backend.UserQuotaBytes : null, usedBytes,
+            isAdmin ? totalUsedBytes ?? 0 : null);
     }
 
     // ── Create, update, delete ────────────────────────────────────────────────
@@ -95,6 +97,7 @@ public class StorageBackendService(
         backend.LastCheckedAt = null;
         backend.LastCheckOk = null;
         backend.LastCheckError = null;
+        backend.CheckFailures = 0;
         await backends.UpdateAsync(backend);
         return ServiceResult<StorageBackend>.Ok(backend);
     }
@@ -167,6 +170,7 @@ public class StorageBackendService(
         backend.LastCheckedAt = Now;
         backend.LastCheckOk = result.Ok;
         backend.LastCheckError = result.Error is { Length: > 1000 } e ? e[..1000] : result.Error;
+        backend.CheckFailures = result.Ok ? 0 : backend.CheckFailures + 1;
         await backends.UpdateAsync(backend);
         return result;
     }

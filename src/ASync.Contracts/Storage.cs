@@ -106,10 +106,14 @@ public sealed record SmbStorageSettings(string Host, string Share, string? Path,
 /// <summary>
 /// A storage back-end as the API shows it. <paramref name="Shared"/> back-ends belong to no one user: an admin
 /// sets them up and every user can keep folders on them (each user under their own sub-directory).
+/// <paramref name="CheckFailures"/>: failed checks in a row (periodic and manual). <paramref name="UserQuotaBytes"/>: on a
+/// shared back-end, how much each user may keep there (null = no limit of its own). <paramref name="UsedBytes"/>: what the
+/// caller's folders use on it; <paramref name="TotalUsedBytes"/>: every user's together (admins only, else null).
 /// </summary>
 public record StorageBackendDto(
     int Id, string Name, StorageBackendType Type, StorageSettings Settings, string[] SecretsSet, string Description, bool Shared,
-    bool CanEdit, DateTime CreatedAt, DateTime? LastCheckedAt, bool? LastCheckOk, string? LastCheckError);
+    bool CanEdit, DateTime CreatedAt, DateTime? LastCheckedAt, bool? LastCheckOk, string? LastCheckError,
+    int CheckFailures = 0, long? UserQuotaBytes = null, long UsedBytes = 0, long? TotalUsedBytes = null);
 
 public record SaveStorageBackendRequest(string Name, StorageSettings Settings, bool Shared = false);
 

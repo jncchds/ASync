@@ -38,8 +38,15 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   MinIO…), WebDAV/Nextcloud, SFTP or SMB.
   - Admins can also add directories on the server itself and shared storage. Each user gets their own area
     on shared storage.
-  - Connections are tested before saving.
+  - Connections are tested before saving, and every hour after that: storage that stops answering gets you an
+    alert (admins, for shared storage), and another one when it works again.
   - Passwords and keys are stored encrypted and never shown again.
+- **Storage use and quotas:** *Folders* and *Storage* show how much your folders take on their storage, per folder
+  (with the part that is old versions and trash, or, for backups, how much data the snapshots hold after
+  deduplication) and per storage. Admins set a quota per user on *Users*, and on shared storage how much each
+  user may keep there. Near the quota (90%) you get an alert; over it, new uploads are refused, so devices report
+  a failed sync and you get an alert. Deleting, restoring and downloading always work. See
+  [Quotas and storage health](#quotas-and-storage-health).
 - **Folders in the web UI:** *Folders* lists what is synced or backed up, where it is stored, and how each
   device's last sync went. The list updates live as devices report.
   - Add and edit folders (Backup, Mirror or two-way), then attach devices with their local folder. Mirror
@@ -77,7 +84,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
     Mirror *Download* devices fetch the restored files. A Mirror *Upload* device makes the storage equal to its
     own folder, so it undoes a restore on its next run: the page warns about that.
 - **Alerts when something stops:** the server notices on its own when a device has not synced or backed up a
-  folder for too long, when its runs keep failing, or when a backup's verification or space freeing failed. It
+  folder for too long, when its runs keep failing, when a backup's verification or space freeing failed, when
+  storage stops answering, or when a quota is nearly or completely full. It
   tells you by [ntfy](https://ntfy.sh), a webhook or e-mail (see [Alerts](#alerts)): once per problem, again
   when it is fixed, and as a daily reminder while it lasts. The *Folders* page marks such devices *Overdue* or
   *Failing*, and the *Alerts* page lists the open problems. Nothing is needed on the devices, and no push
@@ -87,7 +95,9 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   [files and versions](docs/screenshots/light-11-files.png), [trash](docs/screenshots/dark-11-files-trash.png),
   [files on a phone](docs/screenshots/phone-04-files.png),
   [devices](docs/screenshots/light-06-add-device-qr.png), [storage](docs/screenshots/dark-08-storage.png),
-  [phone menu](docs/screenshots/phone-02b-sidebar-open.png).
+  [phone menu](docs/screenshots/phone-02b-sidebar-open.png), [storage use](docs/screenshots/light-12-folders-usage.png),
+  [storage health](docs/screenshots/dark-13-storage-health.png), [quotas](docs/screenshots/light-14-users-quotas.png),
+  [quota and storage alerts](docs/screenshots/phone-15-alerts-quota-storage.png).
 - **Sync engine** (used by the CLI agent today, and by the apps to come):
   - **Backups:** deduplicated, compressed, always encrypted snapshots, with retention rules. Old snapshots
     are dropped after each backup.
@@ -141,7 +151,14 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   thrown away after a day without progress. On S3 storage that ASync does not clean up itself, a bucket
   lifecycle rule "abort incomplete multipart uploads after N days" is a good safety net.
 
-The planned fixes are listed in [AGENTS.md](AGENTS.md) under "Before M3: gaps to close".
+- Usage counts deletions only after the next count (every 6 hours, or *Count again*), and an overwritten file
+  counts twice until then, so someone near their quota may be refused an upload a little early. Space used by the
+  server's own housekeeping (freeing space in standard-encryption backups) shows after the next count too.
+- Quotas are per person and per shared storage, not per folder. They protect against accidents and keep shared
+  storage fair; they are not a defence against a person's own tampered agent.
+- Folders are uploaded one file at a time (each large file in up to 3 parts at once).
+
+What comes next is listed in [AGENTS.md](AGENTS.md) under "Milestones and current stage" (the desktop app).
 
 ## Run it
 
@@ -171,6 +188,7 @@ Open http://localhost:5100 and create the admin account. Settings are environmen
 | `Alerts__FailureThreshold`, `Alerts__ReminderHours` | Failed runs in a row before a device counts as failing (default 3); how often open problems are repeated (default 24, 0 = never). Also per person. |
 | `Alerts__PollSeconds`, `Alerts__Enabled` | How often the server looks for problems (default 300); `false` turns alerts off. `Alerts__RetryMinutes` (15): wait after a message no channel took. |
 | `Smtp__Host`, `Smtp__Port`, `Smtp__Username`, `Smtp__Password`, `Smtp__From`, `Smtp__Security` | The mail account for e-mail alerts. Without `Smtp__Host` and `Smtp__From`, e-mail is not offered. Port 465 uses TLS on connect, others STARTTLS; `Smtp__Security=None` for a local relay. |
+| `Usage__ScanIntervalHours`, `Quotas__WarnPercent`, `Health__IntervalMinutes`, `Health__RetryMinutes`, `Health__FailuresBeforeAlert` | Usage counting, the quota warning and storage health checks (defaults 6, 90, 60, 5, 2): see [Quotas and storage health](#quotas-and-storage-health). |
 | `Push__Mode` | How the server wakes devices. Only `None` (the default) exists so far; alerts and every device's own schedule work without push. |
 
 To move a generated signing key into the environment:
@@ -201,6 +219,10 @@ The server checks every few minutes whether each device keeps up with each of it
   when it was attached, a resumed one from when it was resumed. Paused and removed devices are not watched.
 - **Failing:** the last 3 runs failed, or it has been failing for longer than the grace.
 - **Verification failed / freeing space failed** for a Backup folder.
+- **Nearly full / quota full:** your storage use reached 90% of your quota (or of your limit on a shared
+  storage), or went over it. See [Quotas and storage health](#quotas-and-storage-health).
+- **Storage failing:** the hourly connection test of one of your storages failed twice in a row (for shared
+  storage, admins are told).
 
 Each problem is announced once and again when it is fixed ("back to normal"); while problems stay open they are
 repeated once a day. One message covers all your folders. After a server restart, new *Overdue* alerts wait a
@@ -235,14 +257,48 @@ Tokens and headers are stored encrypted and never shown again. A webhook receive
 ```
 
 - `event` is `alert`, or `test` for *Send test* (with empty lists).
-- `kind` is `overdue`, `failing`, `checkFailed` or `pruneFailed`. `deviceId` and `deviceName` are null for
-  folder problems.
+- `kind` is `overdue`, `failing`, `checkFailed`, `pruneFailed`, `quotaWarning`, `overQuota` or `storageFailing`.
+  `deviceId` and `deviceName` are null for folder problems; `folderId` is null (and `folderName` empty) for the
+  last three, which carry `storageBackendId` and `storageBackendName` instead (for quotas: only a shared storage's
+  own limit; null for your overall quota).
 - `reminder` is true when the message only repeats what is still open.
 - `server` is `PublicUrl`, or null when that is not set (then messages carry no link).
 - Any 2xx answer counts as delivered. Redirects are not followed, and the server waits at most 10 seconds.
   When no channel takes a message, it is tried again after 15 minutes.
 
 ntfy gets the same title and text, with high priority for new problems.
+
+## Quotas and storage health
+
+**Usage** is counted by the server in the background: every 6 hours it lists each folder on its storage (that
+can take a while on large folders, so pages never wait for it). *Count again* on the *Folders* or *Storage* page
+asks for a count of your folders now. Between counts, every upload the server accepts is added at once, so a
+quota holds between counts. Deleted files count only from the next count: until then usage is shown on the high
+side, never the low. For a two-way or Mirror folder the size includes its old versions and trash (shown
+separately); emptying the trash frees that space too. For backups with standard encryption the page also shows
+how much data the snapshots hold after deduplication; end-to-end encrypted backups show only their size on the
+storage, because the server cannot read them.
+
+**Quotas** are set by admins: *Users → Quota* (in GB) limits everything a person stores, and on shared storage
+*Storage → Quota* limits how much each user may keep there. When an upload would go over a quota, the server
+refuses it: the device's sync fails with "Storage quota exceeded: … used", and you get an alert (at 90% you get a
+warning first). Nothing else stops: deleting files, freeing space in backups (a prune), restoring and downloading
+keep working. To get back under: delete files (and empty the trash of two-way and Mirror folders), let old
+snapshots expire and be pruned, or ask for a larger quota; then *Count again*.
+
+**Health checks:** the server runs each storage's connection test every hour (the same test as the *Test* button),
+and again after 5 minutes when it failed. After two failures in a row the owner gets a *Storage failing* alert
+(admins, for shared storage), and a *back to normal* message when it works again.
+
+Settings (environment variables of the server):
+
+| Setting | Default | |
+|---|---|---|
+| `Usage__ScanIntervalHours` | `6` | How often every folder is counted. `Usage__Enabled=false` turns counting off |
+| `Quotas__WarnPercent` | `90` | The share of a quota that raises a warning |
+| `Health__IntervalMinutes` | `60` | How often each storage is tested |
+| `Health__RetryMinutes` | `5` | How soon a failed test is repeated |
+| `Health__FailuresBeforeAlert` | `2` | Failed tests in a row before the alert. `Health__Enabled=false` turns the checks off |
 
 ## Run an agent
 
@@ -330,4 +386,6 @@ The `type` is `S3`, `WebDav` (`url`, `username`, `password`), `Sftp` (`host`, `p
 ## Development
 
 See [CLAUDE.md](CLAUDE.md) for commands and rules, and [AGENTS.md](AGENTS.md) for the architecture.
+The tests include API-level checks of every endpoint (who may call it, and that nobody reaches someone else's
+data); they need the PostgreSQL of `docker-compose.test.yml` and are skipped without it.
 `scripts/e2e-sync.sh` runs the end-to-end sync test: a throw-away server stack on port 5190 and real agents.

@@ -336,6 +336,9 @@ async Task<int> MaintainAsync(CliContext ctx, ParseResult p, MaintenanceKind kin
     foreach (var folder in folders)
     {
         Console.WriteLine($"{folder.Name}…");
+        // Claimed so the server knows this device is pruning: over a quota, it may still write the repacked data.
+        try { await ctx.Api.ClaimMaintenanceAsync(folder.FolderId, ct, manual: kind); }
+        catch (Exception e) when (e is ApiException or HttpRequestException) { /* older server: run anyway */ }
         var outcome = await agent.RunMaintenanceAsync(folder, kind, readData, ct);
         if (!outcome.Ok) failed++;
         if (outcome.Busy)

@@ -25,7 +25,23 @@ public class UsersController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<AdminUserDto>>> GetAll() => (await _users.GetAllAsync()).Select(ToDto).ToList();
+    public async Task<ActionResult<List<AdminUserDto>>> GetAll([FromServices] UsageService usage)
+    {
+        var used = await usage.UsedByUserAsync();
+        return (await _users.GetAllAsync()).Select(u => ToDto(u) with { UsedBytes = used.GetValueOrDefault(u.Id) }).ToList();
+    }
+
+    /// <summary>The most the user may store over all their folders (null = no limit). Takes effect on their next upload.</summary>
+    [HttpPut("{id:int}/quota")]
+    public async Task<ActionResult<AdminUserDto>> SetQuota(int id, [FromBody] SetQuotaRequest req)
+    {
+        if (req.QuotaBytes is < 0) return BadRequest(new { message = "A quota cannot be negative." });
+        var user = await _users.GetByIdAsync(id);
+        if (user is null) return NotFound();
+        user.QuotaBytes = req.QuotaBytes;
+        await _users.UpdateAsync(user);
+        return ToDto(user);
+    }
 
     [HttpPost]
     public async Task<ActionResult<AdminUserDto>> Create([FromBody] CreateUserRequest req)
@@ -95,5 +111,5 @@ public class UsersController : ControllerBase
     internal static string? ValidatePassword(string? password) => AccountRules.ValidatePassword(password);
 
     private static AdminUserDto ToDto(AppUser u) =>
-        new(u.Id, u.Username, u.DisplayName ?? u.Username, u.IsAdmin, u.PasswordHash is not null, u.OidcSubject is not null, u.CreatedAt);
+        new(u.Id, u.Username, u.DisplayName ?? u.Username, u.IsAdmin, u.PasswordHash is not null, u.OidcSubject is not null, u.CreatedAt, u.QuotaBytes);
 }

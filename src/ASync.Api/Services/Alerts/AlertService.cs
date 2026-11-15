@@ -176,7 +176,8 @@ public class AlertService(
     // ── Incidents ─────────────────────────────────────────────────────────────
 
     public static AlertIncidentDto ToDto(AlertIncident i) =>
-        new(i.Id, i.Kind, i.FolderId, i.FolderName, i.DeviceId, i.DeviceName, i.Detail, i.OpenedAt, i.ResolvedAt, i.NotifiedAt);
+        new(i.Id, i.Kind, i.FolderId, i.FolderName, i.DeviceId, i.DeviceName, i.Detail, i.OpenedAt, i.ResolvedAt, i.NotifiedAt,
+            i.StorageBackendId, i.StorageBackendName);
 }
 
 /// <summary>

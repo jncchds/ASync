@@ -173,8 +173,10 @@ public sealed class AsyncApiClient : IDisposable
         SendAsync(HttpMethod.Post, $"api/sync/folders/{folderId}/repository-ready", null, ct);
 
     /// <summary>Which prune or check the server wants this device to run now (end-to-end folders).</summary>
-    public Task<MaintenanceClaimDto> ClaimMaintenanceAsync(int folderId, CancellationToken ct = default) =>
-        SendAsync<MaintenanceClaimDto>(HttpMethod.Post, $"api/sync/folders/{folderId}/maintenance/claim", null, true, ct);
+    /// <param name="manual">Claim this job for a run by hand (due or not); the report releases it.</param>
+    public Task<MaintenanceClaimDto> ClaimMaintenanceAsync(int folderId, CancellationToken ct = default, MaintenanceKind? manual = null) =>
+        SendAsync<MaintenanceClaimDto>(HttpMethod.Post,
+            $"api/sync/folders/{folderId}/maintenance/claim{(manual is { } kind ? $"?manual={kind}" : "")}", null, true, ct);
 
     public Task ReportMaintenanceAsync(int folderId, MaintenanceReportRequest report, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Post, $"api/sync/folders/{folderId}/maintenance/report", report, ct);

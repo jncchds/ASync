@@ -30,10 +30,12 @@ public class FolderStorageController : ControllerBase
     private readonly SnapshotService _snapshots;
     private readonly UploadService _uploads;
     private readonly UploadLimits _limits;
+    private readonly UsageService _usage;
 
     public FolderStorageController(IFolderRepository folders, FolderBackendCache backends, SnapshotService snapshots, UploadService uploads,
-        UploadLimits limits)
+        UploadLimits limits, UsageService usage)
     {
+        _usage = usage;
         _folders = folders;
         _backends = backends;
         _snapshots = snapshots;
@@ -144,7 +146,7 @@ public class FolderStorageController : ControllerBase
     [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
     public async Task<IActionResult> Write(int folderId, [FromQuery] string path, [FromQuery] long? mtime, CancellationToken ct)
     {
-        if (await BackendAsync(folderId, ct) is not { } backend) return NotFound();
+        if (await MemberAsync(folderId, ct) is not var (folder, deviceId, backend)) return NotFound();
         if (Request.ContentLength is not long size || size > _limits.MaxSinglePut)
             return StatusCode(StatusCodes.Status413PayloadTooLarge, new
             {
@@ -152,6 +154,8 @@ public class FolderStorageController : ControllerBase
             });
         return await Guard(async () =>
         {
+            if (await _usage.CheckUploadAsync(folder, deviceId, StoragePath.Normalize(path), size) is { } refusal)
+                throw new QuotaExceededException(refusal);
             await using var buffer = Request.ContentLength is long len and <= MemoryBufferLimit
                 ? (Stream)new MemoryStream((int)len)
                 : new FileStream(Path.GetTempFileName(), FileMode.Create, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
@@ -160,6 +164,7 @@ public class FolderStorageController : ControllerBase
                 return BadRequest(new { message = "The upload was cut short." });
             buffer.Position = 0;
             await backend.WriteAsync(path, buffer, mtime is long ms ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : null, ct);
+            await _usage.RecordAcceptedAsync(folderId, size);
             return NoContent();
         });
     }
@@ -195,13 +200,19 @@ public class FolderStorageController : ControllerBase
 
     /// <summary>
     /// Storage errors become answers the client maps back to the same exceptions:
-    /// 404 + <c>X-Storage-Error: not-found</c>, 400 for bad paths, 502 for the back-end failing.
+    /// 404 + <c>X-Storage-Error: not-found</c>, 400 for bad paths, 502 for the back-end failing, 507 +
+    /// <c>X-Storage-Error: quota</c> for an upload over the owner's quota.
     /// </summary>
     private async Task<IActionResult> Guard(Func<Task<IActionResult>> action)
     {
         try
         {
             return await action();
+        }
+        catch (QuotaExceededException e)
+        {
+            Response.Headers["X-Storage-Error"] = "quota";
+            return StatusCode(StatusCodes.Status507InsufficientStorage, new { message = e.Message });
         }
         catch (UploadGoneException e)
         {

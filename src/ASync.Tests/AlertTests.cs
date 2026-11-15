@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using ASync.Api.Services;
 using ASync.Api.Services.Alerts;
 using ASync.Contracts;
 using ASync.Core.Alerts;
@@ -340,6 +341,129 @@ public class AlertTests
         Assert.Equal(3, test["priority"]!.GetValue<int>());
     }
 
+    // ── Quotas and storage health ─────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(0, null, QuotaState.Ok)]
+    [InlineData(89, 100L, QuotaState.Ok)]
+    [InlineData(90, 100L, QuotaState.Warning)]
+    [InlineData(100, 100L, QuotaState.Warning)]
+    [InlineData(101, 100L, QuotaState.Over)]
+    [InlineData(0, 0L, QuotaState.Warning)]
+    public void QuotaStates_FollowTheWarningThreshold(long used, long? quota, QuotaState expected) =>
+        Assert.Equal(expected, QuotaRules.State(used, quota, 90));
+
+    [Fact]
+    public void Uploads_FitWhileTheyStayWithinTheQuota_AndOnlyPacksCountInRepositories()
+    {
+        Assert.True(QuotaRules.Allows(90, 100, 10));
+        Assert.False(QuotaRules.Allows(90, 100, 11));
+        Assert.True(QuotaRules.Allows(long.MaxValue / 2, null, 1));
+        Assert.True(QuotaRules.Applies(SyncMode.TwoWay, ".async/incoming/x"));
+        Assert.True(QuotaRules.Applies(SyncMode.Backup, "data/0a/0abc"));
+        Assert.False(QuotaRules.Applies(SyncMode.Backup, "index/1"));
+        Assert.False(QuotaRules.Applies(SyncMode.Backup, "locks/1"));
+    }
+
+    private static async Task<Harness> WithWebhookAsync()
+    {
+        var h = new Harness();
+        Assert.True((await h.Service.CreateChannelAsync(1, new SaveAlertChannelRequest("hook", new WebhookChannelSettings("https://hooks.example.com/x")))).Success);
+        return h;
+    }
+
+    private const long GB = 1024L * 1024 * 1024;
+
+    [Fact]
+    public async Task AQuota_WarnsThenAlertsWhenFull_AndRecoversAfterTheScan()
+    {
+        var h = await WithWebhookAsync();
+        h.Users.Users[0].QuotaBytes = 10 * GB;
+        h.Folders.Folders.Add(new Folder { Id = 1, UserId = 1, Name = "Docs", StorageBackendId = 1 });
+        h.Usage.Rows[1] = new FolderUsage { FolderId = 1, Bytes = 9 * GB + GB / 2 };
+
+        await h.Monitor.RunAsync(default);
+        var warning = Assert.Single(h.Alerts.Incidents);
+        Assert.Equal((AlertKind.QuotaWarning, (int?)null), (warning.Kind, warning.FolderId));
+        Assert.Contains("9.5 GB of 10 GB used (95%)", warning.Detail);
+        Assert.Contains("Your storage quota is nearly full", Assert.Single(h.Sender.Sent).Message.Text);
+
+        // Uploads accepted since the scan push it over: a new alert (going over is news even after the warning).
+        h.Usage.Rows[1].PendingBytes = GB;
+        h.Clock.Advance(TimeSpan.FromMinutes(5));
+        await h.Monitor.RunAsync(default);
+        var over = h.Alerts.Incidents.Single(i => i.ResolvedAt is null);
+        Assert.Equal(AlertKind.OverQuota, over.Kind);
+        Assert.NotNull(warning.ResolvedAt);
+        var message = h.Sender.Sent[^1].Message;
+        Assert.Contains("Your storage quota is full", message.Text);
+        Assert.DoesNotContain("Back to normal", message.Text); // the warning closed quietly
+        Assert.Equal("overQuota", message.Payload.Opened.Single().Kind);
+        Assert.Null(message.Payload.Opened.Single().FolderId);
+
+        // Files deleted, and the next scan sees it: back to normal.
+        h.Usage.Rows[1] = new FolderUsage { FolderId = 1, Bytes = 2 * GB };
+        h.Clock.Advance(TimeSpan.FromMinutes(5));
+        await h.Monitor.RunAsync(default);
+        Assert.All(h.Alerts.Incidents, i => Assert.NotNull(i.ResolvedAt));
+        Assert.Contains("has room again", h.Sender.Sent[^1].Message.Text);
+    }
+
+    [Fact]
+    public async Task ASharedBackEndsQuota_IsItsOwnAlert()
+    {
+        var h = await WithWebhookAsync();
+        var shared = await h.Backends.AddAsync(new StorageBackend { Name = "Team S3", UserQuotaBytes = GB });
+        h.Folders.Folders.Add(new Folder { Id = 1, UserId = 1, Name = "Docs", StorageBackendId = shared.Id });
+        h.Usage.Rows[1] = new FolderUsage { FolderId = 1, Bytes = 2 * GB };
+        await h.Monitor.RunAsync(default);
+        var incident = Assert.Single(h.Alerts.Incidents);
+        Assert.Equal((AlertKind.OverQuota, shared.Id, "Team S3"), (incident.Kind, incident.StorageBackendId, incident.StorageBackendName));
+        Assert.Contains("Your quota on \"Team S3\" is full", h.Sender.Sent[^1].Message.Text);
+    }
+
+    [Fact]
+    public async Task AFailingBackEnd_AlertsItsOwnerAfterTwoFailedChecks_AndAdminsForSharedOnes()
+    {
+        var h = await WithWebhookAsync();
+        var bob = h.Users.Add("bob", isAdmin: true);
+        var own = await h.Backends.AddAsync(new StorageBackend { UserId = 1, Name = "My NAS", LastCheckedAt = h.Now, LastCheckOk = false, CheckFailures = 1, LastCheckError = "timeout" });
+        var shared = await h.Backends.AddAsync(new StorageBackend { Name = "Team S3", LastCheckedAt = h.Now, LastCheckOk = false, CheckFailures = 3, LastCheckError = "403 Forbidden" });
+
+        await h.Monitor.RunAsync(default);
+        // One failure of alice's back-end is not an alert yet; the shared one goes to the admin only.
+        var forBob = Assert.Single(h.Alerts.Incidents);
+        Assert.Equal((bob.Id, AlertKind.StorageFailing, (int?)shared.Id), (forBob.UserId, forBob.Kind, forBob.StorageBackendId));
+        Assert.Contains("3 connection tests in a row failed", forBob.Detail);
+        Assert.Contains("403 Forbidden", forBob.Detail);
+
+        own.CheckFailures = 2;
+        h.Clock.Advance(TimeSpan.FromMinutes(5));
+        await h.Monitor.RunAsync(default);
+        var forAlice = h.Alerts.Incidents.Single(i => i.UserId == 1);
+        Assert.Equal((AlertKind.StorageFailing, "My NAS"), (forAlice.Kind, forAlice.StorageBackendName));
+        Assert.Contains("Storage \"My NAS\" is failing", h.Sender.Sent[^1].Message.Text);
+
+        (own.LastCheckOk, own.CheckFailures) = (true, 0);
+        h.Clock.Advance(TimeSpan.FromMinutes(5));
+        await h.Monitor.RunAsync(default);
+        Assert.NotNull(forAlice.ResolvedAt);
+        Assert.Contains("Storage \"My NAS\" works again", h.Sender.Sent[^1].Message.Text);
+        Assert.Null(forBob.ResolvedAt);
+    }
+
+    [Fact]
+    public void HealthChecks_AreDueHourly_AndSoonerAfterAFailure()
+    {
+        var options = new HealthOptions(new ConfigurationBuilder().Build());
+        var now = T0;
+        Assert.True(options.IsDue(new StorageBackend(), now));
+        Assert.False(options.IsDue(new StorageBackend { LastCheckedAt = now.AddMinutes(-59), LastCheckOk = true }, now));
+        Assert.True(options.IsDue(new StorageBackend { LastCheckedAt = now.AddMinutes(-60), LastCheckOk = true }, now));
+        Assert.False(options.IsDue(new StorageBackend { LastCheckedAt = now.AddMinutes(-4), LastCheckOk = false }, now));
+        Assert.True(options.IsDue(new StorageBackend { LastCheckedAt = now.AddMinutes(-5), LastCheckOk = false }, now));
+    }
+
     // ── Channels: validation and secrets ──────────────────────────────────────
 
     private sealed class Harness
@@ -352,6 +476,8 @@ public class AlertTests
         public readonly RecordingNotifier Notifier = new();
         public readonly AlertService Service;
         public readonly AlertMonitor Monitor;
+        public readonly FakeUsageRepository Usage;
+        public readonly FakeStorageBackends Backends = new();
 
         public Harness(bool smtp = false)
         {
@@ -365,8 +491,9 @@ public class AlertTests
             var options = AlertOptions.FromConfiguration(config);
             Service = new AlertService(Alerts, Users, Sender, new EphemeralDataProtectionProvider(), options, SmtpOptions.FromConfiguration(config),
                 PushSettings.FromConfiguration(config), config, Clock);
+            Usage = new FakeUsageRepository(Folders);
             Monitor = new AlertMonitor(Folders, Users, Alerts, Service, Sender, options, new ServerStarted(LongAgo), Notifier, Clock,
-                NullLogger<AlertMonitor>.Instance);
+                NullLogger<AlertMonitor>.Instance, Usage, Backends, new UsageOptions(config), new HealthOptions(config));
         }
 
         public DateTime Now => Clock.GetUtcNow().UtcDateTime;

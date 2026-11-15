@@ -1004,6 +1004,95 @@ async Task<int> RunAsync()
     if (!runC.Process.HasExited) runC.Process.Kill(entireProcessTree: true);
     File.WriteAllText(Path.Combine(work, "run-C.log"), runC.Log.ToString());
 
+    // ── Quotas: over quota, uploads are refused and an alert goes out; deleting brings the person back under ──
+    Section("quota (refused upload, alert, back under after a scan)");
+    using (var hook = new WebhookListener())
+    {
+        var quotaName = $"e2e-quota-{runId}";
+        var quotaUser = await Send(HttpMethod.Post, "/api/users", new { username = quotaName, password = "quota-password", isAdmin = false }, token);
+        var quotaId = quotaUser.Body?["id"]?.GetValue<int>() ?? 0;
+        var qb = new Browser(server);
+        var tq = await qb.SignInAsync(quotaName, "quota-password");
+        var agentD = new Agent("e2e-D", Path.Combine(work, "D"));
+        var codeD = (await qb.SendAsync(HttpMethod.Post, "/api/devices/enrollments", new { reusable = false, label = agentD.Name }, tq)).Body?["code"]?.GetValue<string>();
+        var enrolledD = await Cli(agentD, ["enroll", "--server", server, "--code", codeD ?? "", "--name", agentD.Name]);
+        agentD.Id = Guid.Parse(JsonNode.Parse(File.ReadAllText(Path.Combine(agentD.Config, "identity.json")))!["deviceId"]!.GetValue<string>());
+        var quotaFolderRes = await qb.SendAsync(HttpMethod.Post, "/api/folders", new
+        {
+            name = "quota", mode = "TwoWay", encryption = "Transport", kind = "Files", storageBackendId = sharedId, rootPath = "quota",
+            intervalMinutes = 60, trashKeepDays = 30,
+        }, tq);
+        var quotaFolder = quotaFolderRes.Body?["id"]?.GetValue<int>() ?? 0;
+        var attachD = await qb.SendAsync(HttpMethod.Put, $"/api/folders/{quotaFolder}/devices", new { deviceId = agentD.Id, localPath = agentD.Path("quota") }, tq);
+        Directory.CreateDirectory(agentD.Path("quota"));
+        var qChannel = await qb.SendAsync(HttpMethod.Post, "/api/alerts/channels",
+            new { name = "quota hook", settings = new { type = "Webhook", url = $"http://{webhookHost}:{hook.Port}/hook" } }, tq);
+        Check(tq is not null && enrolledD.Exit == 0 && attachD.Status == HttpStatusCode.OK && qChannel.Status == HttpStatusCode.OK,
+            $"{quotaName} signs in, enrolls D, makes a TwoWay folder on the shared back-end and a webhook channel",
+            enrolledD.Output + quotaFolderRes.Raw + attachD.Raw + qChannel.Raw);
+
+        var notMine = await qb.SendAsync(HttpMethod.Put, $"/api/users/{quotaId}/quota", new { quotaBytes = (long?)null }, tq);
+        Check(notMine.Status == HttpStatusCode.Forbidden, $"a user cannot change their own quota → {notMine.Status}");
+        Write(agentD.Path("quota", "photo.bin"), RandomBytes(600 * 1024));
+        await Sync(agentD, quotaFolder, "D uploads 600 KB (no quota yet)");
+        var setQuota = await Send(HttpMethod.Put, $"/api/users/{quotaId}/quota", new { quotaBytes = 512 * 1024 }, token);
+        Check(setQuota.Status == HttpStatusCode.OK && setQuota.Body?["quotaBytes"]?.GetValue<long>() == 512 * 1024,
+            "the admin sets a 512 KB quota (below what is stored: the uploads were counted as they arrived)", setQuota.Raw);
+        var usage = await qb.SendAsync(HttpMethod.Get, "/api/usage", token: tq);
+        Check(usage.Body?["total"]?["state"]?.GetValue<string>() == "Over" && usage.Body?["total"]?["usedBytes"]?.GetValue<long>() >= 600 * 1024,
+            "GET /api/usage says they are over quota", usage.Raw);
+
+        Write(agentD.Path("quota", "more.bin"), RandomBytes(100 * 1024));
+        var quotaRefused = await Cli(agentD, ["sync", "--folder", $"{quotaFolder}"]);
+        Check(quotaRefused.Exit != 0 && quotaRefused.Output.Contains("Storage quota exceeded"), "D's next upload is refused: the sync fails and says why", quotaRefused.Output);
+        if (serverContainer is not null) Check(await OnStorage($"{storageRoot}-shared/users/{quotaId}/quota/more.bin") == false, "the refused file is not on the storage");
+        bool Quota(JsonNode? body, string list) =>
+            body?[list]?.AsArray().Any(i => i?["kind"]?.GetValue<string>() == "overQuota" && i?["folderId"] is null) == true;
+        var overAlert = await WaitFor(() => hook.Received.Any(r => Quota(r.Body, "opened")), 60);
+        Check(overAlert, "the webhook gets an over-quota alert", string.Join("\n", hook.Received.Select(r => r.Raw)));
+        var reported = (await qb.SendAsync(HttpMethod.Get, "/api/folders", token: tq)).Body?.AsArray().FirstOrDefault()?["devices"]?[0];
+        Check(reported?["lastSyncOk"]?.GetValue<bool>() == false && reported?["lastSyncMessage"]?.GetValue<string>().Contains("quota") == true,
+            "the failed run is reported (so the device's failing alert follows if it goes on)", reported?.ToJsonString());
+
+        // Deleting the file (and emptying the trash, which still takes space) does not count until the folder is listed again.
+        File.Delete(agentD.Path("quota", "photo.bin"));
+        var deleting = await Cli(agentD, ["sync", "--folder", $"{quotaFolder}"]);
+        Check(deleting.Output.Contains("1 deleted"), "D's sync deletes photo.bin on the storage (deletions work over quota)", deleting.Output);
+        var trashEmptied = await qb.SendAsync(HttpMethod.Delete, $"/api/folders/{quotaFolder}/files/trash?confirm=true", token: tq);
+        Check(trashEmptied.Status == HttpStatusCode.OK, $"{quotaName} empties the folder's trash → {trashEmptied.Status}", trashEmptied.Raw);
+        var stillOver = await qb.SendAsync(HttpMethod.Get, "/api/usage", token: tq);
+        Check(stillOver.Body?["total"]?["state"]?.GetValue<string>() == "Over", "until the next scan they still count as over quota", stillOver.Raw);
+        var scan = await qb.SendAsync(HttpMethod.Post, "/api/usage/scan", token: tq);
+        var under = await WaitForAsync(async () =>
+            (await qb.SendAsync(HttpMethod.Get, "/api/usage", token: tq)).Body?["total"]?["state"]?.GetValue<string>() is "Ok" or "Warning", 60, 1);
+        Check(scan.Status == HttpStatusCode.Accepted && under, "after \"Count again\" (a scan) they are back under quota",
+            (await qb.SendAsync(HttpMethod.Get, "/api/usage", token: tq)).Raw);
+        var folderUsage = (await qb.SendAsync(HttpMethod.Get, "/api/folders", token: tq)).Body?.AsArray().FirstOrDefault()?["usage"];
+        Check(folderUsage?["scannedAt"] is not null && folderUsage?["bytes"]?.GetValue<long>() < 512 * 1024,
+            "the folder shows its counted size", folderUsage?.ToJsonString());
+        var resolvedAlert = await WaitFor(() => hook.Received.Any(r => Quota(r.Body, "resolved")), 60);
+        Check(resolvedAlert, "the webhook gets a \"back to normal\" message for the quota", string.Join("\n", hook.Received.Select(r => r.Raw)));
+        await Sync(agentD, quotaFolder, "D's upload now goes through");
+        if (serverContainer is not null) Check(await OnStorage($"{storageRoot}-shared/users/{quotaId}/quota/more.bin") == true, "more.bin is on the storage");
+
+        // ── Health checks: a back-end that cannot be reached alerts its owner without anyone pressing "Test" ──
+        Section("storage health checks");
+        var dead = await qb.SendAsync(HttpMethod.Post, "/api/storage-backends",
+            new { name = "unreachable", settings = new { type = "WebDav", url = "http://127.0.0.1:9/dav/", username = "x", password = "y" } }, tq);
+        var deadId = dead.Body?["id"]?.GetValue<int>() ?? 0;
+        Check(dead.Status == HttpStatusCode.OK, $"{quotaName} adds a WebDAV back-end nobody answers on", dead.Raw);
+        var failingAlert = await WaitFor(() => hook.Received.Any(r =>
+            r.Body?["opened"]?.AsArray().Any(i => i?["kind"]?.GetValue<string>() == "storageFailing" && i?["storageBackendId"]?.GetValue<int>() == deadId) == true), 90);
+        var deadNow = (await qb.SendAsync(HttpMethod.Get, "/api/storage-backends", token: tq)).Body?.AsArray().FirstOrDefault(x => x?["id"]?.GetValue<int>() == deadId);
+        Check(failingAlert && deadNow?["lastCheckOk"]?.GetValue<bool>() == false && deadNow?["checkFailures"]?.GetValue<int>() >= 2,
+            "the periodic check fails twice and the owner gets a storage-failing alert", deadNow?.ToJsonString() + string.Join("\n", hook.Received.Select(r => r.Raw)));
+        var sharedNow = (await Send(HttpMethod.Get, "/api/storage-backends", token: token)).Body?.AsArray().FirstOrDefault(x => x?["id"]?.GetValue<int>() == sharedId);
+        Check(sharedNow?["lastCheckOk"]?.GetValue<bool>() == true && sharedNow?["totalUsedBytes"] is not null,
+            "the shared back-end was tested by the periodic check (working) and admins see its total use", sharedNow?.ToJsonString());
+        await qb.SendAsync(HttpMethod.Delete, $"/api/storage-backends/{deadId}", token: tq);
+        await qb.SendAsync(HttpMethod.Delete, $"/api/folders/{quotaFolder}/devices/{agentD.Id}", token: tq);
+    }
+
     Console.WriteLine(failures.Count == 0 ? "\nAll end-to-end checks passed." : $"\n{failures.Count} check(s) failed:\n  - {string.Join("\n  - ", failures)}");
     return failures.Count == 0 ? 0 : 1;
 }

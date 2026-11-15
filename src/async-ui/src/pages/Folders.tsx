@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  detachFolderDevice, errorMessage, getAlertIncidents, getDevices, getFolders, getStorageBackends,
-  type AlertIncident, type Device, type PurgeJob, type Folder, type FolderDevice, type MaintenanceStatus, type StorageBackend,
+  detachFolderDevice, errorMessage, getAlertIncidents, getDevices, getFolders, getStorageBackends, getUsage,
+  type AlertIncident, type Device, type PurgeJob, type Folder, type FolderDevice, type FolderUsage, type MaintenanceStatus, type StorageBackend,
+  type Usage,
 } from '../api'
+import UsageSummary from '../components/UsageSummary'
 import FolderForm from '../components/FolderForm'
 import FolderDeviceForm from '../components/FolderDeviceForm'
 import SnapshotBrowser from '../components/SnapshotBrowser'
@@ -15,7 +17,25 @@ import { useSyncEvents, type SyncEvent } from '../hooks/useSyncEvents'
 import { useAuth } from '../hooks/useAuth'
 import { kindLabel, modeLabel } from '../utils/folders'
 import { ALERT_KIND_LABELS, openByDevice } from '../utils/alerts'
-import { formatDate, formatMinutes, relativeTime } from '../utils/format'
+import { formatBytes, formatDate, formatMinutes, relativeTime } from '../utils/format'
+
+/** What a folder takes on its storage, as last counted: "1.2 GB · 3,412 files", with versions and trash or deduplicated data. */
+function FolderSize({ usage, backup }: { usage: FolderUsage | null; backup: boolean }) {
+  if (usage === null || usage.scannedAt === null)
+    return <span className="muted" title={usage?.scanError ?? 'The server counts folders in the background every few hours.'}>size not counted yet</span>
+  const pending = usage.pendingBytes > 0 ? `, plus ${formatBytes(usage.pendingBytes)} uploaded since` : ''
+  const title = `Counted ${formatDate(usage.scannedAt)}${pending}.${usage.scanError ? `\nThe last count failed: ${usage.scanError}` : ''}`
+  const files = `${usage.files.toLocaleString()} ${usage.files === 1 ? 'file' : 'files'}`
+  return (
+    <span title={title}>
+      {formatBytes(usage.bytes + usage.pendingBytes)} on storage
+      {backup
+        ? usage.dataBytes !== null && <> ({formatBytes(usage.dataBytes)} of data in {usage.snapshots} {usage.snapshots === 1 ? 'snapshot' : 'snapshots'}, deduplicated)</>
+        : <> ({files}{usage.historyBytes ? `, ${formatBytes(usage.historyBytes)} versions and trash` : ''})</>}
+      {usage.scanError && <span className="error-text"> ⚠</span>}
+    </span>
+  )
+}
 
 /** The last prune or check of a Backup folder as a pill: green when fine, red when failed, grey when not run or off. */
 function MaintenancePill({ status, intervalDays, done, failed, never, off }: {
@@ -60,6 +80,9 @@ export default function Folders() {
   const [deleting, setDeleting] = useState<number | null>(null)
   /** Bumped when a purge of stored data starts, so the list of purges reloads. */
   const [purges, setPurges] = useState(0)
+  /** Storage use and quota (counted in the background); failures here must not hide the folders. */
+  const [usage, setUsage] = useState<Usage | null>(null)
+  const loadUsage = useCallback(() => getUsage().then(setUsage).catch(() => setUsage(null)), [])
 
   const load = useCallback(() => Promise.all([getFolders(), getStorageBackends(), getDevices()])
     .then(([f, b, d]) => {
@@ -72,7 +95,7 @@ export default function Folders() {
   // Only open incidents (resolved within the last 0 days = none); failures here must not hide the folders.
   const loadIncidents = useCallback(() => getAlertIncidents(0).then(setIncidents).catch(() => setIncidents([])), [])
 
-  useEffect(() => { load(); loadIncidents() }, [load, loadIncidents])
+  useEffect(() => { load(); loadIncidents(); loadUsage() }, [load, loadIncidents, loadUsage])
 
   const onEvent = useCallback((e: SyncEvent) => {
     if (e.name === 'config.changed' || e.name === 'folder.status' || e.name === 'reconnected') {
@@ -80,7 +103,8 @@ export default function Folders() {
       if (e.name === 'folder.status') setSyncReports(n => n + 1)
     }
     if (e.name === 'alerts.changed' || e.name === 'reconnected') loadIncidents()
-  }, [load, loadIncidents])
+    if (e.name === 'usage.changed' || e.name === 'reconnected') { loadUsage(); if (e.name === 'usage.changed') load() }
+  }, [load, loadIncidents, loadUsage])
   const live = useSyncEvents(onEvent)
 
   const reload = async () => {
@@ -123,11 +147,12 @@ export default function Folders() {
       <p className="hint">What your devices sync or back up, and where it is stored.</p>
       {openCount > 0 && (
         <div className="notice danger">
-          <strong>{openCount === 1 ? '1 open problem' : `${openCount} open problems`}</strong>: a device is overdue or failing, or a check failed.{' '}
+          <strong>{openCount === 1 ? '1 open problem' : `${openCount} open problems`}</strong>: a device is overdue or failing, a check failed, storage is failing or a quota is full.{' '}
           <Link to="/alerts">See alerts</Link>
         </div>
       )}
       {error && <p className="error-msg">{error}</p>}
+      {usage && folders !== null && folders.length > 0 && <UsageSummary usage={usage} onScan={loadUsage} />}
       {folders !== null && backends.length === 0 && (
         <p className="hint">First <Link to="/storage">add storage</Link> where your folders will be kept.</p>
       )}
@@ -183,6 +208,7 @@ export default function Folders() {
                       <span>{f.storageBackendName}</span>
                       <code>{f.rootPath}</code>
                       <span>every {formatMinutes(f.intervalMinutes)}</span>
+                      <FolderSize usage={f.usage} backup={f.mode === 'Backup'} />
                       <span>folder #{f.id}</span>
                     </div>
                     {f.excludes.length > 0 && <span className="muted small-text">Excludes: {f.excludes.join(', ')}</span>}

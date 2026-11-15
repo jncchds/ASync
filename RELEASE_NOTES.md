@@ -2,6 +2,25 @@
 
 ## v0.1.4 — 2026-11-15
 
+- feat: **Storage use, quotas and storage health checks.** The *Folders* and *Storage* pages show how much each
+  folder takes on its storage (old versions and trash separately; for standard-encryption backups also how much
+  data the snapshots hold after deduplication), your total and your use of each storage. The server counts this in
+  the background every 6 hours (*Count again* asks for it now) and adds accepted uploads at once in between. Admins
+  set a quota per user (*Users → Quota*) and, on shared storage, how much each user may keep there. Over a quota new
+  uploads are refused (devices report a failed sync saying "Storage quota exceeded"); deleting, pruning, restoring
+  and downloading keep working. Every storage is now tested every hour (again after 5 minutes when it failed). New
+  alerts: *nearly full* (90%), *quota full*, and *storage failing* after two failed tests in a row (to admins for
+  shared storage), each with a "back to normal" message. New settings: `Usage__ScanIntervalHours`,
+  `Quotas__WarnPercent`, `Health__IntervalMinutes`, `Health__RetryMinutes`, `Health__FailuresBeforeAlert`.
+- perf: **Large uploads are fast again:** up to 3 parts of a file travel at once, so the next part is on its way
+  while the server stores the previous one. Resuming after an interruption works as before.
+- fix(security): renewing or releasing a folder's sync lease now checks that the device belongs to the folder, and
+  renaming someone else's device answers "not found" whatever the request holds. Found by new API-level tests that
+  check every endpoint for who may call it and that nobody reaches another person's folders, storage, devices,
+  snapshots, files or alerts (they run in CI against PostgreSQL).
+- feat(cli): `async-cli prune` claims the folder's prune first, so it can still repack data when the owner is over
+  quota.
+
 - feat: **Large files in Mirror and two-way folders are transferred in parts and resume after an interruption.**
   Files over 32 MB go to the server in 16 MB parts, each stored on the storage as soon as it arrives; if the
   connection drops, the agent is stopped or either side restarts, the next sync sends only the parts that are

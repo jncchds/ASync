@@ -5,7 +5,7 @@ import {
 } from '../api'
 import AlertChannelForm from '../components/AlertChannelForm'
 import { useSyncEvents, type SyncEvent } from '../hooks/useSyncEvents'
-import { ALERT_KIND_LABELS, channelTypeLabel, incidentSubject } from '../utils/alerts'
+import { ALERT_KIND_LABELS, channelTypeLabel, incidentSubject, isWarningKind } from '../utils/alerts'
 import { formatDate, relativeTime } from '../utils/format'
 
 type RuleKey = keyof SaveAlertSettings
@@ -26,7 +26,7 @@ function IncidentRow({ incident: i }: { incident: AlertIncident }) {
           <strong>{incidentSubject(i)}</strong>
           {i.resolvedAt
             ? <span className="pill pill-success" title={formatDate(i.resolvedAt)}>✓ Back to normal {relativeTime(i.resolvedAt)}</span>
-            : <span className={`pill ${i.kind === 'Overdue' ? 'pill-warning' : 'pill-danger'}`}>⚠ {ALERT_KIND_LABELS[i.kind]}</span>}
+            : <span className={`pill ${isWarningKind(i.kind) ? 'pill-warning' : 'pill-danger'}`}>⚠ {ALERT_KIND_LABELS[i.kind]}</span>}
         </div>
         <span className="small-text">{i.detail}</span>
         <span className="muted small-text" title={formatDate(i.openedAt)}>
@@ -110,8 +110,8 @@ export default function Alerts() {
         {editing === null && <button onClick={() => setEditing('new')}>Add channel</button>}
       </div>
       <p className="hint">
-        The server tells you when a device stops syncing or backing up, or when something fails: once per problem, again
-        when it is fixed, and as a reminder while it lasts. It needs nothing on your devices{settings?.pushMode === 'None' ? ' and no push service' : ''}.
+        The server tells you when a device stops syncing or backing up, when storage stops answering or fills up, or when
+        something fails: once per problem, again when it is fixed, and as a reminder while it lasts. It needs nothing on your devices{settings?.pushMode === 'None' ? ' and no push service' : ''}.
       </p>
       {error && <p className="error-msg">{error}</p>}
 

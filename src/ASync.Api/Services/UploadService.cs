@@ -11,6 +11,9 @@ namespace ASync.Api.Services;
 /// <summary>The upload is unknown, expired, finished, or belongs to someone else: the device starts again.</summary>
 public class UploadGoneException(string message = "This upload no longer exists; start it again.") : Exception(message);
 
+/// <summary>The upload would take its owner past a quota (the gateway answers 507 with <c>X-Storage-Error: quota</c>).</summary>
+public class QuotaExceededException(string message) : Exception(message);
+
 /// <summary>
 /// Server-wide settings and limits of resumable uploads (<c>Uploads:*</c>). Parts are held in memory while they are
 /// checked and stored, so at most <see cref="MaxParallelParts"/> × <see cref="PartSize"/> bytes are in use at once; no
@@ -41,8 +44,12 @@ public sealed class UploadLimits(IConfiguration configuration)
 /// folder's back-end (<see cref="IPartUploadBackend"/>: an S3 multipart upload, or a hidden file written at offsets) and
 /// is acknowledged only once stored and matching its SHA-256; completing makes the file appear at once.
 /// </summary>
+/// <remarks>
+/// A new upload is held to its owner's quota when it starts (its whole size, counted as used from then on, see
+/// <see cref="UsageService"/>); continuing an unfinished one is never refused.
+/// </remarks>
 public class UploadService(IUploadSessionRepository sessions, UploadLimits limits, FolderBackendCache backends, TimeProvider clock,
-    ILogger<UploadService> logger)
+    ILogger<UploadService> logger, UsageService usage)
 {
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
@@ -66,6 +73,8 @@ public class UploadService(IUploadSessionRepository sessions, UploadLimits limit
             await sessions.DeleteAsync(existing.Id);
         }
 
+        if (await usage.CheckUploadAsync(folder, deviceId, path, req.Size) is { } refusal)
+            throw new QuotaExceededException(refusal);
         var mtime = req.Mtime is long ms ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : (DateTimeOffset?)null;
         var handle = await PartUploads.For(backend).BeginPartsAsync(path, mtime, ct);
         var session = new UploadSession
@@ -84,6 +93,8 @@ public class UploadService(IUploadSessionRepository sessions, UploadLimits limit
             if (await sessions.FindAsync(folder.Id, deviceId, path) is { } other) return other;
             throw;
         }
+        // Counted when accepted, not when complete: parallel uploads cannot each slip under the quota.
+        await usage.RecordAcceptedAsync(folder.Id, req.Size);
         logger.LogInformation("Upload {Id} started: {Path} ({Size} bytes in {Parts} parts) for folder {Folder}",
             session.Id, path, req.Size, session.PartCount, folder.Id);
         return session;

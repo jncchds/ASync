@@ -134,17 +134,7 @@ public sealed class RemoteStorageBackend(AsyncApiClient api, int folderId) : ISt
             }
             try
             {
-                var buffer = new byte[(int)Math.Min(session.PartSize, size)];
-                for (var n = 0; n < session.PartCount; n++)
-                {
-                    if (received.Contains(n)) continue;
-                    var length = (int)PartLength(session, size, n);
-                    body.Position = start + (long)n * session.PartSize;
-                    await body.ReadExactlyAsync(buffer.AsMemory(0, length), ct);
-                    await SendPartAsync(path, session.Id, n, buffer, length, ct);
-                    stored += length;
-                    PartUploaded?.Invoke(normalized, stored, size);
-                }
+                await SendPartsAsync(path, normalized, body, start, size, session, received, stored, ct);
                 using var completed = await api.SendRawAsync(() => new HttpRequestMessage(HttpMethod.Post, $"{Base}/uploads/{session.Id}/complete"), ct);
                 await CheckAsync(completed, path, ct);
                 return;
@@ -155,6 +145,60 @@ public sealed class RemoteStorageBackend(AsyncApiClient api, int folderId) : ISt
             }
         }
     }
+
+    /// <summary>
+    /// Sends the missing parts with up to <see cref="MaxPartsInFlight"/> in flight: the next part travels while the
+    /// server hashes, stores and flushes the previous one. Parts are read from <paramref name="body"/> in order (one buffer
+    /// per part in flight, so at most that many parts are in memory), each is acknowledged on its own, and when one
+    /// fails for good no further part is started, the ones in flight are let finish (each one stored is one less to send
+    /// next time), and the failure is reported.
+    /// </summary>
+    private async Task SendPartsAsync(string path, string normalized, Stream body, long start, long size, UploadSessionDto session,
+        HashSet<int> received, long stored, CancellationToken ct)
+    {
+        var running = new List<(Task Task, byte[] Buffer, int Length)>();
+        var spare = new Stack<byte[]>();
+        var bufferSize = (int)Math.Min(session.PartSize, size);
+
+        async Task FinishOneAsync()
+        {
+            var done = await Task.WhenAny(running.Select(r => r.Task));
+            var index = running.FindIndex(r => r.Task == done);
+            var (task, buffer, length) = running[index];
+            running.RemoveAt(index);
+            await task; // throws when the part failed
+            spare.Push(buffer);
+            stored += length;
+            PartUploaded?.Invoke(normalized, stored, size);
+        }
+
+        try
+        {
+            for (var n = 0; n < session.PartCount; n++)
+            {
+                if (received.Contains(n)) continue;
+                while (running.Count >= Math.Max(1, MaxPartsInFlight)) await FinishOneAsync();
+                var length = (int)PartLength(session, size, n);
+                var buffer = spare.Count > 0 ? spare.Pop() : new byte[bufferSize];
+                body.Position = start + (long)n * session.PartSize;
+                await body.ReadExactlyAsync(buffer.AsMemory(0, length), ct);
+                running.Add((SendPartAsync(path, session.Id, n, buffer, length, ct), buffer, length));
+            }
+            while (running.Count > 0) await FinishOneAsync();
+        }
+        catch
+        {
+            try { await Task.WhenAll(running.Select(r => r.Task)); }
+            catch { /* the first failure is the one to report */ }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Parts of one file sent at once (default 3): enough to keep the link busy while the server stores a part, without
+    /// taking more of the server's part slots (<c>Uploads__MaxParallelParts</c>, 4) than one upload needs.
+    /// </summary>
+    public int MaxPartsInFlight { get; init; } = 3;
 
     private static long PartLength(UploadSessionDto session, long size, int number) => Math.Min(session.PartSize, size - (long)number * session.PartSize);
 
@@ -211,6 +255,13 @@ public sealed class RemoteStorageBackend(AsyncApiClient api, int folderId) : ISt
             throw new StorageNotFoundException(path);
         if (response.StatusCode == HttpStatusCode.NotFound && response.Headers.Contains("X-Upload-Error"))
             throw new UploadGoneException(path);
+        if (response.StatusCode == HttpStatusCode.InsufficientStorage)
+        {
+            string? message = null;
+            try { message = (await response.Content.ReadFromJsonAsync<ErrorBody>(AsyncApiClient.Json, ct))?.Message; }
+            catch (System.Text.Json.JsonException) { }
+            throw new StorageQuotaExceededException(message ?? "The storage quota is full.");
+        }
         try
         {
             await AsyncApiClient.EnsureSuccessAsync(response, ct);
@@ -224,6 +275,8 @@ public sealed class RemoteStorageBackend(AsyncApiClient api, int folderId) : ISt
             throw new IOException(e.Message, e);
         }
     }
+
+    private sealed record ErrorBody(string? Message);
 
     /// <summary>The server no longer knows a part upload (expired, or replaced by another start).</summary>
     private sealed class UploadGoneException(string path) : IOException($"The upload of '{path}' expired on the server.");

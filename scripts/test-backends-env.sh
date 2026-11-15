@@ -6,4 +6,5 @@ samba_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{
 echo "export ASYNC_TEST_S3=http://localhost:19000"
 echo "export ASYNC_TEST_SFTP=localhost:12222"
 echo "export ASYNC_TEST_WEBDAV=http://localhost:18081/"
+echo "export ASYNC_TEST_POSTGRES='Host=localhost;Port=15432;Username=async;Password=async'"
 [ -n "$samba_ip" ] && echo "export ASYNC_TEST_SMB=$samba_ip"

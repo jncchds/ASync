@@ -79,12 +79,17 @@ public class SyncController : ControllerBase
     }
 
     [HttpPost("{id:int}/lease/{leaseId}/renew")]
-    public ActionResult<LeaseDto> Renew(int id, string leaseId) =>
-        _leases.Renew(id, leaseId) is { } lease ? lease : Conflict(new { message = "The lease has expired." });
+    public async Task<ActionResult<LeaseDto>> Renew(int id, string leaseId)
+    {
+        // Only a device of the folder may touch its lease (found by the API tests: lease ids were the only guard).
+        if (await MembershipAsync(id) is null) return NotFound();
+        return _leases.Renew(id, leaseId) is { } lease ? lease : Conflict(new { message = "The lease has expired." });
+    }
 
     [HttpDelete("{id:int}/lease/{leaseId}")]
-    public IActionResult Release(int id, string leaseId)
+    public async Task<IActionResult> Release(int id, string leaseId)
     {
+        if (await MembershipAsync(id) is null) return NotFound();
         _leases.Release(id, leaseId);
         return NoContent();
     }
@@ -102,12 +107,15 @@ public class SyncController : ControllerBase
 
     // ── Maintenance (Backup) ──────────────────────────────────────────────────
 
-    /// <summary>Which prune or check this device should run now (end-to-end folders: only devices hold the key).</summary>
+    /// <summary>
+    /// Which prune or check this device should run now (end-to-end folders: only devices hold the key). With
+    /// <paramref name="manual"/>, claims that job for a run by hand (whether due or not).
+    /// </summary>
     [HttpPost("{id:int}/maintenance/claim")]
-    public async Task<ActionResult<MaintenanceClaimDto>> ClaimMaintenance(int id)
+    public async Task<ActionResult<MaintenanceClaimDto>> ClaimMaintenance(int id, [FromQuery] MaintenanceKind? manual)
     {
         if (await MembershipAsync(id) is not { } m) return NotFound();
-        return _service.ClaimMaintenance(m);
+        return _service.ClaimMaintenance(m, manual);
     }
 
     /// <summary>The result of a prune or check this device ran.</summary>

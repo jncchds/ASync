@@ -169,6 +169,23 @@ public sealed class Repository
         return result;
     }
 
+    /// <summary>
+    /// Sizes from the index files alone (no pack is read): <see cref="RepositoryStats.DataBytes"/> counts every distinct
+    /// blob once, before compression and encryption, i.e. what the snapshots hold after deduplication.
+    /// </summary>
+    public async Task<RepositoryStats> StatsAsync(CancellationToken ct = default)
+    {
+        var blobs = new Dictionary<BlobId, int>();
+        var packs = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var (_, file) in await ReadIndexFilesAsync(ct))
+            foreach (var pack in file.Packs)
+            {
+                packs[pack.Id] = pack.Size;
+                foreach (var blob in pack.Blobs) blobs[blob.Id] = blob.RawLength;
+            }
+        return new RepositoryStats(packs.Count, packs.Values.Sum(), blobs.Count, blobs.Values.Sum(v => (long)v));
+    }
+
     public bool HasBlob(BlobId id) { lock (_gate) return _index.ContainsKey(id); }
 
     public BlobLocation? Locate(BlobId id) { lock (_gate) return _index.GetValueOrDefault(id); }

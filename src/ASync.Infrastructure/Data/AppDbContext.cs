@@ -26,6 +26,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PurgeJob> PurgeJobs => Set<PurgeJob>();
     public DbSet<UploadSession> UploadSessions => Set<UploadSession>();
     public DbSet<UploadSessionPart> UploadSessionParts => Set<UploadSessionPart>();
+    public DbSet<FolderUsage> FolderUsages => Set<FolderUsage>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -103,6 +104,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasMany(s => s.Parts).WithOne().HasForeignKey(p => p.SessionId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        // Storage usage per folder (usage scans + uploads accepted since); gone with the folder.
+        b.Entity<FolderUsage>(e =>
+        {
+            e.HasKey(u => u.FolderId);
+            e.Property(u => u.FolderId).ValueGeneratedNever();
+            e.Property(u => u.ScanError).HasMaxLength(1000);
+            e.Ignore(u => u.Used);
+            e.HasOne(u => u.Folder).WithOne().HasForeignKey<FolderUsage>(u => u.FolderId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         b.Entity<UploadSessionPart>(e =>
         {
             e.HasKey(p => new { p.SessionId, p.Number });
@@ -127,9 +138,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(i => i.Kind).HasConversion<string>().HasMaxLength(20);
             e.Property(i => i.FolderName).HasMaxLength(100);
             e.Property(i => i.DeviceName).HasMaxLength(100);
+            e.Property(i => i.StorageBackendName).HasMaxLength(100);
             e.Property(i => i.Detail).HasMaxLength(1000);
             e.HasIndex(i => new { i.UserId, i.ResolvedAt });
             e.HasOne(i => i.Folder).WithMany().HasForeignKey(i => i.FolderId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<StorageBackend>().WithMany().HasForeignKey(i => i.StorageBackendId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<AppUser>().WithMany().HasForeignKey(i => i.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

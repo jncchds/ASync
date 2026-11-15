@@ -32,11 +32,12 @@ public class DevicesController : ControllerBase
     [HttpPatch("{id:guid}")]
     public async Task<ActionResult<DeviceDto>> Rename(Guid id, [FromBody] RenameDeviceRequest req)
     {
+        // Someone else's device is not found, whatever the request says.
+        var device = await _devices.GetAsync(id);
+        if (device is null || device.UserId != User.UserId()) return NotFound();
         var name = req.Name?.Trim();
         if (string.IsNullOrEmpty(name) || name.Length > 100)
             return BadRequest(new { message = "A device name of 1–100 characters is required." });
-        var device = await _devices.GetAsync(id);
-        if (device is null || device.UserId != User.UserId()) return NotFound();
         device.Name = name;
         await _devices.UpdateAsync(device);
         return DeviceProvisioningService.ToDto(device);

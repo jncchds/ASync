@@ -20,6 +20,10 @@ public class StorageBackend
     public DateTime? LastCheckedAt { get; set; }
     public bool? LastCheckOk { get; set; }
     public string? LastCheckError { get; set; }
+    /// <summary>Failed connection tests in a row (periodic or manual); 0 after a success.</summary>
+    public int CheckFailures { get; set; }
+    /// <summary>Shared back-ends: the most each user may keep on it (null = only their own quota applies).</summary>
+    public long? UserQuotaBytes { get; set; }
 
     public AppUser? User { get; set; }
 

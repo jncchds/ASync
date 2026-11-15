@@ -128,6 +128,30 @@ public interface IUploadSessionRepository
     Task<List<UploadSession>> GetIdleAsync(DateTime idleSince);
 }
 
+/// <summary>What one usage scan of a folder counted (see <see cref="FolderUsage"/>).</summary>
+public sealed record FolderScanResult(long Bytes, long Files, long? HistoryBytes, long? DataBytes, int? Snapshots);
+
+/// <summary>A folder's current use with who owns it and where it is stored, for totals per user and per back-end.</summary>
+public sealed record UsageRow(int FolderId, int UserId, int StorageBackendId, long UsedBytes);
+
+public interface IUsageRepository
+{
+    /// <summary>The rows of the user's folders (folders never counted have none).</summary>
+    Task<List<FolderUsage>> GetForUserAsync(int userId);
+    Task<FolderUsage?> GetAsync(int folderId);
+    /// <summary>Every folder's use (or one user's), with owner and back-end.</summary>
+    Task<List<UsageRow>> GetRowsAsync(int? userId = null);
+    /// <summary>Adds accepted upload bytes to the folder's <see cref="FolderUsage.PendingBytes"/> in one atomic statement (making the row if needed).</summary>
+    Task AddPendingAsync(int folderId, long bytes, DateTime now);
+    /// <summary>
+    /// Stores a scan's counts and subtracts <paramref name="pendingAtStart"/> (uploads the scan saw) from the pending bytes,
+    /// keeping what arrived while it ran. Clears the scan error.
+    /// </summary>
+    Task SaveScanAsync(int folderId, FolderScanResult result, long pendingAtStart, DateTime now);
+    /// <summary>Records a failed scan; the counts stay those of the last good one.</summary>
+    Task SaveScanErrorAsync(int folderId, string error, DateTime now);
+}
+
 public interface IAlertRepository
 {
     Task<AlertSettings?> GetSettingsAsync(int userId);

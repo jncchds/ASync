@@ -30,9 +30,15 @@ public class FoldersController : ControllerBase
         _hasher = hasher;
     }
 
+    /// <summary>The person's folders, each with its storage usage as last counted (see <see cref="UsageService"/>).</summary>
     [HttpGet]
-    public async Task<ActionResult<List<FolderDto>>> GetAll() =>
-        (await _folders.GetForUserAsync(User.UserId())).Select(FolderService.ToDto).ToList();
+    public async Task<ActionResult<List<FolderDto>>> GetAll([FromServices] IUsageRepository usage)
+    {
+        var counted = (await usage.GetForUserAsync(User.UserId())).ToDictionary(u => u.FolderId);
+        return (await _folders.GetForUserAsync(User.UserId()))
+            .Select(f => FolderService.ToDto(f) with { Usage = counted.TryGetValue(f.Id, out var u) ? UsageService.ToDto(u) : null })
+            .ToList();
+    }
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<FolderDto>> Get(int id) =>

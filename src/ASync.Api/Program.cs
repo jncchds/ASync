@@ -63,6 +63,16 @@ builder.Services.AddSingleton<MaintenanceClaims>();
 builder.Services.AddScoped<FolderMaintenanceService>();
 builder.Services.AddHostedService<MaintenanceScheduler>();
 
+// ── Storage usage, quotas and back-end health ─────────────────────────────────
+builder.Services.AddScoped<IUsageRepository, UsageRepository>();
+builder.Services.AddSingleton<UsageOptions>();
+builder.Services.AddSingleton<UsageScanSignal>();
+builder.Services.AddScoped<UsageService>();
+builder.Services.AddHostedService<UsageScanner>();
+builder.Services.AddSingleton<HealthOptions>();
+builder.Services.AddScoped<StorageHealthService>();
+builder.Services.AddHostedService<StorageHealthScheduler>();
+
 // ── Deleting folders and users (purging stored data in the background) ────────
 builder.Services.AddScoped<IPurgeJobRepository, PurgeJobRepository>();
 builder.Services.AddScoped<PurgeService>();

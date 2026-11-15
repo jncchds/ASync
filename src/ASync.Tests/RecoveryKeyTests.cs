@@ -344,7 +344,7 @@ public class RecoveryKeyTests : IDisposable
         Assert.NotNull(created.Value!.RecoveryKey);
         Assert.Equal("no-store", controller.Response.Headers.CacheControl.ToString());
         Assert.Null((await Controller(server, Alice).Get(created.Value.Id)).Value!.RecoveryKey);
-        Assert.All((await Controller(server, Alice).GetAll()).Value!, f => Assert.Null(f.RecoveryKey));
+        Assert.All((await Controller(server, Alice).GetAll(new FakeUsageRepository(server.Folders))).Value!, f => Assert.Null(f.RecoveryKey));
     }
 
     [Fact]

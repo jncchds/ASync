@@ -105,14 +105,27 @@ public sealed class FolderSyncer
         }
         CheckMassDeletion(plan);
 
+        // Over the quota, the first refused upload says so and the rest are not tried this run (each would be refused);
+        // downloads and deletions go on.
+        var refusedByQuota = 0;
         foreach (var (path, action) in plan)
         {
             ct.ThrowIfCancellationRequested();
             local.TryGetValue(path, out var l);
             remote.TryGetValue(path, out var r);
+            if (refusedByQuota > 0 && action is Action.Upload or Action.Conflict)
+            {
+                refusedByQuota++;
+                continue;
+            }
             try
             {
                 await ExecuteAsync(path, action, l, r, result, ct);
+            }
+            catch (StorageQuotaExceededException e)
+            {
+                refusedByQuota++;
+                result.Errors.Insert(0, e.Message);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or HttpRequestException)
             {
@@ -120,6 +133,7 @@ public sealed class FolderSyncer
             }
             if (++_unsaved >= 50) SaveState();
         }
+        if (refusedByQuota > 0) result.Errors.Add($"{refusedByQuota} file(s) not uploaded: over the storage quota.");
 
         _state.LastSync = DateTimeOffset.UtcNow;
         await CleanUpIfDueAsync(ct);

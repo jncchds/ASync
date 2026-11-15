@@ -399,9 +399,16 @@ public class FolderService(
     /// The prune and check a device should run now. Only end-to-end folders are handed to devices (the server
     /// maintains Transport folders itself), and each due job goes to one device at a time.
     /// </summary>
-    public MaintenanceClaimDto ClaimMaintenance(FolderDevice membership)
+    /// <param name="manual">A job run by hand (<c>async-cli prune</c>/<c>check</c>): claimed whether due or not, for any
+    /// Backup folder, unless another device holds it. The answer then says only whether that one was claimed.</param>
+    public MaintenanceClaimDto ClaimMaintenance(FolderDevice membership, MaintenanceKind? manual = null)
     {
         var folder = membership.Folder!;
+        if (manual is { } by)
+        {
+            var mine = folder.Mode == SyncMode.Backup && claims.TryClaim(folder.Id, by, membership.DeviceId);
+            return new MaintenanceClaimDto(mine && by == MaintenanceKind.Prune, mine && by == MaintenanceKind.Check, folder.CheckReadDataPercent);
+        }
         bool Claim(MaintenanceKind kind) =>
             MaintenanceSchedule.Applies(folder) && folder.Encryption == FolderEncryption.EndToEnd && !membership.Paused
             && MaintenanceSchedule.IsDue(folder, kind, Now) && claims.TryClaim(folder.Id, kind, membership.DeviceId);

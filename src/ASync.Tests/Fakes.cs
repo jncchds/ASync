@@ -158,3 +158,47 @@ internal sealed class RecordingNotifier : ASync.Api.Hubs.ISyncNotifier
     public Task ToDevicesAsync(IEnumerable<Guid> deviceIds, string name, params object?[] args) { ToDevices.Add((name, args)); return Task.CompletedTask; }
     public Task ToUserAsync(int userId, string name, params object?[] args) { ToUsers.Add((name, args)); return Task.CompletedTask; }
 }
+
+/// <summary>Usage rows in memory, joined with <paramref name="folders"/> for owner and back-end, like the EF repository.</summary>
+internal sealed class FakeUsageRepository(FakeFolderRepository folders) : IUsageRepository
+{
+    public readonly Dictionary<int, FolderUsage> Rows = [];
+
+    private FolderUsage Row(int folderId, DateTime now) =>
+        Rows.TryGetValue(folderId, out var row) ? row : Rows[folderId] = new FolderUsage { FolderId = folderId, UpdatedAt = now };
+
+    public Task<List<FolderUsage>> GetForUserAsync(int userId) => Task.FromResult(Rows.Values
+        .Where(u => folders.Folders.Any(f => f.Id == u.FolderId && f.UserId == userId)).OrderBy(u => u.FolderId).ToList());
+
+    public Task<FolderUsage?> GetAsync(int folderId) => Task.FromResult(Rows.GetValueOrDefault(folderId));
+
+    public Task<List<UsageRow>> GetRowsAsync(int? userId = null) => Task.FromResult((
+        from u in Rows.Values
+        join f in folders.Folders on u.FolderId equals f.Id
+        where userId == null || f.UserId == userId
+        select new UsageRow(u.FolderId, f.UserId, f.StorageBackendId, u.Bytes + u.PendingBytes)).ToList());
+
+    public Task AddPendingAsync(int folderId, long bytes, DateTime now)
+    {
+        lock (Rows) Row(folderId, now).PendingBytes += bytes;
+        return Task.CompletedTask;
+    }
+
+    public Task SaveScanAsync(int folderId, FolderScanResult r, long pendingAtStart, DateTime now)
+    {
+        lock (Rows)
+        {
+            var row = Row(folderId, now);
+            (row.Bytes, row.Files, row.HistoryBytes, row.DataBytes, row.Snapshots) = (r.Bytes, r.Files, r.HistoryBytes, r.DataBytes, r.Snapshots);
+            row.PendingBytes = Math.Max(0, row.PendingBytes - pendingAtStart);
+            (row.ScannedAt, row.ScanError, row.UpdatedAt) = (now, null, now);
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task SaveScanErrorAsync(int folderId, string error, DateTime now)
+    {
+        lock (Rows) (Row(folderId, now).ScanError, Row(folderId, now).UpdatedAt) = (error, now);
+        return Task.CompletedTask;
+    }
+}

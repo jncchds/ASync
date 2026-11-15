@@ -3,8 +3,8 @@ using ASync.Contracts;
 namespace ASync.Core.Models;
 
 /// <summary>
-/// One problem the server found (see <c>Alerts/AlertRules</c>): a device overdue or failing on a folder, or a Backup
-/// folder whose check or prune failed. Open while <see cref="ResolvedAt"/> is null. At most one incident is open per
+/// One problem the server found (see <c>Alerts/AlertRules</c>): a device overdue or failing on a folder, a Backup
+/// folder whose check or prune failed, a person near or over their quota, or a storage back-end failing its health check. Open while <see cref="ResolvedAt"/> is null. At most one incident is open per
 /// subject (folder + device for Overdue/Failing, which may turn into one another while open; folder + kind for the
 /// others), so a problem is announced once, not on every scan.
 /// </summary>
@@ -12,7 +12,11 @@ public class AlertIncident
 {
     public int Id { get; set; }
     public int UserId { get; set; }
-    public int FolderId { get; set; }
+    /// <summary>Null for problems that are not about one folder (quota, storage health).</summary>
+    public int? FolderId { get; set; }
+    /// <summary>The back-end of a StorageFailing incident, or of a shared back-end's quota (cascade with the back-end).</summary>
+    public int? StorageBackendId { get; set; }
+    public string? StorageBackendName { get; set; }
     /// <summary>Null for folder problems (check, prune).</summary>
     public Guid? DeviceId { get; set; }
     public AlertKind Kind { get; set; }
