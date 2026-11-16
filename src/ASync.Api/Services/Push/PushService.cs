@@ -87,6 +87,12 @@ public class PushService(
         return null;
     }
 
+    /// <summary>At most one browse wake-up per device in this long.</summary>
+    public static readonly TimeSpan BrowseInterval = TimeSpan.FromSeconds(20);
+
+    /// <summary>Whether a wake-up can be sent to the device now (push on, an endpoint registered, not revoked).</summary>
+    public bool CanWake(Device d) => settings.UnifiedPush && d.PushTarget is not null && d.RevokedAt is null;
+
     public DevicePushDto? ToDto(Device d) =>
         d.PushTarget is { } target && d.PushType is { } type
             ? new DevicePushDto(type, Uri.TryCreate(target, UriKind.Absolute, out var uri) ? uri.Host : "", d.PushRegisteredAt ?? d.CreatedAt,
@@ -138,7 +144,12 @@ public class PushService(
         if (device is null || device.RevokedAt is not null) return WakeOutcome.Skipped("No such device.");
         if (device.PushTarget is not { } target) return WakeOutcome.Skipped("The device has not registered a push endpoint.");
         if (reason == PushWake.Changed && connections.IsConnected(deviceId)) return WakeOutcome.Skipped("The device is connected.");
-        var interval = reason == PushWake.Overdue ? settings.OverdueInterval : settings.ChangedInterval;
+        var interval = reason switch
+        {
+            PushWake.Overdue => settings.OverdueInterval,
+            PushWake.Browse => BrowseInterval, // the picker's first request wakes; the next ones wait for the same wake
+            _ => settings.ChangedInterval,
+        };
         if (!force && !throttle.TryTake(deviceId, reason, interval, clock.GetUtcNow())) return WakeOutcome.Skipped("Woken a moment ago.");
 
         var (error, gone) = await PostAsync(target, reason, ct);

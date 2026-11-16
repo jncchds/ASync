@@ -1,7 +1,16 @@
 # Release notes
 
-## v0.1.5 — 2026-11-16
+## v0.1.5 — 2026-11-17
 
+- feat: **Choose a device's folder from the web instead of typing its path.** *Browse…* next to *Folder on the device*
+  (attaching a device to a folder, or changing where it syncs) lets the device itself list its folders, live: home,
+  Desktop, Documents, Pictures…, the drives on Windows, mounted disks on Linux and macOS, a phone's internal storage and
+  SD cards; folders open with a click, files are shown greyed so you recognise the place, *New folder here…* makes one,
+  and *Use this folder* fills in the path. The device must be online, or a phone with UnifiedPush wake-ups, which is
+  woken for it (up to 30 seconds); a phone also needs All files access. The *Devices* page shows per device whether it
+  can be browsed, and typing the path always works. Only you can browse your
+  devices, nothing is stored on the server, and it can be turned off per device (*Settings → Allow browsing folders from
+  the web* in the apps, `async-cli browsing --off`, or `--no-browse`/`ASYNC_ALLOW_BROWSE=0` for an agent).
 - feat(android): **Folders anywhere on the phone, including the top of the storage.** Android's own folder picker refuses
   the root of the internal storage, of an SD card and Download "to protect your privacy"; like FolderSync, Solid Explorer
   and Syncthing-fork, ASync can now ask for *All files access* instead. *Choose folder…* explains why in one screen and
@@ -50,6 +59,8 @@
   longer uploads it twice (one version instead of two).
 - fix(ui): **The add-device QR code is dark on white in the dark theme too.** It was drawn in the page's pale text
   colour on its white card, which phones could hardly read.
+- test: the desktop app's tests record what their fakes were asked in a thread-safe list; a plain list could fail a run
+  now and then with "Collection was modified" when the app called a fake while a test read it.
 
 ## v0.1.4 — 2026-11-16
 

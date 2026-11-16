@@ -22,6 +22,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The phone's browse scope is pure C# over IStorageAccess: tested here, built into the Android head. -->
+    <Compile Include="..\ASync.App.Android\PhoneBrowseScope.cs" Link="Linked\PhoneBrowseScope.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ASync.App\ASync.App.csproj" />
     <ProjectReference Include="..\ASync.App.Desktop\ASync.App.Desktop.csproj" />
   </ItemGroup>

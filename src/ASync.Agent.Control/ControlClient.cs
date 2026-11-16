@@ -103,6 +103,9 @@ public sealed class ControlClient : IAsyncDisposable
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.InitEncryption, FolderId = folderId, Secret = passphrase }, ct)).RecoveryKey
         ?? throw new InvalidDataException("No recovery key in the answer.");
 
+    public async Task<string> SetBrowsingAsync(bool enabled, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.SetBrowsing, Enabled = enabled }, ct)).Message ?? "";
+
     public async Task<string> CancelAsync(int? folderId, CancellationToken ct = default) =>
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.Cancel, FolderId = folderId }, ct)).Message ?? "";
 

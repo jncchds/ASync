@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using ASync.Agent.Control;
 using ASync.Client.Core;
+using ASync.Client.Core.Browse;
 using ASync.Client.Core.Sync;
 using ASync.Contracts;
 using Microsoft.Extensions.Logging;
@@ -52,6 +53,53 @@ public sealed record AgentOptions
     /// <summary>See <see cref="SyncAgent.RunAtStart"/> and <see cref="SyncAgent.RunOnInterval"/> (both off on Android: WorkManager schedules).</summary>
     public bool RunAtStart { get; init; } = true;
     public bool RunOnInterval { get; init; } = true;
+
+    /// <summary>
+    /// What the web UI may browse on this device (a computer's starting points by default; the Android app's volumes). Null:
+    /// no browsing at all.
+    /// </summary>
+    public IBrowseScope? Browse { get; init; } = DesktopBrowseScope.Instance;
+
+    /// <summary>
+    /// Browsing from the web UI forced off for this process (<c>async-cli run --no-browse</c>); the environment variable
+    /// <c>ASYNC_ALLOW_BROWSE=0</c> does the same for every host. The setting itself (<c>agent-settings.json</c>) is then
+    /// kept but not used.
+    /// </summary>
+    public bool BrowsingForcedOff { get; init; }
+}
+
+/// <summary>The agent's own settings in its config directory (<c>agent-settings.json</c>); everything about folders is on the server.</summary>
+public sealed record AgentSettings(bool AllowBrowsing = true)
+{
+    public const string FileName = "agent-settings.json";
+
+    private static readonly System.Text.Json.JsonSerializerOptions Json = new(System.Text.Json.JsonSerializerDefaults.Web) { WriteIndented = true };
+
+    /// <summary>The saved settings, or the defaults when there are none or they cannot be read.</summary>
+    public static AgentSettings Load(string configDirectory)
+    {
+        try
+        {
+            var path = Path.Combine(configDirectory, FileName);
+            return File.Exists(path) ? System.Text.Json.JsonSerializer.Deserialize<AgentSettings>(File.ReadAllText(path), Json) ?? new() : new();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { return new(); }
+    }
+
+    public void Save(string configDirectory)
+    {
+        var path = Path.Combine(configDirectory, FileName);
+        var temp = path + ".tmp";
+        File.WriteAllText(temp, System.Text.Json.JsonSerializer.Serialize(this, Json));
+        File.Move(temp, path, overwrite: true);
+    }
+
+    /// <summary>Whether <c>ASYNC_ALLOW_BROWSE</c> says no (0, false, off, no).</summary>
+    public static bool BrowsingOffByEnvironment(string? value = null)
+    {
+        value ??= Environment.GetEnvironmentVariable("ASYNC_ALLOW_BROWSE");
+        return value?.Trim().ToLowerInvariant() is "0" or "false" or "off" or "no";
+    }
 }
 
 /// <summary>
@@ -99,9 +147,63 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         _options = options;
         _logger = loggers.CreateLogger("agent");
         _store = new FileClientStore(options.ConfigDirectory, options.Protector);
+        _settings = AgentSettings.Load(_store.Root);
+        _browsingLocked = options.BrowsingForcedOff || AgentSettings.BrowsingOffByEnvironment();
+        if (options.Browse is { } scope) scope.Changed += () => _ = ReportBrowsingAsync();
     }
 
     public IClientStore Store => _store;
+
+    // ── Browsing from the web UI ──────────────────────────────────────────────
+
+    private AgentSettings _settings;
+    private readonly bool _browsingLocked;
+
+    /// <summary>Whether the web UI may browse this device's folders now (the setting, unless forced off).</summary>
+    public bool BrowsingAllowed => _options.Browse is not null && !_browsingLocked && _settings.AllowBrowsing;
+
+    private long _lastBrowseTicks;
+
+    /// <summary>When the web UI last asked this device to list a directory (null: not since the agent started).</summary>
+    public DateTimeOffset? LastBrowseAt => Interlocked.Read(ref _lastBrowseTicks) is var t and > 0 ? new DateTimeOffset(t, TimeSpan.Zero) : null;
+
+    /// <summary>
+    /// The server woke this device for browsing (a phone's "browse" push): waits for the device's agent to start (up to
+    /// <paramref name="startTimeout"/>) and opens a fresh live connection. False when no device runs (not enrolled, revoked).
+    /// </summary>
+    public async Task<bool> WakeForBrowsingAsync(TimeSpan startTimeout, CancellationToken ct)
+    {
+        var until = DateTimeOffset.UtcNow + startTimeout;
+        while (_agent is null)
+        {
+            if (DateTimeOffset.UtcNow > until) return false;
+            await Task.Delay(250, ct);
+        }
+        await _agent.RefreshLiveConnectionAsync(ct);
+        return true;
+    }
+
+    private BrowsingStatusDto? BrowsingStatus() => _options.Browse is not { } scope ? null
+        : new BrowsingStatusDto(BrowsingAllowed, _browsingLocked, scope.Unavailable?.Message);
+
+    private async Task ReportBrowsingAsync()
+    {
+        Publish(StatusEvent());
+        if (_agent is { } agent) await agent.ReportBrowseStateAsync();
+    }
+
+    public async Task<string> SetBrowsingAsync(bool enabled, CancellationToken ct)
+    {
+        if (_options.Browse is null) throw new ControlException("This agent does not offer browsing.");
+        if (enabled && _browsingLocked)
+            throw new ControlException("Browsing is turned off where this agent was started (--no-browse or ASYNC_ALLOW_BROWSE=0).");
+        _settings = _settings with { AllowBrowsing = enabled };
+        try { _settings.Save(_store.Root); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { throw new ControlException($"Could not save the setting: {e.Message}"); }
+        _logger.LogInformation("Browsing folders from the web UI is now {State}.", enabled ? "allowed" : "turned off");
+        await ReportBrowsingAsync();
+        return enabled ? "The web UI may browse this device's folders." : "The web UI can no longer browse this device's folders.";
+    }
 
     /// <summary>The control channel's endpoint, once <see cref="Start"/> opened it.</summary>
     public ControlEndpoint? Endpoint => _server?.Endpoint;
@@ -228,8 +330,10 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         {
             AllowMassDeletion = _options.AllowMassDeletion, LocalTrees = _options.LocalTrees, Conditions = _options.Conditions,
             SettleTime = _options.SettleTime, RunAtStart = _options.RunAtStart, RunOnInterval = _options.RunOnInterval,
+            Browser = _options.Browse is { } scope ? new DeviceBrowser(scope, () => BrowsingAllowed) : null,
         };
         agent.StatusChanged += () => Publish(StatusEvent());
+        agent.BrowseRequested += () => Interlocked.Exchange(ref _lastBrowseTicks, DateTimeOffset.UtcNow.UtcTicks);
         agent.StatusChanged += () => RaiseObserver(FoldersChanged);
         agent.FolderStatusChanged += OnFolderChanged;
         agent.RemoteChanged += id => RaiseObserver(RemoteFolderChanged is { } changed ? () => changed(id) : null);
@@ -475,6 +579,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             Problem = _revokedMessage ?? _failure ?? agent?.ConnectionProblem,
             Folders = agent is null ? [] : [.. agent.Folders.Select(Map)],
             Enrollment = _enrollment,
+            Browsing = BrowsingStatus(),
         };
     }
 

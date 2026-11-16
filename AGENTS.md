@@ -69,7 +69,7 @@ src/
   ASync.Agent/            the agent as a process: AgentRuntime (lock, control handler, SyncAgent), AgentHost (Generic
                           Host: systemd notify, Windows Service, logging), ServiceInstaller (systemd, launchd, Task
                           Scheduler, sc.exe), RollingFileLogger
-  ASync.Cli/              async-cli (System.CommandLine): enroll, status, folders, sync, run, set-path, pause/resume,
+  ASync.Cli/              async-cli (System.CommandLine): enroll, status, folders, sync, run, set-path, pause/resume, browsing,
                           init-encryption, unlock, snapshots, restore (also offline: --repo), prune, check, forget,
                           service install/uninstall/status/run. References ASync.Storage for offline restores
   ASync.App/              Avalonia 12 shared UI (CommunityToolkit.Mvvm): views, view models, theme (the web UI's tokens),
@@ -523,7 +523,10 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
 - **Live events:** SignalR `/hubs/sync` sends `SyncEvent {seq, name, args}` on the method `event`, only
   through `ISyncNotifier`. Devices join `device:<id>` and people join `user:<id>`. The events are
   `config.changed`, `folder.changed` (folderId, originDeviceId), `folder.status`, `device.revoked` (to the
-  device being removed) and `alerts.changed` (to people, when incidents open, change or close).
+  device being removed), `alerts.changed` (to people, when incidents open, change or close) and `device.status`
+  (deviceId, to its owner: it connected, disconnected or reported a new browsing state). Since task 17 the hub also
+  carries the two device-only calls of "Web UI: browsing a device's folders": the device's `ReportBrowse` and the
+  server's `browse` client result.
 
 **Mirror and TwoWay** (`FolderSyncer`):
 - It compares, file by file, the local file, the remote listing, and both as they were after the last sync
@@ -923,6 +926,124 @@ The UI belongs to the owner's app family (abook, nopds, …): same layout and co
   runs end to end against a running server. That script enrolls a device, backs up through the gateway, then
   browses and downloads, and checks every refusal.
 
+## Web UI: browsing a device's folders (task 17)
+
+People attach a device to a folder by its local path. Typing `C:\Users\me\Documents` or `/storage/emulated/0/DCIM` from
+memory is error-prone, so the device-folder form (`FolderDeviceForm`) has *Browse…*: a picker in which the **device
+itself** lists its directories, live, through the server. Typing stays possible (offline devices).
+
+**Protocol: SignalR client results** (`ISingleClientProxy.InvokeAsync<BrowseReply>("browse", BrowseRequest)`), chosen
+over a request/response pair with a correlation id because the hub already gives everything such a pair would need:
+the correlation, the answer routed back to the waiting call, cancellation (the server's timeout), and the failure when
+the connection drops or the client has no handler. Nothing to store or expire, no second event name, and the device's
+answer goes back on the connection it came from. The cost is one server (no backplane); ASync runs as one server
+anyway. Shapes are in `ASync.Contracts/Browse.cs`:
+- `BrowseRequest {path?, files, maxEntries, newFolder?}`: no path = the device's first starting point (home; a phone's
+  internal storage). `newFolder` creates that subfolder of `path` first, then lists it.
+- `BrowseReply {listing?, refusal?, message?}`; `BrowseListing {path, parent, crumbs[], entries[], more, places[],
+  separator}`. `path` is canonical (absolute, `..` resolved; a typed path that is a link is resolved to its target);
+  `parent` is null at the top (a drive, `/`, a phone's volume); `crumbs` are label + path from the top, so the web UI
+  never splits device paths itself (Windows, UNC, phone volumes). `entries` are directories first, then symlinks, then
+  files (ordinal, case-insensitive), each with name, kind, size (files), link target (symlinks), `unreadable`, `hidden`;
+  directories carry their full path. `places` are the starting points: home, Desktop, Documents, Downloads, Pictures,
+  Music, Videos (those that exist), drives on Windows (`Local disk (C:)`), `/` and the mounted volumes on Linux (removable
+  media, /mnt, a container's volumes such as /data: real file systems outside the system trees, `DesktopBrowseScope.
+  LinuxVolumes`) and /Volumes on macOS; on a phone the volumes (internal storage, SD cards, USB) and Download, DCIM,
+  Pictures, Documents, Music, Movies.
+- **Limits:** 2000 entries (`BrowseLimits.MaxEntries`; the server clamps what it asks for, the device clamps again), and
+  250,000 characters of names and paths, so an answer always fits the hub's 1 MB receive limit (raised from SignalR's
+  32 KB for this); the rest is counted (`more`, "… and N more"). 10 seconds (`BrowseLimits.Timeout`) for an answer.
+- **Refusals** (`DeviceBrowseRefusal`): TurnedOff, NoAllFilesAccess, NotFound, Unreadable, OutOfReach, Invalid (not a
+  full path, a file, a bad name), Exists (the new folder), Failed. The device never throws at the server.
+- `DeviceBrowseState {allowed, needsAllFilesAccess}` is what the device reports with the hub method `ReportBrowse` when
+  its connection opens (and reconnects) and whenever the setting or a phone's All files access changes. The server keeps
+  it with the connection (`DeviceConnections`), never in the database, and tells the owner's pages `device.status`.
+
+**Server** (`DeviceBrowseService`, `DevicesController`): `GET /api/devices/{id}/browse?path=&files=` and
+`POST /api/devices/{id}/browse/mkdir {path, name}`, people only (`Roles.Users`; a device token gets 403, like every
+people's endpoint, checked by `ApiSecurityTests`), rate-limited per person (`RateLimits.Browse`, 120 a minute: every click
+is one, and each makes the device read its disk).
+- Someone else's device: 404 (ownership before anything else, the mkdir body included).
+- **An asleep phone is woken.** Android freezes or ends the app in the background, and its hub connection goes; a
+  device without a connection but with a UnifiedPush endpoint (and `Push__Mode` sending) is `Wakeable`, not `Offline`.
+  Browsing it sends a `browse` wake-up (`IDeviceWaker` → `PushService.WakeAsync`, at most one per 20 seconds per device:
+  the picker's next clicks wait for the same wake) and the request waits up to 30 seconds (`BrowseLimits.WakeWait`) for
+  the device to connect and report its state (`DeviceConnections.WaitForReportAsync`), then goes on as for an online
+  device (so a woken phone without All files access still gets that 409). A wake the push server refuses is a 409 at
+  once, one that does not bring the device in time a 409 "did not wake up… open ASync on it". On the phone, the
+  `browse` reason does not run folders: `BackgroundWork.Wake` enqueues the expedited `BrowseWakeWorker`, which starts the
+  agent, opens a fresh hub connection (`AgentRuntime.WakeForBrowsingAsync` → `SyncAgent.RefreshLiveConnectionAsync`: a
+  process thawed from the freezer still believes in its old socket and would notice only after the 30-second server
+  timeout and a reconnect delay; a connection opened in the last 10 seconds, i.e. a cold start, is kept), and keeps the
+  process online until 90 seconds pass without a listing request (`AgentRuntime.LastBrowseAt`), at most 5 minutes.
+  Desktops and the CLI agent register no push endpoint: they are online or offline. The web UI says "Waking <device>…
+  this can take up to 30 seconds" for a `Wakeable` device.
+- 409 with a message for people: revoked; offline (no hub connection); turned off; a phone without All files access
+  ("choose the folder in the app, or turn on All files access"); an older app or agent that never reported a state
+  ("update it, or type the path"). These are decided from what the device reported, without asking it.
+- The device's newest connection is asked. Its refusals map to 409 (turned off, no access, exists), 404 (not found),
+  400 (invalid), 422 (unreadable, out of reach), 502 (failed); no answer in time is a 504, a broken connection a 502.
+- `DeviceDto.Browse` (`BrowseAvailability`: Available, Offline, Wakeable, TurnedOff, NoAllFilesAccess, Unsupported, Revoked) is the
+  same decision, for the Devices page and the form's hint.
+- **Nothing is stored or logged** beyond a line per request on the device (path and entry count); listings pass through.
+
+**Device side** (`ASync.Client.Core/Browse`): `DeviceBrowser` answers with an `IBrowseScope`: `DesktopBrowseScope`
+(Windows, Linux, macOS: the CLI agent `async-cli run`, the agent service `async-cli|async-desktop service run`) or the
+Android head's `PhoneBrowseScope` (in-process agent). `SyncAgent.Browser` registers the hub handler (run off the receive
+loop with `Task.Run`, so a slow disk does not hold up events) and reports the state; `AgentRuntime` builds it from
+`AgentOptions.Browse` (null: no browsing). Rules:
+- **Symlinks** are listed with their target and never followed: not opened, not counted as directories, not probed.
+- **Unreadable directories** in a listing are marked (the device tries to open each directory entry, within a 3-second
+  budget per listing); only the requested directory itself being unreadable refuses the request.
+- **Phones** (`PhoneBrowseScope`, linked into `ASync.App.Tests`): only with All files access; only under a volume (the
+  parent of a volume's root is null: /storage/emulated cannot be listed anyway); Android/data and Android/obb are never
+  listed, opened or created (`PhoneStorage.IsUnreachable`/`Check`, the same rules as the in-app picker and the guarded
+  tree). SAF document trees are not browsable from the web: they need the system picker, on the phone.
+- Paths are pure strings in `BrowsePaths` (both styles whatever the OS, so Windows paths are unit-tested on Linux):
+  canonical form (`c:/x//y\` → `C:\x\y`, `C:` → `C:\`, UNC roots kept, `C:foo` refused as relative), parent, crumbs,
+  child, valid new folder names (Windows' reserved names and characters on Windows).
+
+**The setting "Allow browsing folders from the web"** (default on) belongs to the agent, since the agent answers:
+`agent-settings.json` in its config directory (`AgentSettings`), changed with the control operation `set-browsing
+{enabled}` (still protocol 1; `AgentStatusDto.Browsing {allowed, locked, unavailable}`; an older agent sends none and
+the app hides the setting). The desktop app and the Android app show it in Settings ("This device"); the CLI has
+`async-cli browsing [--on|--off]` (through the running agent, else it writes the file). `async-cli run --no-browse`
+and `ASYNC_ALLOW_BROWSE=0|false|off|no` (any host, e.g. the Docker image or a service unit) force it off for the
+process: the status says `locked`, the app's checkbox is disabled with the reason, and `set-browsing on` is refused.
+
+**Why this is safe enough.** Browsing shows the owner directory and file *names* (never contents) on their own device,
+which the device already reads as that account, and only to a session of that same person; a device token cannot ask
+(a stolen device token could already read every folder of that device). The device answers only while online and
+allowed, refuses what its platform keeps out of reach, and creates nothing but an empty folder that the person named.
+An admin cannot browse other people's devices (ownership is checked, not roles). People who don't want it turn it off
+per device, or force it off where the agent starts. An agent installed system-wide (`service install --system`: root or
+LocalSystem) lists names anywhere on the machine; that is the account the owner chose for it, and such units are where
+`ASYNC_ALLOW_BROWSE=0` belongs when that is too much.
+
+**Web UI** (`components/DeviceFolderPicker.tsx`): opens under the form's fields at the typed path (falling back to home
+when it does not exist): starting points as buttons, ← Back (its own history), ↑ Up (the listing's parent), breadcrumbs,
+the path, the list (folders open on click; unreadable ones 🔒, links ↪ with their target, files greyed with their size;
+hidden entries behind "Show hidden (N)", files behind "Show files"), "… and N more", *New folder here…*, *Use this
+folder* (fills the path field), Cancel. An unavailable device (409/502/504) shows the server's message with "you can
+still type the folder's path". The Devices page has a *Browsing* column (`BROWSE_LABELS`, hint as tooltip) and reloads
+on `device.status`.
+
+**Tests:** `ASync.Tests`: `BrowsePathsTests` (both path styles, names), `DeviceBrowserTests` (order, sizes, files off,
+the entry and size limits, symlinks listed and a linked path resolved, an unreadable subdirectory marked and an unreadable
+directory refused, hidden and out-of-reach paths, turned off and unavailable, bad paths, new folders, Linux mounts and
+Windows drive labels), `DeviceBrowseServiceTests` (owner, offline, revoked, turned off, no All files access, an old
+agent, timeout, a broken connection, every refusal's status, the newest connection, the clamp; an asleep phone woken and
+answering, woken but without All files access, not waking in time, a refused wake-up, no push), `AgentBrowsingTests` (the
+setting over the control channel and kept, forced off, the variable), `ApiBrowseTests` (PostgreSQL: a real hub client
+answering the client result over the test server, list, mkdir, 404 for another person, 403 for a device token, turned
+off, offline; a person cannot `ReportBrowse`); `ASync.App.Tests`: `BrowsingTests` (the setting in Settings, a refused
+change undone, locked, an old agent, the phone's note, the checkbox at 360 px, the phone scope's volumes, crumbs,
+Android/data and obb, new folders, no access). `scripts/e2e-sync.cs` browses the running CLI agent B, creates a folder,
+attaches B there and syncs into it, then `async-cli browsing --off/--on`. `scripts/smoke-android.sh` browses the
+emulator's storage root through the API with All files access on, and gets the 409 with it off; with ntfy installed
+(its UnifiedPush section) it also browses the phone with the app's process killed: the server wakes it, it connects, and
+answers (with its "no All files access" refusal at that point of the run).
+
 ## Web UI: files, versions and trash of plain folders
 
 Gap item 5. Code: `PlainFilesController`, `Services/PlainFileService.cs` (`PlainBrowser` + `PlainFileService`),
@@ -1131,6 +1252,8 @@ runs two agents of one user.
     the agent, so the agent alone writes the identity and its secrets (Keychain items and DPAPI blobs belong to the
     program that made them). A saved identity ends the wait for one at once. `enroll` refuses while enrolled (`forget`
     first). The code is never logged;
+  - `set-browsing` (`enabled`; task 17): whether the web UI may browse this device's folders, kept in
+    `agent-settings.json`; the status's `browsing` shows it (see "Web UI: browsing a device's folders");
   - `subscribe`: the connection then carries only events: a full `status` first, then `folder` changes, `run-finished`
     with the result, progress twice a second while it moves, `status` on connection or folder-list changes. A
     subscriber that does not keep up loses its oldest events (bounded channel of 256) instead of slowing the agent.
@@ -1199,7 +1322,7 @@ window closed or the app ended, and the CLI and the app always see the same agen
 - `UnlockViewModel` (a dialog): passphrase or recovery key in a masked text box; the secret goes only to the agent's
   `unlock`, the field is cleared as soon as it is sent, and nothing logs it.
 - `UpdatesViewModel` (M3-3): the update banner over the page and the Updates card of the settings.
-- `SettingsViewModel` (over the page): start at login, notifications, updates, theme (light/dark/system, applied at once),
+- `SettingsViewModel` (over the page): start at login, notifications, updates, theme (light/dark/system, applied at once), "Allow browsing folders from the web" (the agent's `set-browsing`, task 17),
   open the web UI, versions of the app and the agent, and *Sign out of this device* (a confirmation, then `forget`).
 - The shell reconnects when the agent goes away ("The agent stopped", tray: problem) and refreshes "5 min ago" every
   30 seconds. All state changes happen on the UI thread (the loop is started there and awaits continue there).
@@ -2022,10 +2145,12 @@ device's distributor endpoint (for example ntfy). Implemented in `ASync.Api/Serv
 - **When:** `folder.changed` (a device's `changed`, a restore in the web UI) queues a wake for each member that takes
   changes (TwoWay, Mirror Download), is not paused and is not the origin (`PushQueue.FolderChanged`); it is sent only if
   that device has **no live hub connection** (`DeviceConnections.IsConnected`: connected devices get the event). The
-  alert scan queues a wake for every device with an open **Overdue** incident. `PushThrottle`: at most one change wake per
-  device per `Push__ChangedSeconds` (60), one overdue wake per `Push__OverdueHours` (6), the test always.
+  alert scan queues a wake for every device with an open **Overdue** incident. Browsing an asleep device's folders sends a
+  `browse` wake directly, not queued (see "Web UI: browsing a device's folders"). `PushThrottle`: at most one change wake per
+  device per `Push__ChangedSeconds` (60), one overdue wake per `Push__OverdueHours` (6), one browse wake per 20 seconds,
+  the test always.
 - **How:** requests only queue (`PushQueue`, bounded, drops the oldest); `PushDispatcher` (hosted) sends one at a time
-  with `PushService.WakeAsync`: a POST of `{"async":"wake","reason":"changed|overdue|test"}` (no user data; `TTL` and
+  with `PushService.WakeAsync`: a POST of `{"async":"wake","reason":"changed|overdue|test|browse"}` (no user data; `TTL` and
   `Urgency: high` headers that Web Push servers understand), Content-Length, through the `push` HTTP client: no
   redirects, `Push__TimeoutSeconds` (10). The outcome is stored on the device; 404/410 (the distributor dropped the
   registration) removes the target. **SSRF:** the same stance as alert webhooks: the address comes from the person's own
@@ -2224,6 +2349,25 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
      8–10's storage permission and legacy storage, real USB drives and SD cards (the emulator's virtual SD card stands in),
      an OEM Settings without the per-app page (the fallback page).
      Next: the VFS on the desktops (Cloud Files, File Provider, FUSE), photos/contacts/calendars, iOS.
+   - **M4-5 Browsing a device's folders from the web (task 17, done):** the device-folder form's *Browse…* asks the
+     device itself, over the hub (SignalR client results), to list a directory; starting points per platform, symlinks
+     shown not followed, unreadable directories marked, 2000 entries, new folders; owner only, rate-limited, nothing
+     stored; per-device setting (apps' Settings, `async-cli browsing`, `--no-browse`/`ASYNC_ALLOW_BROWSE=0`); an asleep
+     phone woken by a `browse` push (see "Web UI: browsing a device's folders"). Verified: unit and API tests (a real hub
+     client answering the client result through the test server), `scripts/e2e-sync.sh` (312 checks: browsing a running
+     CLI agent, a folder created and attached at the picked path and synced into, turned off and on), the Android smoke
+     test on the Android 15 x86_64 emulator with ntfy (153 checks, all passed: the clear 409 without All files access,
+     the storage root and Android/ without data and obb with it, Android/data refused, and the app's process killed →
+     browsing woke it through ntfy, it connected and answered in 2 s without running folders), the web picker in Chrome
+     at 1280 and 390 px against an `async-cli` container (screenshots). Only compiled or reasoned about: Windows paths on
+     a real Windows agent (the path rules are unit-tested as strings), macOS /Volumes, a desktop agent service answering
+     (the same `AgentRuntime` as the CLI agent the e2e test browses).
+     **ASync.App.Tests flake** (1 failure in 22 runs on main, name not captured): not reproduced in 130 runs here (30
+     plain, 30 right after `ASync.Tests` and under its load, 30 with every core busy, 20 next to a Docker build, 20 after
+     the fix). A real race was found that can cause it: the fakes recorded calls in plain `List<T>`s that the shell's
+     thread-pool continuations append to while tests enumerate them (`Assert.Contains`, `Assert.Equal` → "Collection was
+     modified"). They are a lock-protected `CallLog<T>` now, whose enumeration is a snapshot; also the event list an
+     in-process subscription test fills from another task.
 6. **M5 — hardening:** OpenTelemetry, and whatever is left of the gap list below. Later: Google Drive,
    OneDrive and Dropbox adapters.
 

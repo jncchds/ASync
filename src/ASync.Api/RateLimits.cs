@@ -16,4 +16,11 @@ public static class RateLimits
     /// </summary>
     public const string DeviceSignIn = "device-sign-in";
     public const int DeviceSignInPermitsPerMinute = 240;
+
+    /// <summary>
+    /// Browsing a device's folders from the web UI: 120 requests a minute per person (every click in the picker is one,
+    /// and each makes the device list a directory).
+    /// </summary>
+    public const string Browse = "browse";
+    public const int BrowsePermitsPerMinute = 120;
 }

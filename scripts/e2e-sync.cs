@@ -713,6 +713,55 @@ async Task<int> RunAsync()
     Check(attachB.Status == HttpStatusCode.OK, "attach B to a new folder while it runs");
     Check(await WaitFor(() => File.Exists(b.Path("late", "x.txt")), 30), "B's agent picks up the new folder (config.changed) and syncs it", runB.Log.ToString());
 
+    // ── Browsing a running agent's folders from the web UI ────────────────────
+    Section("browsing B's folders through the API");
+    string? BrowseState(JsonNode? list, Agent agent) =>
+        list?.AsArray().FirstOrDefault(d => d?["id"]?.GetValue<string>() == agent.Id.ToString())?["browse"]?.GetValue<string>();
+    var deviceList = (await Send(HttpMethod.Get, "/api/devices", token: token)).Body;
+    Check(BrowseState(deviceList, b) == "Available" && BrowseState(deviceList, a) == "Offline",
+        $"the device list says B can be browsed, A (not running) is offline → {BrowseState(deviceList, b)}, {BrowseState(deviceList, a)}", deviceList?.ToJsonString());
+    Directory.CreateDirectory(b.Path("pick", "inner"));
+    Write(b.Path("pick", "readme.txt"), "12345");
+    var pickDir = Path.GetFullPath(b.Path("pick"));
+    var browsed = await Send(HttpMethod.Get, $"/api/devices/{b.Id}/browse?path={Uri.EscapeDataString(pickDir)}", token: token);
+    var entries = browsed.Body?["entries"]?.AsArray() ?? [];
+    Check(browsed.Status == HttpStatusCode.OK && browsed.Body?["path"]?.GetValue<string>() == pickDir
+          && entries.Select(e => e?["name"]?.GetValue<string>()).SequenceEqual(["inner", "readme.txt"])
+          && entries[1]?["kind"]?.GetValue<string>() == "File" && entries[1]?["size"]?.GetValue<long>() == 5,
+        "B's agent lists a directory for the web UI: directories first, files with their size", browsed.Raw);
+    var homeListing = await Send(HttpMethod.Get, $"/api/devices/{b.Id}/browse", token: token);
+    Check(homeListing.Status == HttpStatusCode.OK && homeListing.Body?["places"]?.AsArray().Any(p => p?["kind"]?.GetValue<string>() == "Home") == true,
+        "without a path it starts at B's home, with its starting points", homeListing.Raw);
+    var made = await Send(HttpMethod.Post, $"/api/devices/{b.Id}/browse/mkdir", new { path = pickDir, name = "target" }, token);
+    var picked = made.Body?["path"]?.GetValue<string>();
+    Check(made.Status == HttpStatusCode.OK && picked == Path.Combine(pickDir, "target") && Directory.Exists(picked),
+        "a new folder is created on B from the picker", made.Raw);
+    var offlineBrowse = await Send(HttpMethod.Get, $"/api/devices/{a.Id}/browse", token: token);
+    Check(offlineBrowse.Status == HttpStatusCode.Conflict && offlineBrowse.Raw.Contains("offline"),
+        $"browsing A, which is not running, is a 409 that says it is offline → {offlineBrowse.Status}", offlineBrowse.Raw);
+    var bDeviceToken = JsonNode.Parse(File.ReadAllText(Path.Combine(b.Config, "token.json")))?["accessToken"]?.GetValue<string>();
+    var browseByDevice = await Send(HttpMethod.Get, $"/api/devices/{b.Id}/browse", token: bDeviceToken);
+    Check(browseByDevice.Status == HttpStatusCode.Forbidden, $"a device token cannot browse → {browseByDevice.Status}", browseByDevice.Raw);
+
+    // The picked path becomes the folder's local path, and the folder syncs there.
+    var pickedFolder = await Folder("picked", "TwoWay", "Transport", (a, "picked", null));
+    var attachPicked = await Send(HttpMethod.Put, $"/api/folders/{pickedFolder}/devices", new { deviceId = b.Id, localPath = picked }, token);
+    Check(attachPicked.Status == HttpStatusCode.OK, "attach B to a folder at the picked path", attachPicked.Raw);
+    Write(a.Path("picked", "chosen.txt"), "synced to the picked folder");
+    await Sync(a, pickedFolder, "A uploads into the folder");
+    Check(await WaitFor(() => File.Exists(Path.Combine(picked ?? "", "chosen.txt")), 30), "B's agent syncs it into the picked folder", runB.Log.ToString());
+
+    // Turned off on B (routed to its running agent): the server knows, and refuses with a clear message.
+    var off = await Cli(b, ["browsing", "--off"]);
+    Check(off.Exit == 0 && off.Output.Contains("no longer"), "B: `browsing --off` through the running agent", off.Output);
+    var turnedOff = await WaitForAsync(async () => BrowseState((await Send(HttpMethod.Get, "/api/devices", token: token)).Body, b) == "TurnedOff", 15, 0.5);
+    var offBrowse = await Send(HttpMethod.Get, $"/api/devices/{b.Id}/browse", token: token);
+    Check(turnedOff && offBrowse.Status == HttpStatusCode.Conflict && offBrowse.Raw.Contains("turned off"),
+        $"the device list says turned off, and browsing B is a 409 that says so → {offBrowse.Status}", offBrowse.Raw);
+    var on = await Cli(b, ["browsing", "--on"]);
+    var shown = await Cli(b, ["browsing"]);
+    Check(on.Exit == 0 && shown.Output.Contains("allowed"), "B: `browsing --on` turns it back on", shown.Output);
+
     // ── The Docker image ──────────────────────────────────────────────────────
     if (dockerImage is not null && dockerNetwork is not null)
     {

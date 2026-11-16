@@ -38,6 +38,9 @@ public interface IControlHandler
     /// <summary>Sets up a new end-to-end folder with the passphrase; returns its recovery key.</summary>
     Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct) =>
         throw new ControlException("This agent cannot set up encryption.");
+
+    /// <summary>Allows or forbids browsing this device's folders from the web UI.</summary>
+    Task<string> SetBrowsingAsync(bool enabled, CancellationToken ct) => throw new ControlException("This agent cannot change browsing.");
 }
 
 /// <summary>An error the agent reports to the client as it is (no stack trace).</summary>
@@ -199,6 +202,11 @@ public sealed class ControlServer : IAsyncDisposable
                     Id = r.Id, Ok = true,
                     RecoveryKey = await _handler.InitEncryptionAsync(Folder(),
                         r.Secret is { Length: > 0 } passphrase ? passphrase : throw new ControlException("\"init-encryption\" needs a passphrase."), ct),
+                },
+                ControlProtocol.Ops.SetBrowsing => new ControlResponse
+                {
+                    Id = r.Id, Ok = true,
+                    Message = await _handler.SetBrowsingAsync(r.Enabled ?? throw new ControlException("\"set-browsing\" needs enabled."), ct),
                 },
                 _ => new ControlResponse { Id = r.Id, Error = $"Unknown operation \"{r.Op}\" (this agent speaks control protocol {ControlProtocol.Version})." },
             };

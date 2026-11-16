@@ -53,6 +53,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   device's last sync went. The list updates live as devices report.
   - Add and edit folders (Backup, Mirror or two-way), then attach devices with their local folder. Mirror
     folders also get a direction for each device. Devices can be paused.
+  - **Browse…** next to the local folder picks it on the device itself instead of typing the path: see
+    [Choosing a device's folder from the web](#choosing-a-devices-folder-from-the-web).
   - If someone else changed a folder while you were editing it, you are asked to reload instead of
     overwriting their change.
   - End-to-end encrypted folders show the command that sets them up on a device.
@@ -112,6 +114,35 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
       has the folder unlocked), because only devices have the key.
     - Either waits while a backup or a download is using the folder, and tries again later.
   - **Mirror and two-way folders:** stored as normal files, with old versions and a trash.
+
+### Choosing a device's folder from the web
+
+<p>
+  <img src="docs/screenshots/light-16-browse-picker.png" alt="The folder picker in the web UI, listing a device's folders" width="64%">
+  <img src="docs/screenshots/phone-16-browse-picker.png" alt="The same picker on a phone-sized screen, dark theme" width="30%">
+</p>
+
+When you attach a device to a folder (or change where it syncs), *Browse…* next to *Folder on the device* opens a
+picker in which the device itself lists its folders, live:
+
+- **Starting points:** your home, Desktop, Documents, Downloads, Pictures, Music and Videos; the drives on Windows;
+  `/` and mounted disks on Linux (USB disks, `/mnt/…`, a container's volumes such as `/data`) and macOS (`/Volumes`); on a
+  phone the internal storage, SD cards and USB drives, Download, DCIM, Pictures and Documents.
+- **Moving around:** click a folder to open it; ← Back, ↑ Up and the breadcrumbs go back. Files are shown greyed with
+  their size so you recognise the place (*Show files* hides them); hidden files and folders are behind *Show hidden*.
+  Links are shown with where they point but not opened; folders the device cannot read have a 🔒. A very full folder
+  shows its first 2000 entries and "… and N more".
+- **New folder here…** creates a folder on the device; **Use this folder** puts its path into the form.
+- **When it cannot work:** the device must be online, with its app or agent running (it answers within 10 seconds).
+  A phone that Android put to sleep is woken first when it has [wake-ups](#background-sync-on-android) (UnifiedPush):
+  the picker says "Waking…" and that can take up to 30 seconds. A phone needs
+  [All files access](#folders-anywhere-on-the-phone) (otherwise choose the folder in the app). The *Devices* page shows per
+  device whether browsing is available, and why not. You can always type the path instead.
+
+Nothing is stored: the server passes the listing from the device to your browser. Only you can browse your devices
+(not other people, admins included, and not devices themselves). To turn it off for a device: *Settings → Allow browsing
+folders from the web* in the desktop or Android app, or `async-cli browsing --off`; `async-cli run --no-browse` or
+`ASYNC_ALLOW_BROWSE=0` (e.g. in the Docker image's environment) keeps it off for that agent, whatever the setting.
 
 ## Known limits
 
@@ -661,6 +692,7 @@ Identities made by earlier versions keep working and are moved to the new form t
 | `run` | Keeps syncing: on schedule, when files change, and as soon as another device changes a folder. The default in Docker. Refused while another agent (the service) runs for the same config directory. |
 | `service install\|uninstall\|status [--system]` | Runs the agent in the background as a service of this OS (see above). |
 | `set-path`, `pause`, `resume` | Changes this device's settings for a folder. |
+| `browsing [--on\|--off]` | Shows, allows or forbids [choosing this device's folders from the web](#choosing-a-devices-folder-from-the-web) (on by default). `run --no-browse` or `ASYNC_ALLOW_BROWSE=0` keeps it off for that agent. |
 | `init-encryption --folder N` | Sets up an end-to-end encrypted Backup folder (on one device) and prints its recovery key. |
 | `unlock --folder N` | Unlocks an end-to-end encrypted folder on another device, with the passphrase or the recovery key. |
 | `snapshots`, `restore` | Lists a Backup folder's snapshots, and restores one (or `--path` a part of it) into `--target`. `--snapshot` takes the short id that `snapshots` and the web UI show (the id's last 8 digits), the start of the id, or `latest`. |

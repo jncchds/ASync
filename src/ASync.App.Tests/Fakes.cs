@@ -17,7 +17,7 @@ internal sealed class FakeAgent : IAgentConnector, IAgentSession
 
     public bool Available { get; set; } = true;
     public int Connects { get; private set; }
-    public List<string> Calls { get; } = [];
+    public CallLog<string> Calls { get; } = new();
     public string? LastSecret { get; private set; }
     public Func<int?, List<FolderRunDto>> SyncResult { get; set; } = id => [new FolderRunDto(id ?? 1, "Docs", true, "2 up, 0 down, 0 deleted", false, DateTimeOffset.UtcNow)];
     public Exception? Fail { get; set; }
@@ -90,6 +90,9 @@ internal sealed class FakeAgent : IAgentConnector, IAgentSession
 
     public Task<string> CancelAsync(int? folderId, CancellationToken ct) => Answer($"cancel {folderId?.ToString() ?? "all"}", "stopped");
 
+    public Task<string> SetBrowsingAsync(bool enabled, CancellationToken ct) =>
+        Answer($"set-browsing {(enabled ? "on" : "off")}", enabled ? "browsing allowed" : "browsing off");
+
     public Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct)
     {
         LastSecret = passphrase;
@@ -102,7 +105,7 @@ internal sealed class FakeAgent : IAgentConnector, IAgentSession
 internal sealed class FakeService : IAgentServiceManager
 {
     public AgentServiceState State { get; set; } = AgentServiceState.NotInstalled;
-    public List<string> Calls { get; } = [];
+    public CallLog<string> Calls { get; } = new();
     public Action? OnInstall { get; set; }
 
     public Task<AgentServiceState> GetStateAsync(CancellationToken ct) => Task.FromResult(State);
@@ -133,9 +136,9 @@ internal sealed class FakePlatform : IPlatformServices
     public string MachineName => "test-host";
     public DevicePlatform Platform => DevicePlatform.Linux;
     public string AppVersion => "1.2.3";
-    public List<string> Opened { get; } = [];
-    public List<(string Title, string Message)> Notifications { get; } = [];
-    public List<ThemeChoice> Themes { get; } = [];
+    public CallLog<string> Opened { get; } = new();
+    public CallLog<(string Title, string Message)> Notifications { get; } = new();
+    public CallLog<ThemeChoice> Themes { get; } = new();
     public string? NextPick { get; set; }
     public bool StartAtLogin { get; set; }
 
@@ -180,7 +183,7 @@ internal sealed class FakePlatform : IPlatformServices
 /// <summary>A phone's shared storage: volumes are directories of a test's temporary directory.</summary>
 internal sealed class FakeStorage(params StorageVolumeInfo[] volumes) : IStorageAccess
 {
-    public List<string> Calls { get; } = [];
+    public CallLog<string> Calls { get; } = new();
     public bool HasAllFilesAccess { get; set; }
     public List<RawVolume> Raw { get; } = [];
     public event Action? Changed;
@@ -195,7 +198,7 @@ internal sealed class FakeStorage(params StorageVolumeInfo[] volumes) : IStorage
 /// <summary>A phone's background side the test drives (Android's battery exemption, UnifiedPush, the reminder).</summary>
 internal sealed class FakeBackground : IBackgroundServices
 {
-    public List<string> Calls { get; } = [];
+    public CallLog<string> Calls { get; } = new();
     public bool IsIgnoringBatteryOptimizations { get; set; }
     public string? VendorHint { get; set; } = "Xiaomi: also allow Autostart.";
     public List<PushDistributor> Installed { get; set; } = [new("io.heckel.ntfy", "ntfy")];

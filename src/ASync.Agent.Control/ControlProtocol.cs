@@ -65,6 +65,14 @@ public static class ControlProtocol
         /// <see cref="ControlResponse.RecoveryKey"/> is its recovery key, shown to the person once.
         /// </summary>
         public const string InitEncryption = "init-encryption";
+
+        // Added for browsing from the web UI (task 17, still protocol 1).
+
+        /// <summary>
+        /// Allow or forbid the web UI to browse this device's folders (<c>enabled</c>); the agent keeps it in its config
+        /// directory and tells the server. <see cref="AgentStatusDto.Browsing"/> shows the setting.
+        /// </summary>
+        public const string SetBrowsing = "set-browsing";
     }
 }
 
@@ -89,6 +97,8 @@ public sealed record ControlRequest
     public DevicePlatform? Platform { get; init; }
     /// <summary><c>set-conditions</c>: the folder's new run conditions.</summary>
     public RunConditionsDto? Conditions { get; init; }
+    /// <summary><c>set-browsing</c>: allow browsing from the web UI.</summary>
+    public bool? Enabled { get; init; }
 }
 
 public sealed record ControlResponse
@@ -177,7 +187,16 @@ public sealed record AgentStatusDto
     public List<FolderStatusDto> Folders { get; init; } = [];
     /// <summary>A device-code enrollment waiting for approval (or the reason it ended without one).</summary>
     public PendingEnrollmentDto? Enrollment { get; init; }
+    /// <summary>Browsing this device's folders from the web UI (null: an older agent without it).</summary>
+    public BrowsingStatusDto? Browsing { get; init; }
 }
+
+/// <summary>
+/// Whether the web UI may browse this device's folders. <paramref name="Allowed"/>: the setting in effect;
+/// <paramref name="Locked"/>: forced off where the agent was started (<c>--no-browse</c>, <c>ASYNC_ALLOW_BROWSE=0</c>), so
+/// the app cannot turn it on; <paramref name="Unavailable"/>: why it cannot work now anyway (a phone without All files access).
+/// </summary>
+public sealed record BrowsingStatusDto(bool Allowed, bool Locked = false, string? Unavailable = null);
 
 /// <summary>
 /// A device-code request the agent is polling: show <see cref="UserCode"/> and open <see cref="VerificationUri"/>.

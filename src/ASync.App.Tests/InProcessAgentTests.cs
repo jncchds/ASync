@@ -17,7 +17,7 @@ public class InProcessAgentTests
     private sealed class FakeHandler : IControlHandler
     {
         public AgentStatusDto Status { get; set; } = Statuses.NotEnrolled();
-        public List<string> Calls { get; } = [];
+        public CallLog<string> Calls { get; } = new();
         public Exception? Fail { get; set; }
 
         public HelloDto Hello() => new(ControlProtocol.Version, "9.9.9", 1, AgentMode.Foreground, "/cfg");
@@ -103,7 +103,7 @@ public class InProcessAgentTests
         var handler = new FakeHandler { Status = Statuses.Connected(Statuses.Folder()) };
         var hub = new ControlEventHub();
         var session = (await new InProcessAgentConnector(handler, hub).ConnectAsync(CancellationToken.None))!;
-        var received = new List<ControlEvent>();
+        var received = new CallLog<ControlEvent>(); // filled by the reading task, read here
         var reading = Task.Run(async () =>
         {
             await foreach (var e in session.SubscribeAsync(CancellationToken.None)) received.Add(e);

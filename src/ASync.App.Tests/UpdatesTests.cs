@@ -13,7 +13,7 @@ internal sealed class FakeUpdates : IUpdateService
     public AppUpdate? Next { get; set; } = new("2.0.0", "- new things");
     public Exception? FailDownload { get; set; }
     public Exception? FailApply { get; set; }
-    public List<string> Calls { get; } = [];
+    public CallLog<string> Calls { get; } = new();
 
     public Task<AppUpdate?> CheckAsync(CancellationToken ct)
     {

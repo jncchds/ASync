@@ -15,6 +15,8 @@
 #   Nothing on the phone needs its browser: the device-code flow shows the code to approve on a computer, and a new
 #   end-to-end Backup folder is set up in the app (passphrase, recovery key shown once), backed up, and restored byte for
 #   byte by async-cli with that passphrase.
+#   Browsing from the web UI (task 17): through the API, a clear 409 without All files access; with it, the storage's
+#   root listed, Android/ without data and obb, Android/data itself refused.
 #   Background work (M4-2): the foreground-service notification during the large transfer; the battery prompt and the
 #   system's exemption question; the folders' periodic WorkManager jobs; with the app in the background and its process
 #   killed (am kill), a file changed by async-cli arrives through the folder's periodic job, which the system runs in a
@@ -124,6 +126,9 @@ on_phone() { adb shell "cat '$1'" 2>/dev/null | tr -d '\r'; }
 # the writer with SIGPIPE and the pipeline fails although the text was there).
 contains() { local text="$1" out; shift; out=$("$@" 2>/dev/null | tr -d '\r') || true; [[ "$out" == *"$text"* ]]; }
 logged() { contains "$1" adb logcat -d -s ASync; }
+# Browsing the phone's folders through the API (task 17): the HTTP status, the answer in $work/browse.json.
+browse_status() { api GET /api/devices >/dev/null; curl -s -o "$work/browse.json" -w "%{http_code}" -H "Authorization: Bearer $token" "$server/api/devices/$device/browse$1"; }
+browse_state() { api GET /api/devices | jq -r --arg d "$device" '.[] | select(.id == $d) | .browse'; }
 # settle FILE…: waits until the files' modification times stop changing. Android updates a new file's time a few seconds
 # after it was closed (the media scanner); a sync in between uploads it a second time (same content, one more version).
 settle() {
@@ -736,6 +741,20 @@ else
   wait_for 60 logged "woken by the server (changed)" && pass "logged: woken by the server (changed)" || fail "wake log" "$(adb logcat -d -s ASync | tail -10)"
   api GET /api/devices | jq -e --arg d "$device" '.[] | select(.id == $d) | .push.lastWakeOk == true' >/dev/null \
     && pass "the server recorded the wake-up as delivered" || fail "server wake recorded" "$(api GET /api/devices | jq -c '.[].push')"
+  # Browsing an asleep phone from the web UI (task 17): the server wakes it ("browse"), waits for it to connect, then asks.
+  # All files access is still off here, so the woken phone's own answer is that refusal (not "did not wake up").
+  background_app
+  alive && fail "am kill left the process running" || pass "closed once more, to be browsed"
+  adb logcat -c
+  asleep() { [[ "$(browse_state)" == Wakeable ]]; }
+  wait_for 40 asleep && pass "the Devices page says it is asleep and can be woken for browsing" || fail "wakeable" "$(browse_state)"
+  t0=$SECONDS
+  code=$(browse_status "")
+  [[ "$code" == 409 ]] && grep -q "All files access" "$work/browse.json" \
+    && pass "browsing it woke the closed app, which connected and answered in $((SECONDS - t0)) s ($(jq -r .message "$work/browse.json" | cut -c1-60)…)" \
+    || fail "browse wake" "$code $(cat "$work/browse.json") $(adb logcat -d -s ASync | tail -10)"
+  logged "woken by the server for browsing" && pass "logged: woken by the server for browsing (no folder run)" || fail "browse wake log" "$(adb logcat -d -s ASync | tail -10)"
+  logged "Background run" && fail "a browse wake-up ran folders" "$(adb logcat -d -s ASync | grep 'Background run')" || pass "no folder ran for it"
   open_app || true
 fi
 ctl "bg-reminder 3" >/dev/null
@@ -769,6 +788,12 @@ set_appop default
 sleep 2
 front_app
 wait_state '.state == "Connected"' 90 || fail "app connected" "$(state)"
+# Browsing the phone's folders from the web UI (task 17): without All files access, a clear 409.
+no_access_reported() { [[ "$(browse_state)" == NoAllFilesAccess ]]; }
+wait_for 20 no_access_reported && pass "the device list says the phone needs All files access to be browsed" || fail "browse state" "$(browse_state)"
+code=$(browse_status "")
+[[ "$code" == 409 ]] && grep -q "choose the folder in the app, or turn on All files access" "$work/browse.json" \
+  && pass "browsing it from the API: 409 \"$(jq -r .message "$work/browse.json" | cut -c1-90)…\"" || fail "browse without access" "$code $(cat "$work/browse.json")"
 adb shell "rm -rf '$target/.async' '$target/root-from-phone.txt' '$target/root-from-cli.txt'; echo 'at the root' > '$target/root-from-phone.txt'"
 settle "$target/root-from-phone.txt"
 rootf=$(api POST /api/folders "{\"name\":\"Phone root\",\"mode\":\"TwoWay\",\"encryption\":\"Transport\",\"kind\":\"Files\",\"storageBackendId\":$backend,\"rootPath\":\"root\",\"intervalMinutes\":60}" | jq -r .id)
@@ -801,6 +826,19 @@ jq -e '(.entries | index("data") | not) and (.entries | index("obb") | not)' <<<
   && pass "Android/data and Android/obb are not offered ($(jq -c .entries <<<"$inside"))" || fail "android data offered" "$inside"
 ctl picker-up >/dev/null
 shot allfiles-picker
+# With the access: the web UI can browse the storage's root, Android/data and obb left out.
+available_reported() { [[ "$(browse_state)" == Available ]]; }
+wait_for 20 available_reported && pass "with the access the device list says the phone can be browsed" || fail "browse state after grant" "$(browse_state)"
+code=$(browse_status "")
+jq -e '.path == "/storage/emulated/0" and .parent == null and .crumbs[0].label == "Internal storage"
+       and ([.entries[].name] | index("Download")) and ([.places[].label] | index("Internal storage"))' "$work/browse.json" >/dev/null && [[ "$code" == 200 ]] \
+  && pass "browsing it from the API lists the storage's root ($(jq -c '[.entries[] | select(.kind == "Directory") | .name] | .[0:6]' "$work/browse.json"))" \
+  || fail "browse root" "$code $(head -c 600 "$work/browse.json")"
+code=$(browse_status "?path=/storage/emulated/0/Android")
+[[ "$code" == 200 ]] && jq -e '[.entries[].name] | (index("data") == null and index("obb") == null)' "$work/browse.json" >/dev/null \
+  && pass "and Android/ without data and obb ($(jq -c '[.entries[].name]' "$work/browse.json"))" || fail "browse android" "$code $(cat "$work/browse.json")"
+code=$(browse_status "?path=/storage/emulated/0/Android/data")
+[[ "$code" == 422 ]] && pass "Android/data itself is refused (422: out of reach)" || fail "browse android/data" "$code $(cat "$work/browse.json")"
 storage=$(ctl storage)
 if [[ -n "$sd" ]]; then
   jq -e --arg p "$sd" '.volumes | length == 2 and .[0].label == "Internal storage" and .[1].path == $p' <<<"$storage" >/dev/null \
@@ -859,6 +897,8 @@ sleep 1
 ctl "show StorageCard" >/dev/null
 shot allfiles-settings
 has '.settings' && pass "Settings shows All files access as allowed" || fail "settings" "$(state)"
+ctl "show BrowsingPanel" >/dev/null
+shot settings-browsing
 ctl back >/dev/null
 
 # Taken away: Android stops the app's process (as when the switch is turned off in Settings); started again, the folders

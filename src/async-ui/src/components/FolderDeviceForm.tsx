@@ -1,5 +1,8 @@
 import { useState } from 'react'
-import { attachFolderDevice, errorMessage, isConflict, type Device, type Folder, type FolderDevice, type MirrorDirection } from '../api'
+import {
+  attachFolderDevice, BROWSE_HINTS, errorMessage, isConflict, type Device, type Folder, type FolderDevice, type MirrorDirection,
+} from '../api'
+import DeviceFolderPicker from './DeviceFolderPicker'
 
 interface Props {
   folder: Folder
@@ -26,6 +29,13 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState(false)
+  const [browsing, setBrowsing] = useState(false)
+  const device = devices.find(d => d.id === deviceId)
+  const deviceName = existing?.deviceName ?? device?.name ?? 'the device'
+  // Older servers send no availability: let the device's answer say why it cannot be browsed.
+  const browse = device?.browse ?? (device ? 'Available' : null)
+  const placeholder = device?.platform === 'Windows' ? 'C:\\Users\\me\\Documents'
+    : device?.platform === 'Android' ? '/storage/emulated/0/DCIM' : '/home/me/Documents'
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -59,15 +69,25 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
       <div className="form-row">
         <label>
           Device
-          <select value={deviceId} disabled={existing !== undefined} onChange={e => setDeviceId(e.target.value)} required>
+          <select value={deviceId} disabled={existing !== undefined} onChange={e => { setDeviceId(e.target.value); setBrowsing(false) }} required>
             {existing
               ? <option value={existing.deviceId}>{existing.deviceName}</option>
               : available.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </label>
-        <label>
+        <label className="path-field">
           Folder on the device
-          <input value={localPath} onChange={e => setLocalPath(e.target.value)} required maxLength={1000} placeholder="/home/me/Documents" />
+          <span className="input-with-button">
+            <input value={localPath} onChange={e => setLocalPath(e.target.value)} required maxLength={1000} placeholder={placeholder} />
+            <button type="button" className="secondary small" onClick={() => setBrowsing(b => !b)} disabled={!deviceId}
+              title={browse && browse !== 'Available' ? BROWSE_HINTS[browse] : 'Pick the folder on the device'}
+              aria-expanded={browsing}>
+              Browse…
+            </button>
+          </span>
+          {browse && browse !== 'Available' && !browsing && (
+            <span className="hint">{BROWSE_HINTS[browse]}{browse === 'Wakeable' ? '' : ' Type the path instead.'}</span>
+          )}
         </label>
         {folder.mode === 'Mirror' && (
           <label>
@@ -79,6 +99,17 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
           </label>
         )}
       </div>
+      {browsing && deviceId && (
+        <DeviceFolderPicker
+          key={deviceId}
+          deviceId={deviceId}
+          deviceName={deviceName}
+          waking={browse === 'Wakeable'}
+          initialPath={localPath}
+          onPick={p => { setLocalPath(p); setBrowsing(false) }}
+          onClose={() => setBrowsing(false)}
+        />
+      )}
       <label className="checkbox">
         <input type="checkbox" checked={paused} onChange={e => setPaused(e.target.checked)} /> Paused
       </label>
