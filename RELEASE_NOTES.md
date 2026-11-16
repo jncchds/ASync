@@ -2,6 +2,15 @@
 
 ## v0.1.5 — 2026-11-16
 
+- feat(android): **ASync in the Files app.** Your folders and backups show in Android's Files app and in every app's
+  file picker ("attach a file", "open", "save to") as *ASync — <your server>*, without syncing them to the phone first:
+  files are fetched when you open them, kept in a 512 MB cache, and anything over 128 MB streams (videos can be skipped
+  through). Two-way folders can be edited there (save, create, rename, move, copy, delete), stored exactly as a sync
+  stores them: replaced files keep their old version, deleted ones go to the trash, other devices pick the change up, and
+  a copy synced to a folder on the phone follows. Mirror folders are read-only there; backups show one directory per
+  snapshot, newest first, to open or copy files out of (end-to-end encrypted ones once unlocked in the app). Search,
+  recent files and thumbnails work; large transfers show the usual notification. It needs the server: offline, the
+  folders cannot be listed. Tried on an Android 15 emulator.
 - feat(android): **The Android app syncs and backs up in the background, and the server can wake it.** Folders run on
   their interval with the app closed (at least every 15 minutes, Android's shortest; also after a restart of the phone),
   and every folder runs when the app is opened. While a folder runs, a notification shows its progress with a *Cancel*

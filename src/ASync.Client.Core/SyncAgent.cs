@@ -102,6 +102,20 @@ public sealed class SyncAgent : IAsyncDisposable
             : throw new KeyNotFoundException($"Folder {folderId} is not assigned to this device.");
 
     /// <summary>Starts an automatic run of every folder (the Android app when it is opened), as a trigger does.</summary>
+    /// <summary>Starts an automatic run of one folder (its run conditions apply); false when there is no such folder.</summary>
+    public bool Trigger(int folderId, string reason)
+    {
+        if (!_workers.TryGetValue(folderId, out var worker)) return false;
+        worker.Trigger(reason);
+        return true;
+    }
+
+    /// <summary>
+    /// The server said a folder's content changed on another device (<c>folder.changed</c>), for any folder of this device,
+    /// Backup ones included; or the connection came back (folder id 0: anything may have changed). Handlers must be quick.
+    /// </summary>
+    public event Action<int>? RemoteChanged;
+
     public void TriggerAll(string reason)
     {
         foreach (var worker in _workers.Values) worker.Trigger(reason);
@@ -414,6 +428,7 @@ public sealed class SyncAgent : IAsyncDisposable
             _hubReconnecting = false;
             SetConnection(AgentConnection.Connected);
             await ReloadAsync(ct); // events may have been missed while offline
+            RaiseRemoteChanged(0);
             TriggerDownloads("reconnected"); // including folder.changed (a phone frozen in the background, say)
         };
         _hub.Closed += e =>
@@ -468,6 +483,12 @@ public sealed class SyncAgent : IAsyncDisposable
         catch (Exception e) { _logger.LogWarning("Reconnecting failed: {Message}", e.Message); }
     }
 
+    private void RaiseRemoteChanged(int folderId)
+    {
+        try { RemoteChanged?.Invoke(folderId); }
+        catch (Exception ex) { _logger.LogDebug("A change listener failed: {Message}", ex.Message); }
+    }
+
     /// <summary>The folders that take other devices' changes (TwoWay, Mirror Download).</summary>
     private void TriggerDownloads(string reason)
     {
@@ -489,6 +510,7 @@ public sealed class SyncAgent : IAsyncDisposable
                     await ReloadAsync(ct);
                     break;
                 case SyncEvents.FolderChanged when e.Args.Length > 0 && int.TryParse(e.Args[0]?.ToString(), out var folderId):
+                    RaiseRemoteChanged(folderId);
                     if (_workers.TryGetValue(folderId, out var worker) && worker.Folder.Mode != SyncMode.Backup
                         && worker.Folder.Direction != MirrorDirection.Upload)
                         worker.Trigger("changed on another device");

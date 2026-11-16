@@ -21,6 +21,7 @@ namespace ASync.App.Android;
 /// <c>pause|resume &lt;folder&gt;</c>, <c>unlock &lt;folder&gt;</c> (opens the dialog), <c>secret &lt;text&gt;</c>,
 /// <c>theme light|dark|system</c>, <c>settings</c>, <c>back</c>, <c>selftest &lt;folder&gt;</c> (the local tree
 /// contract on a fresh directory in that folder's tree).
+/// <c>docs …</c>: the documents provider through ContentResolver (DocumentsAutomation).
 /// </summary>
 [BroadcastReceiver(Name = "ua.pp.chds.async.Automation", Exported = true, Permission = "android.permission.DUMP")]
 [IntentFilter(["ua.pp.chds.async.AUTOMATION"])]
@@ -30,7 +31,7 @@ public sealed class Automation : BroadcastReceiver
     {
         var command = intent?.GetStringExtra("cmd") ?? "state";
         var pending = GoAsync()!;
-        if (command.StartsWith("bg", StringComparison.Ordinal))
+        if (command.StartsWith("bg", StringComparison.Ordinal) || command.StartsWith("docs", StringComparison.Ordinal))
         {
             // Background commands work without the UI (a process WorkManager started, the app swiped away).
             _ = Task.Run(async () =>
@@ -209,6 +210,7 @@ public sealed class Automation : BroadcastReceiver
     {
         var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         AndroidAgent.EnsureStarted(context);
+        if (parts[0] == "docs") return await DocumentsAutomation.RunAsync(context, line);
         var runtime = AndroidAgent.Runtime;
         switch (parts[0])
         {

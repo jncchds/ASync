@@ -232,6 +232,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         agent.StatusChanged += () => Publish(StatusEvent());
         agent.StatusChanged += () => RaiseObserver(FoldersChanged);
         agent.FolderStatusChanged += OnFolderChanged;
+        agent.RemoteChanged += id => RaiseObserver(RemoteFolderChanged is { } changed ? () => changed(id) : null);
         agent.FolderRan += r =>
         {
             try { FolderRan?.Invoke(r); }
@@ -387,6 +388,21 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         catch (ApiException e) { throw new ControlException(e.Message); }
         catch (HttpRequestException e) { throw new ControlException($"Cannot reach the server: {e.Message}"); }
     }
+
+    /// <summary>The signed-in API client of the running device (null while not enrolled, revoked or starting).</summary>
+    public AsyncApiClient? Api => _api;
+
+    /// <summary>Why the device cannot work: it was removed from the account (null otherwise).</summary>
+    public string? RevokedMessage => _revokedMessage ?? (_agent?.Connection == AgentConnection.Revoked ? _agent.ConnectionProblem : null);
+
+    /// <summary>
+    /// Another device changed a folder's content (<c>folder.changed</c>, any mode), or 0 after a reconnect (events may have
+    /// been missed). Handlers must be quick.
+    /// </summary>
+    public event Action<int>? RemoteFolderChanged;
+
+    /// <summary>Starts an automatic run of one folder (its run conditions apply); false when the device has no such folder.</summary>
+    public bool Trigger(int folderId, string reason) => _agent?.Trigger(folderId, reason) == true;
 
     /// <summary>Starts an automatic run of every folder (the app was opened).</summary>
     public void TriggerAll(string reason) => _agent?.TriggerAll(reason);

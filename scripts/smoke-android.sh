@@ -22,6 +22,15 @@
 #   the emulator's cellular network is metered) does not run, its job waits for UNMETERED, and runs once Wi-Fi is back;
 #   UnifiedPush with the ntfy app as the distributor and an ntfy server container: the endpoint registered with the
 #   server, and a change on another device wakes the killed app, which syncs it down; the local reminder.
+#   Documents provider (M4-3), driven through the automation's `docs` commands (ContentResolver/DocumentsContract calls
+#   inside the app, as the Files app makes them; files are read by the adb shell with a one-document grant, as another
+#   app reads them; the Files
+#   app itself for the screenshots): the adb shell refused without MANAGE_DOCUMENTS; the root and the folders; a TwoWay
+#   folder listed without .async; a file uploaded by async-cli read byte for byte from the cache; a 200 MB file streamed
+#   through a proxy descriptor, not cached; a file created and written through the provider seen by async-cli and in the
+#   phone's own synced copy, replaced (a version kept, no conflict copy), renamed, copied into a new directory, deleted
+#   into the trash; search, recents, a thumbnail; a Backup folder's snapshots and tree, a file from it byte for byte
+#   (cached, then streamed), a write into it refused.
 #
 # Needs: an Android SDK (ANDROID_HOME or ~/Android/Sdk: platform-tools, emulator), an AVD (AVD=name, default async-smoke)
 # or a running emulator/device, docker, jq, curl, python3, a .NET SDK with the android workload (DOTNET=…) unless APK=… is
@@ -32,6 +41,7 @@
 #   SCREENSHOTS=docs/screenshots scripts/smoke-android.sh   # also android-*-light.png / -dark.png of the main screens
 #   NO_BUILD=1 IMAGE=async-desktop-smoke-async-server:latest …   # reuse a server image instead of building one
 #   KEEP=1 …                                                # leave the stack, the emulator and artifacts/android-smoke
+#   SKIP_BACKGROUND=1 …                                     # leave out the background-work sections (quicker)
 # The checks read `condition && pass … || fail …`: pass never fails, so fail runs only when the condition does.
 #   NTFY_APK=path/to/ntfy.apk …   # the ntfy app (F-Droid io.heckel.ntfy) for the UnifiedPush checks; skipped without it
 # shellcheck disable=SC2015
@@ -450,6 +460,141 @@ cli restore --folder "$secret" --snapshot latest --target "$work/restored-secret
   && pass "and restores the phone's files byte for byte" || fail "e2e restore" "$(ls -R "$work/restored-secrets" 2>&1 | head)"
 api DELETE "/api/folders/$secret/devices/$device" >/dev/null || true # the next sections count the phone's folders
 
+section "documents provider: ASync in the Files app"
+# Driven through the automation's `docs` commands: ContentResolver/DocumentsContract calls inside the app (its own uid may
+# call its provider), the same calls the Files app makes; the Files app itself for the screenshots.
+docs_ctl() { ctl "docs $1"; }
+# docs_wait COMMAND [seconds]: a slow command (a large read) in the background, polled until it answers.
+docs_wait() {
+  local t r
+  t=$(docs_ctl "start $1")
+  for _ in $(seq 1 $(( ${2:-180} * 2 ))); do
+    r=$(docs_ctl "result $t")
+    [[ "$r" != pending ]] && { printf '%s\n' "$r"; return 0; }
+    sleep 0.5
+  done
+  echo timeout; return 1
+}
+denied=$(adb shell content query --uri "content://$pkg.documents/root" 2>&1 | tr -d '\r' || true)
+[[ "$denied" == *"Permission Denial"* || "$denied" == *"SecurityException"* || "$denied" == *"requires android.permission.MANAGE_DOCUMENTS"* ]] \
+  && pass "another caller without MANAGE_DOCUMENTS (the adb shell) is refused" || fail "provider permission" "$denied"
+roots=$(docs_ctl roots)
+jq -e --arg t "ASync — 10.0.2.2" 'length == 1 and .[0].title == $t and .[0].document_id == "root" and .[0].summary == "admin"' <<<"$roots" >/dev/null \
+  && pass "one root: $(jq -r '.[0].title' <<<"$roots") ($(jq -r '.[0].summary' <<<"$roots"))" || fail "roots" "$roots"
+top=$(docs_ctl "list root")
+jq -e --arg d "f/$docs" --arg p "b/$photos" '(.entries | any(.document_id == $d and .mime_type == "vnd.android.document/directory"))
+  and (.entries | any(.document_id == $p))' <<<"$top" >/dev/null \
+  && pass "its folders: $(jq -r '[.entries[]._display_name] | join(", ")' <<<"$top")" || fail "root listing" "$top"
+listing=$(docs_ctl "list f/$docs")
+jq -e '(.entries | any(._display_name == "from-cli.txt" and .mime_type == "text/plain")) and (.entries | any(._display_name == "video.bin"))
+  and (.entries | all(._display_name != ".async"))' <<<"$listing" >/dev/null \
+  && pass "Phone docs lists $(jq -r '[.entries[]._display_name] | join(", ")' <<<"$listing") (not .async)" || fail "folder listing" "$listing"
+enc() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"; }
+doc_uri() { printf 'content://%s.documents/document/%s' "$pkg" "$(enc "$1")"; }
+# shell_read ID: the document as another app reads it (here the adb shell, with a read grant for that one document, as
+# DocumentsUI gives the app a person picked a file for): its sha256. Not read inside the app: a process cannot read the
+# proxy descriptors it serves (AGENTS.md "Android documents provider", gotcha).
+shell_read() { docs_ctl "grant $1" >/dev/null; adb exec-out content read --uri "$(doc_uri "$1")" | sha256sum | cut -d' ' -f1; }
+ungranted=$(adb shell content read --uri "$(doc_uri "f/$docs/video.bin")" 2>&1 | tr -d '\r' | head -c 400 || true)
+r=$(docs_ctl "open f/$docs/from-cli.txt")
+sum=$(shell_read "f/$docs/from-cli.txt")
+[[ "$sum" == "$(sha256sum "$work/cli-docs/from-cli.txt" | cut -d' ' -f1)" ]] && [[ "$(jq -r .fd <<<"$r")" == *"/cache/documents/files/"* ]] \
+  && pass "a file uploaded by async-cli, read by another process with a grant for it, byte for byte (from the cache)" || fail "read small file" "$r $sum"
+[[ "$ungranted" == *"Permission Denial"* || "$ungranted" == *SecurityException* ]] && pass "a document without a grant stays refused to it" || fail "ungranted read" "$ungranted"
+# 200 MB is over the cache's 128 MB per file: a proxy descriptor (appfuse), read in ranges, nothing stored.
+before=$(docs_ctl cache | jq -r .bytes)
+r=$(docs_wait "open f/$docs/video.bin")
+sum=$(shell_read "f/$docs/video.bin")
+[[ "$sum" == "$(sha256sum "$work/cli-docs/video.bin" | cut -d' ' -f1)" ]] && [[ "$(jq -r .fd <<<"$r")" == *appfuse* ]] \
+  && [[ "$(docs_ctl cache | jq -r .bytes)" == "$before" ]] \
+  && pass "the 200 MB file streams through a proxy descriptor ($(jq -r .fd <<<"$r")), byte for byte, not cached" || fail "stream large file" "$r"
+logged "Transfers: running" && pass "the transfer notification kept the network for it" || pass "(the transfer notification was not needed: $(adb logcat -d -s ASync | grep -c Transfers) transfer lines)"
+
+new=$(docs_ctl "create f/$docs text/plain provider-note.txt")
+[[ "$new" == "f/$docs/provider-note.txt" ]] && pass "created $new" || fail "create" "$new"
+docs_ctl "write $new written in the Files app" >/dev/null
+server_has "$docs" provider-note.txt >/dev/null && pass "the write is on the server at once" || fail "write to server"
+cli_sync
+[[ "$(cat "$work/cli-docs/provider-note.txt" 2>/dev/null)" == "written in the Files app" ]] && pass "async-cli syncs it down byte for byte" || fail "cli sees the write" "$(cat "$work/cli-docs/provider-note.txt" 2>&1)"
+phone_note() { [[ "$(on_phone /sdcard/ASyncSmoke/docs/provider-note.txt)" == "${1:-written in the Files app}" ]]; }
+wait_for 90 phone_note && pass "the phone's own synced copy (the SAF folder) got it through the run the write triggered" || fail "local copy" "$(on_phone /sdcard/ASyncSmoke/docs/provider-note.txt)"
+docs_ctl "write $new replaced in the Files app" >/dev/null
+history=$(api GET "/api/folders/$docs/files/history?path=provider-note.txt")
+jq -e '.versions | length == 1' <<<"$history" >/dev/null && pass "replacing it keeps the old content as a version" || fail "version kept" "$history"
+wait_for 90 phone_note "replaced in the Files app" && pass "and the phone's copy follows again" || fail "local copy replaced"
+conflicts=$(adb shell ls /sdcard/ASyncSmoke/docs 2>/dev/null | tr -d '\r' | grep -c conflict || true)
+[[ "$conflicts" == 0 ]] && pass "no conflict copies from the provider's own writes" || fail "conflict copies" "$(adb shell ls /sdcard/ASyncSmoke/docs)"
+renamed=$(docs_ctl "rename $new provider-renamed.txt")
+[[ "$renamed" == "f/$docs/provider-renamed.txt" ]] && server_has "$docs" provider-renamed.txt >/dev/null && pass "renamed to $renamed" || fail "rename" "$renamed"
+dir=$(docs_ctl "mkdir f/$docs Scans")
+docs_ctl "list f/$docs" | jq -e '.entries | any(._display_name == "Scans" and .mime_type == "vnd.android.document/directory")' >/dev/null \
+  && pass "a new directory ($dir) is listed (kept on the phone until a file goes in)" || fail "mkdir" "$dir"
+copied=$(docs_ctl "copy $renamed $dir")
+[[ "$copied" == "$dir/provider-renamed.txt" ]] && server_has "$docs" Scans >/dev/null && pass "copied into it: $copied" || fail "copy" "$copied"
+[[ "$(docs_ctl "delete $renamed")" == ok ]] && ! server_has "$docs" provider-renamed.txt >/dev/null \
+  && api GET "/api/folders/$docs/files/trash" | jq -e '[.. | .path? // empty] | any(. == "provider-renamed.txt")' >/dev/null \
+  && pass "deleted into the folder's trash (restorable in the web UI)" || fail "delete to trash" "$(api GET "/api/folders/$docs/files/trash")"
+found=$(docs_ctl "search provider")
+jq -e --arg c "$copied" 'any(.document_id == $c)' <<<"$found" >/dev/null && pass "search finds $(jq -r '[.[]._display_name] | join(", ")' <<<"$found")" || fail "search" "$found"
+docs_ctl recent | jq -e --arg c "$copied" 'any(.document_id == $c)' >/dev/null && pass "recent documents list it" || fail "recents" "$(docs_ctl recent)"
+adb shell screencap -p /sdcard/ASyncSmoke/docs/screen.png
+settle /sdcard/ASyncSmoke/docs/screen.png
+sync_phone "$docs" >/dev/null
+thumb=$(docs_ctl "thumb f/$docs/screen.png")
+[[ "$thumb" =~ ^[0-9]+x[0-9]+$ ]] && pass "a thumbnail of an image: $thumb" || fail "thumbnail" "$thumb"
+
+snaps=$(docs_ctl "list b/$photos")
+sid=$(jq -r '.entries[0].document_id' <<<"$snaps" | cut -d/ -f3)
+jq -e '(.entries | length) >= 1 and (.entries[0]._display_name | test("^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} · [0-9a-f]{8}$"))' <<<"$snaps" >/dev/null \
+  && pass "the Backup folder shows its snapshots: $(jq -r '[.entries[]._display_name] | join(", ")' <<<"$snaps")" || fail "snapshots" "$snaps"
+tree_listing=$(docs_ctl "list s/$photos/$sid")
+jq -e '(.entries | any(._display_name == "2026")) and (.entries | any(._display_name == "cat.jpg")) and (.entries | all(((.flags / 2 | floor) % 2) == 0 and ((.flags / 4 | floor) % 2) == 0))' <<<"$tree_listing" >/dev/null \
+  && pass "a snapshot's tree, read-only: $(jq -r '[.entries[]._display_name] | join(", ")' <<<"$tree_listing")" || fail "snapshot tree" "$tree_listing"
+clip_sum=$(adb shell sha256sum /sdcard/ASyncSmoke/photos/2026/clip.mp4 | cut -d' ' -f1 | tr -d '\r')
+r=$(docs_wait "open s/$photos/$sid/2026/clip.mp4")
+sum=$(shell_read "s/$photos/$sid/2026/clip.mp4")
+[[ "$sum" == "$clip_sum" && "$(jq -r .fd <<<"$r")" == *"/cache/documents/files/"* ]] && pass "a file from the snapshot opens byte for byte (cached)" || fail "snapshot read" "$r $sum"
+docs_ctl "cache 1048576" >/dev/null # smaller than the 3 MB clip: now it streams
+r=$(docs_wait "open s/$photos/$sid/2026/clip.mp4")
+sum=$(adb exec-out content read --uri "$(doc_uri "s/$photos/$sid/2026/clip.mp4")" | sha256sum | cut -d' ' -f1)
+[[ "$sum" == "$clip_sum" && "$(jq -r .fd <<<"$r")" == *appfuse* ]] && pass "and streamed (proxy descriptor, chunks located through the index) byte for byte" || fail "snapshot stream" "$r $sum"
+docs_ctl "cache 134217728" >/dev/null
+w=$(ctl "docs write s/$photos/$sid/cat.jpg nope" 2>&1)
+[[ "$w" == error:* ]] && pass "writing into a snapshot is refused ($w)" || fail "snapshot write refused" "$w"
+
+if [[ -n "$shots" ]]; then
+  # The Files app (DocumentsUI) itself: the root, a folder, a snapshot, and a picker as another app opens it.
+  # Opened at the root (VIEW of a root URI); folders and snapshots are tapped into, as a person would (DocumentsUI does
+  # not open a directory document by VIEW).
+  files_root() {
+    adb shell am force-stop com.google.android.documentsui 2>/dev/null; adb shell am force-stop com.android.documentsui 2>/dev/null
+    adb shell "am start -W -a android.intent.action.VIEW -d 'content://$pkg.documents/root/async' -t vnd.android.document/root" >/dev/null 2>&1
+    sleep 4; dismiss_anr
+  }
+  for mode in light dark; do
+    adb shell cmd uimode night "$([[ $mode == dark ]] && echo yes || echo no)" >/dev/null
+    files_root
+    adb exec-out screencap -p > "$shots/android-files-root-$mode.png"
+    tap_text '^Phone docs$' 10 && sleep 3 && adb exec-out screencap -p > "$shots/android-files-folder-$mode.png"
+    files_root
+    tap_text '^Phone photos$' 10 && sleep 3 && tap_text '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]+ · [0-9a-f]{8}$' 10 && sleep 3 \
+      && adb exec-out screencap -p > "$shots/android-files-snapshot-$mode.png"
+  done
+  adb shell cmd uimode night no >/dev/null
+  for mode in light dark; do
+    adb shell cmd uimode night "$([[ $mode == dark ]] && echo yes || echo no)" >/dev/null
+    adb shell am force-stop com.google.android.documentsui 2>/dev/null; adb shell am force-stop com.android.documentsui 2>/dev/null
+    adb shell "am start -W -a android.intent.action.OPEN_DOCUMENT -c android.intent.category.OPENABLE -t '*/*' --eu android.provider.extra.INITIAL_URI 'content://$pkg.documents/document/$(enc "f/$docs")'" >/dev/null 2>&1
+    sleep 4; dismiss_anr
+    adb exec-out screencap -p > "$shots/android-files-picker-$mode.png"
+  done
+  adb shell cmd uimode night no >/dev/null
+  # Back to the app: the next section's system dialog must be started from the front.
+  adb shell am start -W -n "$pkg/$pkg.MainActivity" >/dev/null
+  sleep 2
+fi
+
+if [[ -z "${SKIP_BACKGROUND:-}" ]]; then
 section "background work: WorkManager, battery, conditions"
 stamp=$(date +%s) # file names of this run: a rerun on a kept phone must not find the last run's files
 bgstate() { ctl bg; }
@@ -597,6 +742,8 @@ ctl "bg-reminder 3" >/dev/null
 r=$(ctl "bg-remind-now $docs")
 [[ "$r" == "Phone docs: nothing synced for 3 days" ]] && pass "the local reminder notification: $r" || fail "reminder" "$r"
 wait_bg '.works | any(.tags == "reminder" and .state == "ENQUEUED")' 20 && pass "reminders are scheduled (moved on after each successful run)" || fail "reminder scheduled" "$(bgstate | jq -c .works)"
+
+fi # SKIP_BACKGROUND
 
 section "restart"
 adb shell am force-stop "$pkg"
