@@ -12,6 +12,9 @@
 #   on that SAF tree (selftest); sync both ways with a second device (async-cli), including an edit, a delete and a large
 #   file with live progress; pause/resume; the Back button closing settings; a Backup folder on a SAF tree backed up and
 #   restored by async-cli, byte for byte; the app restarted (identity and folders survive, the device signs in again).
+#   Nothing on the phone needs its browser: the device-code flow shows the code to approve on a computer, and a new
+#   end-to-end Backup folder is set up in the app (passphrase, recovery key shown once), backed up, and restored byte for
+#   byte by async-cli with that passphrase.
 #   Background work (M4-2): the foreground-service notification during the large transfer; the battery prompt and the
 #   system's exemption question; the folders' periodic WorkManager jobs; with the app in the background and its process
 #   killed (am kill), a file changed by async-cli arrives through the folder's periodic job, which the system runs in a
@@ -251,10 +254,12 @@ sleep 5
 code_shown=$(ctl "devicecode $phone_server")
 if [[ ! "$code_shown" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]; then echo "    (first try: $code_shown)"; sleep 5; code_shown=$(ctl "devicecode $phone_server"); fi
 [[ "$code_shown" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}$ ]] && pass "device-code flow: the code $code_shown is shown" || fail "device code" "$code_shown"
-wait_for 20 bash -c "adb shell dumpsys activity activities | grep -m1 ResumedActivity | grep -qv '$pkg'" \
-  && adb logcat -d | grep -q "dat=http://10.0.2.2:$port/" && pass "the approval page opened in the browser" || fail "approval page opened"
-adb shell am start -W -n "$pkg/$pkg.MainActivity" >/dev/null # back to the app (as a person would)
-wait_for 15 top_is "$pkg/.MainActivity" || true
+# A phone never needs its own browser: it shows the code to approve on a computer (the web UI there).
+sleep 6
+top_is "$pkg/.MainActivity" && ! contains "dat=http://10.0.2.2:$port/" adb logcat -d \
+  && pass "the phone's browser did not open: the code is approved on a computer" || fail "browser opened on the phone" "$(adb shell dumpsys activity activities | grep -m1 ResumedActivity)"
+has '.approveHint | test("On your computer, open http://10.0.2.2:[0-9]+/devices/approve")' \
+  && pass "it says where: $(state | jq -r .approveHint)" || fail "approve hint" "$(state)"
 shot enroll-device-code
 ctl cancel >/dev/null
 wait_state '.pendingCode == null' 20 && pass "Cancel gives the request up" || fail "cancel" "$(state)"
@@ -303,7 +308,8 @@ tree="content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%
 wait_state ".folders[] | select(.name == \"Phone docs\") | .path == \"$tree\"" 30 && pass "the agent syncs the tree $tree" || fail "set path" "$(state)"
 api GET "/api/folders/$docs" | jq -e --arg p "$tree" '.devices[] | select(.localPath == $p)' >/dev/null && pass "the server has the content URI as the local path" || fail "server path"
 adb shell dumpsys package "$pkg" 2>/dev/null | grep -q "ASyncSmoke" || adb shell cmd uri grants 2>/dev/null | grep -q ASyncSmoke || true
-selftest=$(ctl "selftest $docs")
+# Once more when the answer came too late for the broadcast's time limit (a slow emulator).
+selftest=$(ctl "selftest $docs" || ctl "selftest $docs")
 [[ "$selftest" =~ ^([0-9]+)/([0-9]+)\ passed\ \(SafTree\)$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]] \
   && pass "local tree contract on the SAF tree: $selftest" || fail "SAF tree contract" "$selftest"
 
@@ -415,6 +421,34 @@ cli restore --folder "$photos" --snapshot latest --target "$work/restored" >/dev
   && [[ "$(sha256sum "$work/restored/2026/clip.mp4" | cut -d' ' -f1)" == "$(adb shell sha256sum /sdcard/ASyncSmoke/photos/2026/clip.mp4 | cut -d' ' -f1 | tr -d '\r')" ]] \
   && pass "the restored files match the phone's byte for byte" || fail "restore content" "$(ls -R "$work/restored" 2>&1)"
 shot dashboard
+
+section "an end-to-end Backup folder set up on the phone"
+# Created and attached in the web UI on a computer; set up (passphrase, recovery key) on the phone, in the app.
+secret=$(api POST /api/folders "{\"name\":\"Phone secrets\",\"mode\":\"Backup\",\"encryption\":\"EndToEnd\",\"kind\":\"Files\",\"storageBackendId\":$backend,\"rootPath\":\"secrets\",\"intervalMinutes\":60}" | jq -r .id)
+photos_tree="content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fphotos"
+api PUT "/api/folders/$secret/devices" "{\"deviceId\":\"$device\",\"localPath\":\"$photos_tree\"}" >/dev/null
+wait_state ".folders[] | select(.name == \"Phone secrets\") | .needsSetup" 30 && pass "the new end-to-end folder shows \"Not set up\" on the phone" || fail "needs setup" "$(state)"
+ctl "setup $secret" >/dev/null
+sleep 1
+shot e2e-setup
+recovery=$(ctl "setup-passphrase correct horse battery staple")
+[[ "$recovery" =~ ^[A-Z0-9]{4}(-[A-Z0-9]{4}){3,}$ ]] && pass "set up in the app; the recovery key is shown once" || fail "setup" "$recovery"
+shot e2e-recovery-key
+ctl setup-done >/dev/null
+wait_state '.dialog | not' 10 || fail "dialog closed" "$(state)"
+wait_for 30 bash -c "curl -fsS -H 'Authorization: Bearer $token' $server/api/folders/$secret | jq -e .repositoryReady" \
+  && pass "the server knows the repository is ready" || fail "repository ready" "$(api GET "/api/folders/$secret" | jq -c '{repositoryReady}')"
+wait_state ".folders[] | select(.name == \"Phone secrets\") | (.needsSetup | not) and (.locked | not)" 30 && pass "and the folder is unlocked on the phone" || fail "unlocked" "$(state)"
+f=$(sync_phone "$secret" 180)
+jq -e '.ok and (.message | startswith("Snapshot"))' <<<"$f" >/dev/null && pass "backed up end-to-end encrypted: $(jq -r .message <<<"$f")" || fail "e2e backup" "$f"
+api PUT "/api/folders/$secret/devices" "{\"deviceId\":\"$cli_device\",\"localPath\":\"$work/cli-secrets-unused\"}" >/dev/null
+printf 'correct horse battery staple' > "$work/passphrase"
+cli unlock --folder "$secret" --passphrase-file "$work/passphrase" >/dev/null 2>&1 && pass "async-cli unlocks it with the passphrase chosen on the phone" || fail "cli unlock"
+rm -rf "$work/restored-secrets" "$work/passphrase"
+cli restore --folder "$secret" --snapshot latest --target "$work/restored-secrets" >/dev/null \
+  && [[ "$(sha256sum "$work/restored-secrets/2026/clip.mp4" | cut -d' ' -f1)" == "$(adb shell sha256sum /sdcard/ASyncSmoke/photos/2026/clip.mp4 | cut -d' ' -f1 | tr -d '\r')" ]] \
+  && pass "and restores the phone's files byte for byte" || fail "e2e restore" "$(ls -R "$work/restored-secrets" 2>&1 | head)"
+api DELETE "/api/folders/$secret/devices/$device" >/dev/null || true # the next sections count the phone's folders
 
 section "background work: WorkManager, battery, conditions"
 stamp=$(date +%s) # file names of this run: a rerun on a kept phone must not find the last run's files

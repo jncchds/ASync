@@ -413,15 +413,20 @@ To build it yourself: `dotnet publish src/ASync.App.Desktop -c Release -o ~/asyn
   <img src="docs/screenshots/android-settings-dark.png" alt="Settings, dark" width="24%">
 </p>
 
-The same pages as the desktop app, on Android 8 and later. **What works so far (M4-1): syncing while the app is open.**
-- **Adding the phone:** scan the QR code of *Devices → Add device* (the camera; no Google services needed), tap or paste
-  its `async://pair` link, type the server address and the code, or *Approve in the browser*. The phone's key is made in
+The same pages as the desktop app, on Android 8 and later. **The phone never needs its own browser:** the server is set
+up in the web UI on a computer (folders, storage, people), and everything done *on the phone* is in the app; the app has
+no web UI buttons there.
+- **Adding the phone:** scan the QR code of *Devices → Add device* on your computer (the camera; no Google services
+  needed), tap or paste its `async://pair` link, type the server address and the code, or *Approve on your computer*: the
+  phone shows a short code to enter in the web UI there (*Devices → Approve*). The phone's key is made in
   the Android Keystore (in its secure hardware where it has some) and never leaves it; what the app stores about the
   device is encrypted with another Keystore key.
-- **Folders:** attach a folder to the phone in the web UI (any local path will do: the phone asks), then *Choose folder…*
-  on the phone picks where it lives, with Android's own folder picker (internal storage, an SD card, a USB drive, or
+- **Folders:** attach a folder to the phone in the web UI on your computer (any local path will do: the phone asks), then
+  *Choose folder…* on the phone picks where it lives, with Android's own folder picker (internal storage, an SD card, a USB drive, or
   another app's storage). Two-way, Mirror and Backup folders work there; *Sync now*, pause and resume, live progress,
-  unlocking end-to-end folders, and the settings (theme, sign out) as on the desktop. The Back button closes dialogs and
+  unlocking end-to-end folders, and the settings (theme, sign out) as on the desktop. A **new end-to-end folder** is set up
+  on the phone itself: *Set up encryption…* asks for its passphrase (twice) and shows the recovery key once; other
+  devices then unlock it with the same passphrase (`async-cli unlock`, or *Unlock…* in the apps). The Back button closes dialogs and
   settings.
 - **In the background (M4-2):** folders keep syncing and backing up with the app closed, on their interval (Android runs
   background work at most every 15 minutes), only on Wi-Fi or while charging if you say so, and the server can wake the

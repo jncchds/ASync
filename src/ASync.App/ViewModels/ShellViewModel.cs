@@ -381,6 +381,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
 
     public string? WebUiUrl => Status?.Device?.ServerUrl ?? Settings.LastServer;
 
+    /// <summary>Whether to show the web UI buttons (not on phones: see <see cref="IPlatformServices.OffersWebUi"/>).</summary>
+    public bool OffersWebUi => Platform.OffersWebUi;
+
     [RelayCommand]
     private async Task OpenWebUi()
     {

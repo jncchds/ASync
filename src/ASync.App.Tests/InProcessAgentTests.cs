@@ -39,6 +39,22 @@ public class InProcessAgentTests
         public Task<PendingEnrollmentDto> StartDeviceCodeAsync(string server, string name, DevicePlatform platform, CancellationToken ct) =>
             Task.FromResult(Answer($"device-code {server}", new PendingEnrollmentDto(server, name, "ABCD-EFGH", server + "/devices/approve", DateTimeOffset.UtcNow.AddMinutes(15))));
         public Task<string> ForgetAsync(CancellationToken ct) => Task.FromResult(Answer("forget", "forgotten"));
+        public Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct) =>
+            Task.FromResult(Answer($"init-encryption {folderId}", "RECOVERY-KEY"));
+        public Task<string> SetConditionsAsync(int folderId, RunConditionsDto conditions, CancellationToken ct) =>
+            Task.FromResult(Answer($"set-conditions {folderId} {conditions.UnmeteredOnly}", "saved"));
+    }
+
+    [Fact]
+    public async Task TheBackgroundOperations_SetUpEncryptionAndConditions_GoToTheHandler()
+    {
+        var handler = new FakeHandler();
+        var session = (await new InProcessAgentConnector(handler, new ControlEventHub()).ConnectAsync(CancellationToken.None))!;
+        Assert.Equal("RECOVERY-KEY", await session.InitEncryptionAsync(3, "correct horse battery", CancellationToken.None));
+        Assert.Equal("saved", await session.SetConditionsAsync(3, new RunConditionsDto(UnmeteredOnly: true), CancellationToken.None));
+        Assert.Equal("\"init-encryption\" needs a passphrase.", (await Assert.ThrowsAsync<ControlException>(() =>
+            session.InitEncryptionAsync(3, "", CancellationToken.None))).Message);
+        Assert.Equal(["init-encryption 3", "set-conditions 3 True"], handler.Calls);
     }
 
     [Fact]

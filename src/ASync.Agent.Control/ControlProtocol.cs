@@ -60,6 +60,11 @@ public static class ControlProtocol
         public const string SetConditions = "set-conditions";
         /// <summary>Stop the running run of a folder (<c>folderId</c>) or of all; they continue when next due.</summary>
         public const string Cancel = "cancel";
+        /// <summary>
+        /// Set up a new end-to-end encrypted folder with a passphrase (<c>folderId</c>, <c>secret</c>); the answer's
+        /// <see cref="ControlResponse.RecoveryKey"/> is its recovery key, shown to the person once.
+        /// </summary>
+        public const string InitEncryption = "init-encryption";
     }
 }
 
@@ -99,6 +104,8 @@ public sealed record ControlResponse
     public List<FolderRunDto>? Results { get; init; }
     /// <summary><c>device-code</c>: the code to show and the link to approve it.</summary>
     public PendingEnrollmentDto? Enrollment { get; init; }
+    /// <summary><c>init-encryption</c>: the new folder's recovery key (shown once; never logged).</summary>
+    public string? RecoveryKey { get; init; }
 }
 
 /// <summary>A line of the event stream.</summary>
@@ -195,6 +202,8 @@ public sealed record FolderStatusDto
     public bool Paused { get; init; }
     /// <summary>End-to-end and not unlocked on this device (or not set up yet): it cannot run.</summary>
     public bool Locked { get; init; }
+    /// <summary>End-to-end and not set up yet: a device must create its repository with a passphrase (<c>init-encryption</c>).</summary>
+    public bool NeedsSetup { get; init; }
     public FolderActivity Activity { get; init; }
     /// <summary>Set while <see cref="Activity"/> is Syncing or BackingUp.</summary>
     public ProgressDto? Progress { get; init; }

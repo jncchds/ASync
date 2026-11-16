@@ -56,7 +56,7 @@ public sealed partial class EnrollViewModel : ObservableObject
 
     /// <summary>A device-code request waiting for approval.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsWaiting), nameof(IsNotWaiting), nameof(ExpiresText))]
+    [NotifyPropertyChangedFor(nameof(IsWaiting), nameof(IsNotWaiting), nameof(ExpiresText), nameof(ApproveHint))]
     public partial PendingEnrollmentDto? Pending { get; private set; }
 
     public bool IsWaiting => Pending is not null;
@@ -64,7 +64,27 @@ public sealed partial class EnrollViewModel : ObservableObject
 
     public string ExpiresText => Pending is { } p ? $"The code expires at {p.ExpiresAt.ToLocalTime():HH:mm}." : "";
 
-    public string Intro => $"Connect this {_shell.Platform.DeviceNoun} to your ASync server. Its folders are set up in the web UI afterwards.";
+    public string Intro => _shell.Platform.OffersWebUi
+        ? $"Connect this {_shell.Platform.DeviceNoun} to your ASync server. Its folders are set up in the web UI afterwards."
+        : $"Connect this {_shell.Platform.DeviceNoun} to your ASync server: scan the QR code or type the code from the web UI on your computer " +
+          "(Devices → Add device), or get a code here and approve it there.";
+
+    /// <summary>The device-code choice: approved in this device's browser, or on another device (phones).</summary>
+    public string DeviceCodeLabel => _shell.Platform.OffersWebUi ? "Approve in the browser" : "Approve on your computer";
+
+    /// <summary>Before the code is asked for: how it works here.</summary>
+    public string DeviceCodeIntro => _shell.Platform.OffersWebUi
+        ? "The browser opens the server's approval page; sign in there and approve this device."
+        : $"This {_shell.Platform.DeviceNoun} shows a short code; enter it in the web UI on your computer (Devices → Approve) to let it in.";
+
+    public bool OffersWebUi => _shell.Platform.OffersWebUi;
+
+    /// <summary>Under the code: where to approve it.</summary>
+    public string ApproveHint => Pending is { } p
+        ? _shell.Platform.OffersWebUi
+            ? $"Approve it in the browser that opened ({p.VerificationUri}), signed in to your account."
+            : $"On your computer, open {p.VerificationUri} (or Devices → Approve in the web UI), sign in and enter this code."
+        : "";
 
     /// <summary>A camera to scan the web UI's QR code with (phones).</summary>
     public bool CanScan => _shell.Platform.CanScanQrCode;
@@ -164,7 +184,8 @@ public sealed partial class EnrollViewModel : ObservableObject
             }
             Pending = started;
             Remember(started.Server);
-            await _shell.Platform.OpenUrlAsync(started.VerificationUri);
+            // A phone shows the code to approve on a computer; it does not open its own browser.
+            if (_shell.Platform.OffersWebUi) await _shell.Platform.OpenUrlAsync(started.VerificationUri);
         }
         finally
         {

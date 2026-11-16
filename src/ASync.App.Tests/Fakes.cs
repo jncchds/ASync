@@ -90,6 +90,12 @@ internal sealed class FakeAgent : IAgentConnector, IAgentSession
 
     public Task<string> CancelAsync(int? folderId, CancellationToken ct) => Answer($"cancel {folderId?.ToString() ?? "all"}", "stopped");
 
+    public Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct)
+    {
+        LastSecret = passphrase;
+        return Answer($"init-encryption {folderId}", "ABCD-EFGH-JKMN-PQRS");
+    }
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
@@ -159,6 +165,7 @@ internal sealed class FakePlatform : IPlatformServices
     public Task<string?> ScanQrCodeAsync() => Task.FromResult(NextScan);
     public string DisplayPath(string location) => Phone && location.StartsWith("content://", StringComparison.Ordinal) ? "Internal storage › " + location.Split("%3A")[^1] : location;
     public string DeviceNoun => Phone ? "phone" : "computer";
+    public bool OffersWebUi => !Phone;
 
     /// <summary>Set for a phone with background services (the battery prompt, wake-ups, the reminder).</summary>
     public FakeBackground? BackgroundServices { get; set; }

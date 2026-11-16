@@ -5,25 +5,44 @@
              x:DataType="vm:UnlockViewModel">
   <Border Classes="card" BoxShadow="0 8 32 0 #40000000">
     <StackPanel Spacing="12">
-      <TextBlock Classes="h2" Text="{Binding Title}" />
-      <TextBlock Classes="muted" Text="Its files are encrypted on this device before they leave it. Enter the folder's passphrase or its recovery key; it is only passed to the agent, which keeps the unlocked key so backups run unattended." />
-      <WrapPanel ItemSpacing="16">
-        <RadioButton GroupName="secret" Content="Passphrase" IsChecked="{Binding !UseRecoveryKey}" />
-        <RadioButton GroupName="secret" Name="UseRecoveryKey" Content="Recovery key" IsChecked="{Binding UseRecoveryKey}" />
-      </WrapPanel>
-      <StackPanel>
-        <TextBlock Classes="label" Text="{Binding SecretLabel}" />
-        <!-- PasswordChar: never shown on screen; RevealPassword stays off. -->
-        <TextBox Name="Secret" Text="{Binding Secret}" PasswordChar="•" />
+      <TextBlock Classes="h2" Text="{Binding Title}" TextWrapping="Wrap" />
+
+      <!-- Unlocking, or setting up: the form. -->
+      <StackPanel Spacing="12" IsVisible="{Binding IsEntering}">
+        <TextBlock Classes="muted" Text="{Binding Intro}" TextWrapping="Wrap" />
+        <WrapPanel ItemSpacing="16" IsVisible="{Binding IsUnlock}">
+          <RadioButton GroupName="secret" Content="Passphrase" IsChecked="{Binding !UseRecoveryKey}" />
+          <RadioButton GroupName="secret" Name="UseRecoveryKey" Content="Recovery key" IsChecked="{Binding UseRecoveryKey}" />
+        </WrapPanel>
+        <StackPanel>
+          <TextBlock Classes="label" Text="{Binding SecretLabel}" />
+          <!-- PasswordChar: never shown on screen; RevealPassword stays off. -->
+          <TextBox Name="Secret" Text="{Binding Secret}" PasswordChar="•" />
+        </StackPanel>
+        <StackPanel IsVisible="{Binding IsSetup}">
+          <TextBlock Classes="label" Text="The passphrase again" />
+          <TextBox Name="Confirm" Text="{Binding Confirm}" PasswordChar="•" />
+        </StackPanel>
+        <Border Classes="notice danger" IsVisible="{Binding HasError}">
+          <TextBlock Name="Error" Text="{Binding Error}" TextWrapping="Wrap" />
+        </Border>
+        <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <Button Name="Unlock" Content="Unlock" Command="{Binding UnlockCommand}" IsDefault="{Binding IsUnlock}" IsVisible="{Binding IsUnlock}" />
+          <Button Name="SetUp" Content="Set up" Command="{Binding SetUpCommand}" IsDefault="{Binding IsSetup}" IsVisible="{Binding IsSetup}" />
+          <Button Classes="secondary" Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" />
+          <ProgressBar IsIndeterminate="True" Width="80" IsVisible="{Binding IsBusy}" VerticalAlignment="Center" />
+        </WrapPanel>
       </StackPanel>
-      <Border Classes="notice danger" IsVisible="{Binding HasError}">
-        <TextBlock Name="Error" Text="{Binding Error}" />
-      </Border>
-      <WrapPanel ItemSpacing="8" LineSpacing="8">
-        <Button Name="Unlock" Content="Unlock" Command="{Binding UnlockCommand}" IsDefault="True" />
-        <Button Classes="secondary" Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" />
-        <ProgressBar IsIndeterminate="True" Width="80" IsVisible="{Binding IsBusy}" VerticalAlignment="Center" />
-      </WrapPanel>
+
+      <!-- Set up: the recovery key, once. -->
+      <StackPanel Spacing="12" IsVisible="{Binding HasRecoveryKey}">
+        <TextBlock Text="Encryption is set up. This is the folder's recovery key: write it down or store it in a password manager now. It is shown only this once."
+                   TextWrapping="Wrap" />
+        <SelectableTextBlock Name="RecoveryKey" Classes="mono" Text="{Binding RecoveryKey}" TextWrapping="Wrap" FontSize="15" />
+        <TextBlock Classes="muted small" TextWrapping="Wrap"
+                   Text="With the passphrase or this key you can restore the backups on any device. Without both, nobody can: not you, not the server's admin." />
+        <Button Name="Done" Content="I have written it down" Command="{Binding DoneCommand}" HorizontalAlignment="Left" />
+      </StackPanel>
     </StackPanel>
   </Border>
 </UserControl>

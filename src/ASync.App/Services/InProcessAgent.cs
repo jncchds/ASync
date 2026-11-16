@@ -96,6 +96,8 @@ public sealed class InProcessAgentConnector(IControlHandler agent, ControlEventH
         public Task<string> SetConditionsAsync(int folderId, RunConditionsDto conditions, CancellationToken ct) =>
             Call(() => agent.SetConditionsAsync(folderId, conditions ?? throw new ControlException("\"set-conditions\" needs conditions."), ct), ct);
         public Task<string> CancelAsync(int? folderId, CancellationToken ct) => Call(() => agent.CancelAsync(folderId, ct), ct);
+        public Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct) =>
+            Call(() => agent.InitEncryptionAsync(folderId, passphrase is { Length: > 0 } ? passphrase : throw new ControlException("\"init-encryption\" needs a passphrase."), ct), ct);
 
         public ValueTask DisposeAsync()
         {

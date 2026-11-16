@@ -52,6 +52,12 @@ public interface IPlatformServices
     /// <summary>"computer" or "phone": what the UI calls this device.</summary>
     string DeviceNoun => "computer";
 
+    /// <summary>
+    /// Whether the app offers to open the web UI on this device. Phones do not: everything a phone needs is in the app, and
+    /// the server's own setup (folders, storage, people) is done in the web UI on a computer.
+    /// </summary>
+    bool OffersWebUi => true;
+
     /// <summary>Which run conditions this platform cannot check (shown under a folder's conditions); null = it checks all.</summary>
     string? ConditionsNote =>
         OperatingSystem.IsLinux() ? "On this computer the Wi-Fi rule needs NetworkManager; without it the rule is ignored."

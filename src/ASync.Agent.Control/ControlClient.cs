@@ -98,6 +98,11 @@ public sealed class ControlClient : IAsyncDisposable
     public async Task<string> SetConditionsAsync(int folderId, RunConditionsDto conditions, CancellationToken ct = default) =>
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.SetConditions, FolderId = folderId, Conditions = conditions }, ct)).Message ?? "";
 
+    /// <summary>Sets up a new end-to-end folder; returns its recovery key.</summary>
+    public async Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.InitEncryption, FolderId = folderId, Secret = passphrase }, ct)).RecoveryKey
+        ?? throw new InvalidDataException("No recovery key in the answer.");
+
     public async Task<string> CancelAsync(int? folderId, CancellationToken ct = default) =>
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.Cancel, FolderId = folderId }, ct)).Message ?? "";
 

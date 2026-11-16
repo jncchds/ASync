@@ -41,6 +41,9 @@ public sealed class AndroidPlatform(Func<MainActivity?> activity) : IPlatformSer
 
     public string DeviceNoun => "phone";
 
+    /// <summary>Everything a phone needs is in the app; the web UI is for a computer.</summary>
+    public bool OffersWebUi => false;
+
     public Task OpenUrlAsync(string url)
     {
         try

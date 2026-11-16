@@ -19,7 +19,8 @@
           </Border>
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-          <Button Classes="icon" Content="Web UI" Command="{Binding OpenWebUiCommand}" ToolTip.Tip="Open the web UI in the browser" />
+          <Button Classes="icon" Content="Web UI" Command="{Binding OpenWebUiCommand}" ToolTip.Tip="Open the web UI in the browser"
+                  IsVisible="{Binding OffersWebUi}" />
           <Button Classes="icon" Name="SettingsButton" Content="⚙ Settings" Command="{Binding OpenSettingsCommand}" />
         </StackPanel>
       </Grid>

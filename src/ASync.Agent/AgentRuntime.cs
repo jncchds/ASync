@@ -476,6 +476,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             IntervalMinutes = f.IntervalMinutes,
             Paused = f.Paused,
             Locked = f.Encryption == FolderEncryption.EndToEnd && (!f.RepositoryReady || !_store.HasRepositoryKeys(f.FolderId)),
+            NeedsSetup = f.Encryption == FolderEncryption.EndToEnd && !f.RepositoryReady,
             Activity = f.Paused && s.Activity == WorkerActivity.Idle ? FolderActivity.Paused : s.Activity switch
             {
                 WorkerActivity.Syncing => FolderActivity.Syncing,
@@ -599,6 +600,20 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         if (conditions.ChargingOnly) rules.Add("only while charging");
         if (conditions.BatteryNotLow) rules.Add("not on a low battery");
         return rules.Count == 0 ? $"\"{folder.Name}\" runs whenever it is due." : $"\"{folder.Name}\" runs {string.Join(", ", rules)}.";
+    }
+
+    public async Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct)
+    {
+        if (passphrase.Length < 8) throw new ControlException("Choose a passphrase of at least 8 characters.");
+        var (agent, api) = Running();
+        var folder = await FolderAsync(api, folderId, ct);
+        string recovery;
+        try { recovery = await RepositoryAccess.InitializeEndToEndAsync(api, _store, folder, new RemoteStorageBackend(api, folder.FolderId), passphrase, ct); }
+        catch (InvalidOperationException e) { throw new ControlException(e.Message); }
+        catch (ApiException e) { throw new ControlException(e.Message); }
+        _logger.LogInformation("\"{Name}\": end-to-end encryption set up on this device.", folder.Name);
+        await agent.ReloadAsync(ct); // RepositoryReady: the folder's worker starts again and backs up
+        return recovery;
     }
 
     public Task<string> CancelAsync(int? folderId, CancellationToken ct)

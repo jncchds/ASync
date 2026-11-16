@@ -20,6 +20,11 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
     [ObservableProperty] public partial bool HasLocalPath { get; private set; }
     [ObservableProperty] public partial bool Paused { get; private set; }
     [ObservableProperty] public partial bool Locked { get; private set; }
+    /// <summary>End-to-end and not set up yet: this device can set it up (passphrase, recovery key).</summary>
+    [ObservableProperty] public partial bool NeedsSetup { get; private set; }
+
+    /// <summary>Locked but set up: the passphrase or recovery key unlocks it here.</summary>
+    public bool CanBeUnlocked => Locked && !NeedsSetup;
     [ObservableProperty] public partial Pill State { get; private set; } = new("", PillKind.Muted);
 
     [ObservableProperty] public partial bool IsBusy { get; private set; }
@@ -74,6 +79,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         HasLocalPath = f.LocalPath is { Length: > 0 };
         Paused = f.Paused;
         Locked = f.Locked;
+        NeedsSetup = f.NeedsSetup;
 
         var busy = f.Activity is FolderActivity.Syncing or FolderActivity.BackingUp or FolderActivity.Maintenance;
         IsBusy = busy;
@@ -110,6 +116,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             { Activity: FolderActivity.BackingUp } => new Pill("Backing up", PillKind.Accent),
             { Activity: FolderActivity.Maintenance } => new Pill("Maintenance", PillKind.Accent),
             { Paused: true } => new Pill("Paused", PillKind.Muted),
+            { NeedsSetup: true } => new Pill("Not set up", PillKind.Warning),
             { Locked: true } => new Pill("Locked", PillKind.Warning),
             { LocalPath.Length: 0 } => new Pill("No local folder", PillKind.Warning),
             { LastResult: { Ok: false, Skipped: false } } => new Pill("Failed", PillKind.Danger),
@@ -120,6 +127,8 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             _ => new Pill("Waiting", PillKind.Muted),
         };
         OnPropertyChanged(nameof(PauseText));
+        OnPropertyChanged(nameof(CanBeUnlocked));
+        SetUpEncryptionCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(NeedsPath));
         OnPropertyChanged(nameof(ChooseFolderText));
         SyncNowCommand.NotifyCanExecuteChanged();
@@ -135,6 +144,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         NextRunText = _folder switch
         {
             { Paused: true } => "Paused",
+            { NeedsSetup: true } => "Waits for its encryption to be set up",
             { Locked: true } => "Waits to be unlocked",
             { LocalPath.Length: 0 } => "Waits for a local folder",
             { Waiting: { } waiting } => waiting,
@@ -186,8 +196,12 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         finally { Working = false; }
     }
 
-    [RelayCommand(CanExecute = nameof(Locked))]
+    [RelayCommand(CanExecute = nameof(CanBeUnlocked))]
     private void Unlock() => shell.Dialog = new UnlockViewModel(shell, Id, Name);
+
+    /// <summary>A new end-to-end folder: this device creates its repository (what `async-cli init-encryption` does).</summary>
+    [RelayCommand(CanExecute = nameof(NeedsSetup))]
+    private void SetUpEncryption() => shell.Dialog = new UnlockViewModel(shell, Id, Name, setup: true);
 
     public static string? Describe(RunConditionsDto? c)
     {

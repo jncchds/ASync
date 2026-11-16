@@ -15,6 +15,10 @@
   the web UI's device form of a folder or in the app (*Conditions…*). Scheduled runs and wake-ups wait for them and the
   app shows why ("Waiting for Wi-Fi"); *Sync now* ignores them. Phones honour all three; computers the charging and
   battery rules, and the Wi-Fi rule on Linux with NetworkManager (ignored on Windows and macOS).
+- feat(android): **The phone never needs its browser.** Everything done on the phone is in the app: the code to approve
+  a new phone is entered in the web UI on your computer (the phone no longer opens its own browser), and a new
+  end-to-end encrypted folder is set up on the phone itself (*Set up encryption…*: its passphrase, then its recovery
+  key, shown once), which before needed `async-cli init-encryption`. The desktop app can do the same.
 - feat(server): **Wake-ups through UnifiedPush.** `Push__Mode=UnifiedPush` is the new default: the server posts a tiny
   "wake" to the address a phone registered (http/https only, no redirects, 10 s), at most once a minute per phone for
   changes (`Push__ChangedSeconds`) and every 6 hours while overdue (`Push__OverdueHours`). Phones without a distributor

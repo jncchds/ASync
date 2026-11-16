@@ -45,8 +45,9 @@
     <Border Classes="card" IsVisible="{Binding HasNoFolders}">
       <StackPanel Spacing="6">
         <TextBlock Text="No folders on this device yet." FontWeight="SemiBold" />
-        <TextBlock Classes="muted" Text="Attach folders to this device in the web UI (Folders → a folder → Devices). They appear here at once." />
-        <Button Classes="secondary" Content="Open the web UI" Command="{Binding Shell.OpenWebUiCommand}" HorizontalAlignment="Left" Margin="0,4,0,0" />
+        <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding NoFoldersHint}" />
+        <Button Classes="secondary" Content="Open the web UI" Command="{Binding Shell.OpenWebUiCommand}" HorizontalAlignment="Left" Margin="0,4,0,0"
+                IsVisible="{Binding Shell.OffersWebUi}" />
       </StackPanel>
     </Border>
 
@@ -103,12 +104,16 @@
               <Border Classes="notice" IsVisible="{Binding AlertText, Converter={x:Static ObjectConverters.IsNotNull}}">
                 <TextBlock Classes="small" Text="{Binding AlertText}" />
               </Border>
-              <Border Classes="notice" IsVisible="{Binding Locked}">
-                <TextBlock Classes="small" Text="End-to-end encrypted and locked on this device: unlock it with the passphrase or the recovery key to back it up here." />
+              <Border Classes="notice" IsVisible="{Binding CanBeUnlocked}">
+                <TextBlock Classes="small" TextWrapping="Wrap" Text="End-to-end encrypted and locked on this device: unlock it with the passphrase or the recovery key to back it up here." />
+              </Border>
+              <Border Classes="notice" IsVisible="{Binding NeedsSetup}">
+                <TextBlock Classes="small" TextWrapping="Wrap" Text="End-to-end encrypted and not set up yet: choose its passphrase here (you get its recovery key once). Other devices then unlock it with the same passphrase." />
               </Border>
 
               <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,2,0,0">
-                <Button Classes="small" Content="Unlock…" Command="{Binding UnlockCommand}" IsVisible="{Binding Locked}" />
+                <Button Classes="small" Content="Unlock…" Command="{Binding UnlockCommand}" IsVisible="{Binding CanBeUnlocked}" />
+                <Button Classes="small" Name="SetUpEncryption" Content="Set up encryption…" Command="{Binding SetUpEncryptionCommand}" IsVisible="{Binding NeedsSetup}" />
                 <Button Classes="small" Content="Choose folder…" Command="{Binding ChooseFolderCommand}" IsVisible="{Binding NeedsPath}" />
                 <Button Classes="small" Content="Sync now" Command="{Binding SyncNowCommand}" IsVisible="{Binding HasLocalPath}" />
                 <Button Classes="small secondary" Content="{Binding PauseText}" Command="{Binding TogglePauseCommand}" />

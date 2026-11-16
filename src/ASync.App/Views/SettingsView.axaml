@@ -35,13 +35,13 @@
         <TextBlock Text="{Binding DeviceText}" IsVisible="{Binding CanSignOut}" />
         <TextBlock Classes="muted" Text="Not enrolled." IsVisible="{Binding !CanSignOut}" />
         <WrapPanel ItemSpacing="8" LineSpacing="8">
-          <Button Classes="secondary" Content="Open the web UI" Command="{Binding OpenWebUiCommand}" />
+          <Button Classes="secondary" Content="Open the web UI" Command="{Binding OpenWebUiCommand}" IsVisible="{Binding OffersWebUi}" />
           <Button Classes="danger" Name="SignOut" Content="Sign out of this device…" Command="{Binding SignOutCommand}"
                   IsVisible="{Binding CanSignOut}" IsEnabled="{Binding !ConfirmingSignOut}" />
         </WrapPanel>
         <Border Classes="notice danger" IsVisible="{Binding ConfirmingSignOut}">
           <StackPanel Spacing="8">
-            <TextBlock Text="Sign out of this device? It stops syncing and forgets its identity here. Your files stay where they are. Remove the device in the web UI too; to use it again, enroll it again." />
+            <TextBlock Text="{Binding SignOutText}" TextWrapping="Wrap" />
             <WrapPanel ItemSpacing="8" LineSpacing="8">
               <Button Classes="danger" Name="ConfirmSignOut" Content="Sign out" Command="{Binding ConfirmSignOutCommand}" />
               <Button Classes="secondary" Content="Keep it" Command="{Binding CancelSignOutCommand}" />

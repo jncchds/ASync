@@ -1429,6 +1429,15 @@ status's problem (on the desktop a service manager restarted the process instead
   The unlocked keys of end-to-end folders go through it as before (`keys/<folder>.key`). The store lives in the app's
   private files (`files/async`); `allowBackup` is off.
 
+**Phones never need their browser** (since M4-2's follow-up): the web UI is for a computer, and everything done on the
+phone is in the app. `IPlatformServices.OffersWebUi` is false on Android: no web UI buttons, texts point to "the web UI on
+your computer", and the device-code flow does not open the phone's browser but shows the code with where to approve it.
+A new end-to-end folder is set up in the app: control op `init-encryption` (`folderId`, `secret`; the answer's
+`RecoveryKey`), the same `RepositoryAccess.InitializeEndToEndAsync` as `async-cli init-encryption`; `FolderStatusDto.NeedsSetup`
+(end-to-end, repository not ready) shows *Set up encryption…* instead of *Unlock…*, and the unlock dialog's setup mode asks
+for the passphrase twice (at least 8 characters) and shows the recovery key once (selectable, not kept). The smoke test sets
+one up on the phone, backs it up, and has `async-cli` unlock it with that passphrase and restore it byte for byte.
+
 **Enrollment** (the shared `EnrollViewModel`): server and code, a pasted `async://pair` link, an *opened* one (the activity's
 intent filter for `async://pair`; `MainActivity` hands it to `EnrollViewModel.ApplyLink`), *Scan the QR code*
 (`IPlatformServices.ScanQrCode`, shown when the platform has a camera: `QrScanActivity` decodes the camera's preview frames
@@ -1931,8 +1940,9 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
      settle time for just-modified files, run conditions on `FolderDevice` (web UI, apps, desktop agents where the OS can
      tell), the UnifiedPush connector on the phone and the server's wake-ups (`Push__Mode=UnifiedPush`, now the default),
      see "Android background work (M4-2)", "Run conditions" and "Push". Verified on the Android 15 x86_64 emulator
-     (`scripts/smoke-android.sh`: 77 checks; the last full run passed 76, the one that failed only attributed what started
-     the process and was turned into information): the notification and foreground service during a 200 MB transfer
+     (`scripts/smoke-android.sh`: all 84 checks of the last full run passed, with the phone-only follow-up below): the
+     device code approved on a computer (the phone's browser stays closed), a new end-to-end folder set up in the app and
+     restored by `async-cli` with that passphrase, the notification and foreground service during a 200 MB transfer
      (which also continued an interrupted upload), the battery prompt and the system's question, the folders' jobs, a
      file arriving through the folder's periodic job in a process the system started after `am kill`, a Wi-Fi-only folder
      waiting on mobile data (job CONNECTIVITY unsatisfied, a wake-up deferred, nothing downloaded) and running once Wi-Fi

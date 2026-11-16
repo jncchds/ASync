@@ -57,6 +57,13 @@ internal sealed class FakeControlHandler : IControlHandler
         if (secret == "wrong") throw new InvalidOperationException("Wrong passphrase.");
         return Task.FromResult("\"Docs\" is unlocked on this device.");
     }
+
+    public Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct)
+    {
+        Calls.Add($"init-encryption {folderId}");
+        LastSecret = passphrase;
+        return Task.FromResult("K7QD-M2XP-9RWA-4TEN");
+    }
 }
 
 /// <summary>A socket (or, on Windows, a pipe) endpoint of its own for one test.</summary>
@@ -120,6 +127,16 @@ public class ControlChannelTests : IAsyncLifetime
         Assert.Contains("unlocked", await _client.UnlockAsync(7, "correct horse"));
         Assert.Equal(["sync 7 True", "pause 7", "resume 7", "set-path 7 /data/docs", "unlock 7"], _handler.Calls);
         Assert.Equal("correct horse", _handler.LastSecret);
+    }
+
+    [Fact]
+    public async Task InitEncryption_SendsThePassphrase_AndReturnsTheRecoveryKey()
+    {
+        Assert.Equal("K7QD-M2XP-9RWA-4TEN", await _client.InitEncryptionAsync(7, "correct horse battery"));
+        Assert.Equal(("init-encryption 7", "correct horse battery"), (_handler.Calls.Single(), _handler.LastSecret));
+        var missing = await Assert.ThrowsAsync<ControlException>(() =>
+            _client.SendAsync(new ControlRequest { Op = ControlProtocol.Ops.InitEncryption, FolderId = 7 }));
+        Assert.Equal("\"init-encryption\" needs a passphrase.", missing.Message);
     }
 
     [Fact]

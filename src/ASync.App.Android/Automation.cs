@@ -148,6 +148,22 @@ public sealed class Automation : BroadcastReceiver
             case "unlock":
                 Folder(arg).UnlockCommand.Execute(null);
                 return "dialog open";
+            case "setup":
+                Folder(arg).SetUpEncryptionCommand.Execute(null);
+                return shell.Dialog is { IsSetup: true } ? "dialog open" : "no setup dialog";
+            case "setup-passphrase":
+            {
+                // The passphrase typed twice and Set up; answers the recovery key the dialog shows (or its error).
+                if (shell.Dialog is not { IsSetup: true } setupDialog) return "no setup dialog";
+                setupDialog.Secret = arg;
+                setupDialog.Confirm = arg;
+                await setupDialog.SetUpCommand.ExecuteAsync(null);
+                return setupDialog.RecoveryKey ?? $"error: {setupDialog.Error}";
+            }
+            case "setup-done":
+                if (shell.Dialog is not { HasRecoveryKey: true } done) return "no recovery key shown";
+                done.DoneCommand.Execute(null);
+                return shell.Message ?? "ok";
             case "editconditions":
             {
                 // Opens the folder's run-conditions editor, or closes it when open.
@@ -357,6 +373,7 @@ public sealed class Automation : BroadcastReceiver
             ["enrollCode"] = shell.Enroll.Code,
             ["useCode"] = shell.Enroll.UseCode,
             ["pendingCode"] = shell.Enroll.Pending?.UserCode,
+            ["approveHint"] = shell.Enroll.Pending is null ? null : shell.Enroll.ApproveHint,
             ["dialog"] = shell.Dialog is not null,
             ["settings"] = shell.SettingsPage is not null,
             ["batteryPrompt"] = shell.Background?.ShowBatteryPrompt,
@@ -378,6 +395,7 @@ public sealed class Automation : BroadcastReceiver
                 ["lastMessage"] = s.LastResult?.Message,
                 ["lastAt"] = s.LastResult?.At.ToUnixTimeMilliseconds(),
                 ["waiting"] = s.Waiting,
+                ["needsSetup"] = s.NeedsSetup,
                 ["unmeteredOnly"] = s.Conditions?.UnmeteredOnly,
             });
         }
