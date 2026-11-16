@@ -171,6 +171,25 @@ internal sealed class FakePlatform : IPlatformServices
     public FakeBackground? BackgroundServices { get; set; }
     public IBackgroundServices? Background => BackgroundServices;
     public string? ConditionsNote => Phone ? null : "This computer cannot tell metered networks apart.";
+
+    /// <summary>Set for a phone with All files access (real paths in a temporary directory standing for the volumes).</summary>
+    public FakeStorage? StorageAccess { get; set; }
+    public IStorageAccess? Storage => StorageAccess;
+}
+
+/// <summary>A phone's shared storage: volumes are directories of a test's temporary directory.</summary>
+internal sealed class FakeStorage(params StorageVolumeInfo[] volumes) : IStorageAccess
+{
+    public List<string> Calls { get; } = [];
+    public bool HasAllFilesAccess { get; set; }
+    public List<RawVolume> Raw { get; } = [];
+    public event Action? Changed;
+
+    public void RequestAllFilesAccess() => Calls.Add("request");
+    public IReadOnlyList<StorageVolumeInfo> Volumes() => volumes;
+    public string? RealPathOf(string location) => PhoneStorage.RealPathOf(location, volumes, Raw);
+    public void ReleaseTree(string location) => Calls.Add("release " + location);
+    public void RaiseChanged() => Changed?.Invoke();
 }
 
 /// <summary>A phone's background side the test drives (Android's battery exemption, UnifiedPush, the reminder).</summary>

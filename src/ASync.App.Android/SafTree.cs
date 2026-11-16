@@ -2,6 +2,7 @@ using Android.Content;
 using Android.Database;
 using Android.OS;
 using Android.Provider;
+using ASync.App.Services;
 using ASync.Engine.Local;
 using Microsoft.Win32.SafeHandles;
 using AUri = Android.Net.Uri;
@@ -10,19 +11,53 @@ namespace ASync.App.Android;
 
 /// <summary>
 /// Folder locations on Android: a Storage Access Framework tree (<c>content://…/tree/…</c>, picked with
-/// ACTION_OPEN_DOCUMENT_TREE and kept with a persisted permission) or, for the app's own storage, a path.
+/// ACTION_OPEN_DOCUMENT_TREE and kept with a persisted permission), a real path on the shared storage
+/// (<c>/storage/emulated/0/DCIM</c>, with "All files access": <see cref="AndroidStorage"/>), or a path in the app's own storage.
+/// Real paths on the shared storage are <see cref="FileSystemTree"/>s inside a <see cref="GuardedTree"/>: the permission
+/// is checked on every call (it can be turned off at any time; without it a listing would show only some files), and
+/// Android/data and Android/obb are left out. They are not watched for changes (a recursive inotify watch of a whole
+/// volume would run out of watches; the phone runs folders on their schedule, on Sync now and when the app opens).
 /// </summary>
 public sealed class AndroidTreeFactory(ContentResolver resolver) : ILocalTreeFactory
 {
-    public ILocalTree Open(string location) =>
-        SafTree.IsTreeUri(location) ? new SafTree(resolver, AUri.Parse(location)!) : new FileSystemTree(location);
+    /// <summary>A path on the phone's shared storage (a volume's mount, or where volumes are mounted), not the app's own files.</summary>
+    public static bool IsShared(string path, IReadOnlyList<StorageVolumeInfo> volumes) =>
+        PhoneStorage.VolumeOf(path, volumes) is not null
+        || path.StartsWith("/storage/", StringComparison.Ordinal) || path.StartsWith("/sdcard", StringComparison.Ordinal)
+        || path.StartsWith("/mnt/", StringComparison.Ordinal);
+
+    public ILocalTree Open(string location)
+    {
+        if (SafTree.IsTreeUri(location)) return new SafTree(resolver, AUri.Parse(location)!);
+        var volumes = AndroidStorage.Instance.Volumes();
+        if (!IsShared(location, volumes)) return new FileSystemTree(location);
+        var name = PhoneStorage.VolumeOf(location, volumes) is { } v && PhoneStorage.Normalize(location) == v.Path ? v.Label : null;
+        return new GuardedTree(new FileSystemTree(location), AndroidStorage.Instance.Blocked, PhoneStorage.HiddenUnder(location, volumes), name,
+            watchable: false);
+    }
 
     public string? Validate(string location)
     {
         if (SafTree.IsTreeUri(location))
             return SafTree.HasPermission(resolver, location) ? null
                 : "This app has no permission for that folder any more. Choose it again with Change folder….";
-        return Path.IsPathFullyQualified(location) ? null : "Choose the folder with Change folder… on this phone.";
+        if (!Path.IsPathFullyQualified(location)) return "Choose the folder with Change folder… on this phone.";
+        var volumes = AndroidStorage.Instance.Volumes();
+        if (!IsShared(location, volumes)) return null;
+        if (!AndroidStorage.Instance.HasAllFilesAccess)
+            return "All files access is off for ASync: allow it in Settings → Folders on this phone, or choose the folder with the system picker.";
+        if (PhoneStorage.Check(location, volumes) is { } invalid) return invalid;
+        return Directory.Exists(location) ? null : $"{location} does not exist on this phone.";
+    }
+
+    /// <summary>A document tree of the external-storage provider and its real path are the same place.</summary>
+    public bool SamePlace(string a, string b) => Real(a) is { } x && Real(b) is { } y && x == y;
+
+    private static string? Real(string location)
+    {
+        if (SafTree.IsTreeUri(location))
+            return AndroidStorage.Instance.RealPathOf(location) is { } real ? PhoneStorage.Normalize(real) : null;
+        return location.StartsWith('/') ? PhoneStorage.Normalize(location) : null;
     }
 }
 

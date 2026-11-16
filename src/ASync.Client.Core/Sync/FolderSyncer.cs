@@ -30,6 +30,12 @@ public sealed record SyncOptions
     public TimeSpan SettleTime { get; init; }
     /// <summary>The clock <see cref="SettleTime"/> is measured with.</summary>
     public TimeProvider Clock { get; init; } = TimeProvider.System;
+    /// <summary>
+    /// Whether a previous local path of the folder (the one its sync state was made at) is the same directory as this
+    /// tree, written differently (<see cref="ILocalTreeFactory.SamePlace"/>): then the state is carried over instead of
+    /// every file looking new or changed.
+    /// </summary>
+    public Func<string, bool>? SamePlace { get; init; }
 }
 
 public sealed record SyncResult
@@ -112,11 +118,17 @@ public sealed class FolderSyncer
     public async Task<SyncResult> RunAsync(CancellationToken ct = default)
     {
         if (!_tree.Exists())
-            throw new SyncRefusedException(_tree.FileSystemPath is null
+            throw new SyncRefusedException(_tree.UnavailableReason ?? (_tree.FileSystemPath is null
                 ? $"The folder {_tree.Location} cannot be used (was it deleted, or its permission taken back?). Choose the folder again."
-                : $"The folder {_tree.Location} does not exist (is the disk mounted?). Create it to start syncing into it.");
+                : $"The folder {_tree.Location} does not exist (is the disk mounted?). Create it to start syncing into it."));
 
         _state = SyncState.Load(_statePath);
+        if (_state.Location != _tree.Location)
+        {
+            if (_state.Location is { } previous && _options.SamePlace?.Invoke(previous) == true) Rebase();
+            _state.Location = _tree.Location;
+            SaveState();
+        }
         var result = new SyncResult();
         var local = ScanLocal();
         var remote = new Dictionary<string, RemoteFile>(StringComparer.Ordinal);
@@ -462,6 +474,8 @@ public sealed class FolderSyncer
             }
             catch (UnauthorizedAccessException)
             {
+                // The whole tree was taken away meanwhile (Android's All files access turned off): say that.
+                if (_tree.UnavailableReason is { } reason) throw new SyncRefusedException(reason);
                 var where = dir.Length == 0 ? _tree.Location : _tree is FileSystemTree fs ? fs.Full(dir) : $"{dir} in {_tree.Location}";
                 throw new SyncRefusedException($"Cannot read {where} (permission denied). Nothing was changed: fix its permissions, or exclude it.");
             }
@@ -486,6 +500,25 @@ public sealed class FolderSyncer
     private long? SizeOf(string path) => _tree.Stat(path) is { IsFile: true } e ? e.Size : null;
 
     private Stream OpenLocal(string path) => _tree.OpenRead(StoragePath.Normalize(path));
+
+    /// <summary>
+    /// The folder now reaches the same files another way (Android: the real path of a document tree). Its sync state stays:
+    /// only the local times it recorded are taken over from the new tree where the file is the same size and its time
+    /// differs by less than two seconds (another API may round differently, FAT keeps two-second times). A file changed
+    /// since the last sync still differs in size or time and is synced as usual; nothing is uploaded again, nothing becomes
+    /// a conflict.
+    /// </summary>
+    private void Rebase()
+    {
+        foreach (var (path, b) in _state.Files.ToList())
+        {
+            LocalEntry? e;
+            try { e = _tree.Stat(path); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+            if (e is { IsFile: true } && e.Size == b.LocalSize && e.Modified != b.LocalModified && Math.Abs(e.Modified - b.LocalModified) < 2000)
+                _state.Files[path] = b with { LocalModified = e.Modified };
+        }
+    }
 
     private void SaveState()
     {

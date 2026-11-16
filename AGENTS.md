@@ -1376,10 +1376,23 @@ and files are reached through a documents provider. The engine format is unchang
   `Location` (for messages), `Name` (the default snapshot source) and `FileSystemPath` (for the file watcher; null when
   the tree is not on a file system). A directory that cannot be listed throws (`UnauthorizedAccessException`,
   `DirectoryNotFoundException`): it must never look empty, or a sync would delete its files elsewhere.
-- **Implementations:** `FileSystemTree` (desktop, CLI: exactly the old behaviour; symlinks reported, never followed) and
-  `SafTree` in the Android head. `ILocalTreeFactory` opens a folder's local path (`FileSystemTreeFactory`, or
-  `AndroidTreeFactory`: content URIs → `SafTree`, paths → `FileSystemTree`) and validates a new one (`set-path`).
-  `SyncAgent.LocalTrees`/`AgentOptions.LocalTrees` choose it.
+- **Implementations:** `FileSystemTree` (desktop, CLI: exactly the old behaviour; symlinks reported, never followed),
+  `SafTree` in the Android head, and `GuardedTree` (Engine, BCL): another tree behind a `blocked` check asked on every
+  call (while it answers a reason: `Exists()` false, `UnavailableReason` that reason, every other call
+  `UnauthorizedAccessException`) and with `hidden` paths it never lists or writes; Android's real paths are a
+  `FileSystemTree` inside one ("Android: All files access"). `ILocalTreeFactory` opens a folder's local path
+  (`FileSystemTreeFactory`, or `AndroidTreeFactory`: content URIs → `SafTree`, shared-storage paths → guarded
+  `FileSystemTree`, the app's own paths → `FileSystemTree`), validates a new one (`set-path`) and tells whether two
+  locations are the same directory (`SamePlace`). `SyncAgent.LocalTrees`/`AgentOptions.LocalTrees` choose it.
+- **Optional members** (default interface members, so other trees are unchanged): `UnavailableReason` (shown by the
+  syncer and the backup instead of "does not exist" when the root is unusable, and when a listing is refused mid-run),
+  `Watchable` (whether the agent puts a `FileSystemWatcher` on `FileSystemPath`; default: when there is one).
+- **A folder moving between two spellings of one place** (a document tree and its real path): `SyncState.Location`
+  records the tree's `Location` the state was made at; a run at another location asks `SyncOptions.SamePlace`
+  (`ILocalTreeFactory.SamePlace`), and when it is the same place carries the state over (`FolderSyncer.Rebase`: an entry's
+  local time is taken from the new tree where the size is equal and the time differs by under 2 s, since APIs round
+  differently and FAT keeps 2-second times). Without that, every file would look locally changed and TwoWay would
+  upload all of them again (tested: `GuardedTreeTests`).
 - **Changes in the syncer:** the local trash's age comes from its directory's name (the deletion time it is named after),
   else its modification time, not the creation time (trees do not all have one); a tree that cannot set modification
   times keeps the download's own time, which the sync state records, so nothing looks changed on the next run (tested:
@@ -1462,6 +1475,65 @@ delete where a provider cannot move), deletes. SAF limits and how they are handl
   content, one more version on the server, nothing lost. Closed in M4-2 by a settle time: files modified in the last
   10 seconds wait for the next run ("Android background work");
 - a revoked permission or a deleted folder makes `Exists()` false: the run fails with "Choose the folder again".
+
+SAF cannot reach a volume's root, Download or Android/… on Android 11+ (the picker refuses them "to protect your
+privacy"): with "All files access" folders can use real paths instead (next section).
+
+### Android: All files access (real paths)
+
+Decided (task 16): do what FolderSync, Solid Explorer and Syncthing-fork do and ask for `MANAGE_EXTERNAL_STORAGE`. The APK
+is distributed by us (GitHub releases, no Google Play, whose policy restricts the permission to file managers and the
+like). SAF stays as the fallback for people who decline, and for other apps' document providers. Code:
+`ASync.App/Services/PhoneStorage.cs` (BCL: volumes, paths, `IStorageAccess`), `ViewModels/LocalFolderViewModel.cs`,
+`StorageViewModel.cs`, the Android head's `AndroidStorage.cs` and `AndroidTreeFactory` (`SafTree.cs`).
+
+- **Permission:** manifest `MANAGE_EXTERNAL_STORAGE` (Android 11+, granted only by the person on the system's page), plus
+  `WRITE/READ_EXTERNAL_STORAGE` with `maxSdkVersion=29` and `requestLegacyExternalStorage` for Android 8–10 (the runtime
+  question there). `AndroidStorage.HasAllFilesAccess` is `Environment.IsExternalStorageManager` (cached for a second: it
+  is asked on every call of a guarded tree). *Allow all files access* opens `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION`
+  for `package:ua.pp.chds.async`, else `ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION`. The app learns the answer when it comes
+  back to the front (`MainActivity.OnResume` → `AndroidStorage.NotifyChanged` → `IStorageAccess.Changed`).
+- **The flow (shared UI, `IPlatformServices.Storage`, null on desktops):** *Choose/Change folder…* opens
+  `ShellViewModel.FolderDialog` (`LocalFolderViewModel`; the Back button closes it). Without the permission: one short
+  screen on why, *Allow all files access* or *Use the system picker* (the old `PickFolderAsync`, now the folder's
+  `ChooseSystemFolder` command); coming back without it says it is still off, with it the dialog turns into the picker.
+  With it: ASync's own picker over real paths (System.IO): the volumes as buttons, the current place as a breadcrumb
+  ("Internal storage › DCIM") and its path, subdirectories (hidden ones and Android/data, Android/obb left out), Up,
+  *New folder here*, *Use this folder*. A chosen real path is stored on the server as is (`/storage/emulated/0/DCIM`:
+  people read it in the web UI); a document tree it replaces gives its persisted permission back.
+- **Volumes:** `StorageManager.getStorageVolumes` → `RawVolume` → `PhoneStorage.Map`: mounted read-write only (not
+  `mounted_ro`, unmounted, removed), internal storage first, the same mount once; labels "Internal storage", else the
+  system's description ("SD card", "USB drive" without one), the volume id added when two read the same. The directory
+  is `StorageVolume.getDirectory` (API 30), else `/storage/<uuid>` (and `getExternalStorageDirectory` for the primary).
+- **Out of reach:** Android/data and Android/obb (and below) are refused by `PhoneStorage.Check` and hidden by the tree
+  (`PhoneStorage.HiddenUnder`: `Android/data`, `Android/obb` at a volume's root, `data`, `obb` in its Android directory):
+  since Android 13 no app may read them, All files access or not; listing them would fail the whole run.
+- **The tree:** `AndroidTreeFactory.Open` of a path on the shared storage (a volume, or under /storage, /sdcard, /mnt) is
+  `GuardedTree(FileSystemTree, AndroidStorage.Blocked, HiddenUnder, name: the volume's label at its root, watchable:
+  false)`. Not watched: a recursive inotify watch of a whole volume would run out of watches, and the phone runs folders
+  on their schedule, on *Sync now* and when the app opens anyway. Modification times can be set (unlike SAF), so
+  downloads keep their times. `Validate` refuses a shared path without the permission, in Android/data or obb, or missing.
+- **Switching a SAF folder to its real path:** with the permission, a folder card whose path is an external-storage
+  tree with a real path that exists (`PhoneStorage.RealPathOf`: `primary:` → the primary volume, `home:` → its
+  Documents, `<uuid>:` → that volume; the Downloads provider's `raw:`/`msf:` ids have none) offers *Use the real path …*
+  (an offer, never automatic). It is a `set-path`; the agent's next run sees `SyncState.Location` differ,
+  `AndroidTreeFactory.SamePlace` maps both to the same real path, and the state is carried over ("Local file trees"):
+  no re-upload, no conflicts (verified on the emulator: "0 up, 0 down, 0 deleted").
+- **Turned off later** (Settings, or `appops`): every call of the guarded tree refuses, so a run stops before planning
+  anything with "All files access was turned off for ASync… Nothing was changed here or on the server" (the folder's
+  failed result, reported to the server like any failure, so it alerts if it lasts); a listing refused mid-run says the
+  same. A missing root never deletes remotely, as before. WorkManager's runs and wake-ups go through the same tree. Turned
+  on again, the next run continues with the state it had.
+- **Automation (tests):** `choose-local <folder>`, `picker`, `picker-go|open|up|volume|use|allow|system|cancel`,
+  `switch-real <folder>`, `storage [refresh]` (the volumes and the permission; `refresh` as if the app came back to the
+  front, for permissions changed with `appops`), `show <control>` (scrolls a card into view for screenshots); `state`
+  has `allFiles`, `folderDialog` and each folder's `realPathOffer`.
+- **Tests:** `ASync.Tests`: `GuardedTreeTests` (the contract through the guard, every call refused when blocked, hidden
+  paths, a TwoWay run stopping with the reason and deleting nothing, also when blocked mid-run, the switch from a tree
+  with second-rounded times keeping the state, and without `SamePlace` everything uploaded again); `ASync.App.Tests`:
+  `AllFilesAccessTests` (the volume mapping, `RealPathOf`, out-of-reach paths, breadcrumbs, the explanation turning into
+  the picker, the picker's volumes, Download, new folders and refusals, the system picker as the fallback, Back, the
+  switch offer, Settings, desktops without any of it, headless views at 360 px).
 
 **Platform:** `AndroidPlatform` (`IPlatformServices`): the phone's name (Settings → device name, else the model), links in
 the browser, *Open folder* in the Files app (best effort), notifications on a channel (Android 13's permission asked when
@@ -2124,6 +2196,26 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
      and saving through a picker grant (the shell's grant stands in), `notifyChange` refreshing an open Files window on
      another device's change (the URIs are notified; not observed in DocumentsUI), the cancel action for provider
      transfers, a save failing offline, Android versions before 15.
+   - **M4-4 Android All files access (done):** folders anywhere on the phone, volume roots and Download included:
+     `MANAGE_EXTERNAL_STORAGE` with a one-screen explanation and the system page, ASync's own picker over real paths and
+     the volumes' labels, `GuardedTree` over `FileSystemTree` (stops safely when the permission goes, Android/data and obb
+     left out), real paths on the server as people read them, SAF folders offered their real path with the sync state kept
+     (see "Android: All files access"). Verified on the Android 15 x86_64 emulator (`scripts/smoke-android.sh`):
+     in a run on a fresh emulator with the background sections skipped, the new section passed all its checks but the two
+     on revoking, which revoked only the package's appops mode while the Settings switch had set the uid's (which wins);
+     revoking the uid's mode, as Settings does, was then verified by hand (Android stops the app's process; started again,
+     the folder fails with the message, nothing changed) and by a wake-up in a later run (a real-path folder failed with
+     the message in the background), and the script now sets both. Covered: the virtual SD card's root and the internal storage's root in the picker, Download offered,
+     Android/data and obb hidden, the tree contract 14/14 on the real path, TwoWay both ways with `async-cli` at the SD
+     card's root, a SAF folder switched to its real path with "0 up, 0 down, 0 deleted", revoked → "All files access was
+     turned off" in the app and in a WorkManager wake-up with nothing deleted, turned on again → syncs. Two full runs with
+     the background sections never got a clean pass of the section: the test reset the permission after bringing the
+     app up, which stops the app again (fixed: reset first); the last full run was stopped by the machine running out
+     of memory early on. Those runs also failed checks in sections this task did not change: once the documents
+     provider's "a replaced file keeps a version" (the replace landed, no version listed), once the Wi-Fi-only checks of
+     M4-2 on an emulator reused from earlier runs (metered state unknown). Only compiled or reasoned about: Android 8–10's
+     storage permission and legacy storage, real USB drives and SD cards (the emulator's virtual SD card stands in), an
+     OEM Settings without the per-app page (the fallback page).
      Next: the VFS on the desktops (Cloud Files, File Provider, FUSE), photos/contacts/calendars, iOS.
 6. **M5 — hardening:** OpenTelemetry, and whatever is left of the gap list below. Later: Google Drive,
    OneDrive and Dropbox adapters.

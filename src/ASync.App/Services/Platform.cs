@@ -65,6 +65,9 @@ public interface IPlatformServices
 
     /// <summary>Background work, battery and push (phones); null on desktops, where the agent is a service.</summary>
     IBackgroundServices? Background => null;
+
+    /// <summary>Real paths on a phone's shared storage ("All files access"); null on desktops.</summary>
+    IStorageAccess? Storage => null;
 }
 
 /// <summary>A UnifiedPush distributor installed on the phone (ntfy, say).</summary>

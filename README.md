@@ -422,8 +422,9 @@ no web UI buttons there.
   the Android Keystore (in its secure hardware where it has some) and never leaves it; what the app stores about the
   device is encrypted with another Keystore key.
 - **Folders:** attach a folder to the phone in the web UI on your computer (any local path will do: the phone asks), then
-  *Choose folder…* on the phone picks where it lives, with Android's own folder picker (internal storage, an SD card, a USB drive, or
-  another app's storage). Two-way, Mirror and Backup folders work there; *Sync now*, pause and resume, live progress,
+  *Choose folder…* on the phone picks where it lives: anywhere on the phone with *All files access* (see
+  [Folders anywhere on the phone](#folders-anywhere-on-the-phone)), or with Android's own folder picker (internal
+  storage, an SD card, a USB drive, or another app's storage, but not their top level or Download). Two-way, Mirror and Backup folders work there; *Sync now*, pause and resume, live progress,
   unlocking end-to-end folders, and the settings (theme, sign out) as on the desktop. A **new end-to-end folder** is set up
   on the phone itself: *Set up encryption…* asks for its passphrase (twice) and shows the recovery key once; other
   devices then unlock it with the same passphrase (`async-cli unlock`, or *Unlock…* in the apps). The Back button closes dialogs and
@@ -434,10 +435,34 @@ no web UI buttons there.
   background work at most every 15 minutes), only on Wi-Fi or while charging if you say so, and the server can wake the
   phone when another device changed something: see [Background sync on Android](#background-sync-on-android).
 - **Not yet:** photos, contacts and calendars come later. Files changed on the phone are noticed on the next run, not at
-  once. Android's folder picker cannot keep file times: files downloaded to the phone carry the time they were
-  downloaded, and names a storage cannot hold (`:`, `?`… on SD cards) fail that file with a message. A file written in
+  once. Folders chosen with Android's folder picker cannot keep file times: files downloaded to the phone carry the time they were
+  downloaded (with All files access they keep their times), and names a storage cannot hold (`:`, `?`… on SD cards) fail that file with a message. A file written in
   the last 10 seconds waits for the next run (Android touches a new file's time once more a few seconds after it was
   written, which would otherwise upload it twice).
+
+### Folders anywhere on the phone
+
+Android's own folder picker refuses the top level of the internal storage, of an SD card or USB drive, and Download
+("to protect your privacy"). To sync those, ASync can use **All files access**, as file managers and sync apps such as
+FolderSync, Solid Explorer and Syncthing-fork do (the APK is installed from our releases, not Google Play, whose rules
+would not allow it):
+
+- **Granting it:** *Choose folder…* (or *Change folder…*) explains why in one screen; *Allow all files access* opens
+  Android's page for ASync (*Settings → Apps → Special app access → All files access → ASync* on most phones): turn on
+  *Allow access to manage all files* and go back. *Use the system picker* keeps Android's picker instead. On Android 8–10
+  the app asks for the storage permission instead. *Settings → Folders on this phone* shows whether it is on and opens
+  the same page to change it.
+- **ASync's folder picker:** the internal storage, each SD card and USB drive by name, and every folder on them: choose
+  the top of a volume, Download, or anything below; *New folder here* makes one. The server and the web UI show the
+  folder as its real path, e.g. `/storage/emulated/0/DCIM`.
+- **Out of reach:** Android/data and Android/obb are not offered, and are left out of a folder at the top of a volume:
+  since Android 13 they belong to their apps alone, All files access or not.
+- **Folders chosen before:** once the access is on, a folder chosen with Android's picker shows *Use the real path
+  /storage/emulated/0/…*. Switching keeps its sync state: nothing is uploaded or downloaded again, no conflicts.
+- **Turned off later:** folders at real paths stop with "All files access was turned off for ASync", also in the
+  background, and nothing is deleted on the phone or the server. Turn it on again, or choose the folder with the system
+  picker. Android may restart the app when you change the switch; that is expected.
+- Such folders are not watched for changes: they run on their schedule, on *Sync now* and when the app is opened.
 
 ### Background sync on Android
 

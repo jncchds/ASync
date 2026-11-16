@@ -51,6 +51,23 @@
       </StackPanel>
     </Border>
 
+    <Border Classes="card" Name="StorageCard" IsVisible="{Binding HasStorage}">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="h2" Text="Folders on this phone" />
+        <WrapPanel ItemSpacing="8" LineSpacing="4">
+          <TextBlock Classes="label" Text="All files access" VerticalAlignment="Center" />
+          <Border Classes="pill success" IsVisible="{Binding Storage.HasAllFilesAccess, FallbackValue=False}"><TextBlock Text="Allowed" /></Border>
+          <Border Classes="pill warning" IsVisible="{Binding !Storage.HasAllFilesAccess, FallbackValue=False}"><TextBlock Text="Not allowed" /></Border>
+        </WrapPanel>
+        <TextBlock Name="StorageText" Text="{Binding Storage.StatusText, FallbackValue=''}" TextWrapping="Wrap" />
+        <Button Name="ChangeAllFilesAccess" Content="{Binding Storage.ChangeText, FallbackValue=''}" Command="{Binding Storage.ChangeCommand, FallbackValue={x:Null}}"
+                HorizontalAlignment="Left" />
+        <TextBlock Classes="muted small" TextWrapping="Wrap" Text="{x:Static vm:StorageViewModel.UnreachableNote}" />
+        <TextBlock Classes="muted small" TextWrapping="Wrap"
+                   Text="Turned off later, folders at real paths stop with a message (nothing is deleted anywhere) until it is on again or they are chosen with the system picker." />
+      </StackPanel>
+    </Border>
+
     <Border Classes="card" Name="BackgroundCard" IsVisible="{Binding HasBackground}">
       <StackPanel Spacing="12">
         <TextBlock Classes="h2" Text="Background sync" />

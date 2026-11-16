@@ -54,6 +54,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         "; to use it again, enroll it again.";
     public bool HasBackground => Background is not null;
 
+    /// <summary>Phones: All files access.</summary>
+    public StorageViewModel? Storage => _shell.Storage;
+    public bool HasStorage => Storage is not null;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanSignOut))]
     public partial string? DeviceText { get; private set; }

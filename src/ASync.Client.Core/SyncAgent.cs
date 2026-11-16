@@ -238,6 +238,7 @@ public sealed class SyncAgent : IAsyncDisposable
                             VersionsKeepDays = folder.VersionsKeepDays, TrashKeepDays = folder.TrashKeepDays,
                             AllowMassDeletion = allowMassDeletion ?? AllowMassDeletion,
                             SettleTime = SettleTime,
+                            SamePlace = previous => LocalTrees.SamePlace(previous, folder.LocalPath),
                         }) { Progress = progress }.RunAsync(ct);
                     }
                     finally
@@ -702,7 +703,7 @@ public sealed class SyncAgent : IAsyncDisposable
 
         private static string? WatchablePath(SyncAgent agent, string location)
         {
-            try { return agent.LocalTrees.Open(location).FileSystemPath is { } path && Directory.Exists(path) ? path : null; }
+            try { return agent.LocalTrees.Open(location) is { Watchable: true, FileSystemPath: { } path } && Directory.Exists(path) ? path : null; }
             catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException) { return null; }
         }
 

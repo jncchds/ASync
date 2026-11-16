@@ -60,7 +60,8 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
 
     /// <summary>A request of this folder is running (sync now, pause, a new path).</summary>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(SyncNowCommand), nameof(TogglePauseCommand), nameof(ChooseFolderCommand), nameof(SaveConditionsCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SyncNowCommand), nameof(TogglePauseCommand), nameof(ChooseFolderCommand), nameof(ChooseSystemFolderCommand),
+        nameof(SwitchToRealPathCommand), nameof(SaveConditionsCommand))]
     public partial bool Working { get; private set; }
 
     public string PauseText => Paused ? "Resume" : "Pause";
@@ -131,6 +132,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         SetUpEncryptionCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(NeedsPath));
         OnPropertyChanged(nameof(ChooseFolderText));
+        RefreshStorage();
         SyncNowCommand.NotifyCanExecuteChanged();
         OpenFolderCommand.NotifyCanExecuteChanged();
         UnlockCommand.NotifyCanExecuteChanged();
@@ -186,8 +188,73 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
     [RelayCommand(CanExecute = nameof(HasLocalPath))]
     private Task OpenFolder() => shell.Platform.OpenFolderAsync(_folder.LocalPath);
 
+    /// <summary>
+    /// Choose or change the folder's local path. On a phone with <see cref="IPlatformServices.Storage"/>: the in-app picker
+    /// over real paths with All files access, else first the screen that explains it (<see cref="LocalFolderViewModel"/>),
+    /// which also offers the system picker. Elsewhere the platform's own picker.
+    /// </summary>
     [RelayCommand(CanExecute = nameof(CanChange))]
     private async Task ChooseFolder()
+    {
+        if (shell.Platform.Storage is { } storage)
+        {
+            shell.FolderDialog = new LocalFolderViewModel(shell, storage, Name, SetRealPathAsync, () => ChooseSystemFolderCommand.ExecuteAsync(null),
+                HasLocalPath ? _folder.LocalPath : null);
+            return;
+        }
+        await ChooseSystemFolder();
+    }
+
+    /// <summary>A real path from the in-app picker; a document tree it replaces gives its permission back.</summary>
+    private async Task<bool> SetRealPathAsync(string path)
+    {
+        var previous = _folder.LocalPath;
+        Working = true;
+        try
+        {
+            if (!await shell.RunAsync((s, ct) => s.SetPathAsync(Id, path, ct)!)) return false;
+        }
+        finally { Working = false; }
+        if (previous.StartsWith("content://", StringComparison.Ordinal) && previous != path) shell.Platform.Storage?.ReleaseTree(previous);
+        return true;
+    }
+
+    /// <summary>
+    /// A document-tree folder whose real path ASync may use now (All files access granted): the offer to switch, which
+    /// keeps the folder's sync state (the agent sees the same files: <c>FolderSyncer</c>'s rebase). Null otherwise.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSwitchToRealPath), nameof(SwitchText))]
+    public partial string? RealPathOffer { get; private set; }
+
+    public bool CanSwitchToRealPath => RealPathOffer is not null;
+
+    public string SwitchText => RealPathOffer is { } p ? $"Use the real path {p}" : "";
+
+    /// <summary>Looks again whether the switch can be offered (the permission may have changed).</summary>
+    public void RefreshStorage()
+    {
+        string? offer = null;
+        if (shell.Platform.Storage is { HasAllFilesAccess: true } storage && _folder.LocalPath.StartsWith("content://", StringComparison.Ordinal))
+        {
+            try
+            {
+                if (storage.RealPathOf(_folder.LocalPath) is { } real && Directory.Exists(real)) offer = real;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        RealPathOffer = offer;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanChange))]
+    private async Task SwitchToRealPath()
+    {
+        if (RealPathOffer is { } real) await SetRealPathAsync(real);
+    }
+
+    /// <summary>The platform's own picker (on Android the system's document-tree picker: the fallback without All files access).</summary>
+    [RelayCommand(CanExecute = nameof(CanChange))]
+    private async Task ChooseSystemFolder()
     {
         var path = await shell.Platform.PickFolderAsync($"Where \"{Name}\" syncs on this {shell.Platform.DeviceNoun}", HasLocalPath ? _folder.LocalPath : null);
         if (path is null) return;

@@ -78,5 +78,12 @@
             IsVisible="{Binding Dialog, Converter={x:Static ObjectConverters.IsNotNull}}">
       <ContentControl Name="DialogHost" Content="{Binding Dialog}" VerticalAlignment="Center" HorizontalAlignment="Stretch" MaxWidth="460" Margin="16" />
     </Border>
+
+    <!-- Where a folder lives on a phone: the All files access explanation, or the in-app picker (tall: the screen's height). -->
+    <Border Grid.Row="0" Grid.RowSpan="4" Background="{DynamicResource Backdrop}"
+            IsVisible="{Binding FolderDialog, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <ContentControl Name="FolderDialogHost" Content="{Binding FolderDialog}" VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                      MaxWidth="560" Margin="12,24" />
+    </Border>
   </Grid>
 </UserControl>

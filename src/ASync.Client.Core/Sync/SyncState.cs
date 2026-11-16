@@ -17,6 +17,8 @@ public sealed class SyncState
     public Dictionary<string, BaseEntry> Files { get; set; } = new(StringComparer.Ordinal);
     public DateTimeOffset? LastSync { get; set; }
     public DateTimeOffset? LastCleanUp { get; set; }
+    /// <summary>The tree's <c>Location</c> this state was made at (null in states from before it was recorded).</summary>
+    public string? Location { get; set; }
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -31,6 +33,7 @@ public sealed class SyncState
     public void Save(string path)
     {
         var temp = path + ".tmp";
+        if (Path.GetDirectoryName(path) is { Length: > 0 } dir) Directory.CreateDirectory(dir);
         File.WriteAllBytes(temp, JsonSerializer.SerializeToUtf8Bytes(this, Json));
         File.Move(temp, path, overwrite: true);
     }
