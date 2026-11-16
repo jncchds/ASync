@@ -96,6 +96,7 @@ internal static class DocumentsAutomation
             case "write":
             {
                 var a = Args(2);
+                var closes = AndroidDocuments.ClosesHandled;
                 var fd = resolver.OpenFileDescriptor(Doc(a[0]), "wt")!;
                 // AutoCloseOutputStream closes the descriptor itself: a descriptor only disposed is "leaked" for the
                 // provider, which then saves nothing (as Android wants: the writer may have failed).
@@ -105,6 +106,9 @@ internal static class DocumentsAutomation
                     output.Write(bytes, 0, bytes.Length);
                     output.Close();
                 }
+                // The provider sees the close a moment later, on its own thread: wait for that before waiting for the
+                // upload, or a quick check finds no pending save yet and answers before anything was stored.
+                for (var i = 0; i < 100 && AndroidDocuments.ClosesHandled == closes; i++) await Task.Delay(100);
                 await WaitForSavesAsync();
                 return "ok";
             }

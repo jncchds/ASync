@@ -2201,21 +2201,28 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
      the volumes' labels, `GuardedTree` over `FileSystemTree` (stops safely when the permission goes, Android/data and obb
      left out), real paths on the server as people read them, SAF folders offered their real path with the sync state kept
      (see "Android: All files access"). Verified on the Android 15 x86_64 emulator (`scripts/smoke-android.sh`):
-     in a run on a fresh emulator with the background sections skipped, the new section passed all its checks but the two
-     on revoking, which revoked only the package's appops mode while the Settings switch had set the uid's (which wins);
-     revoking the uid's mode, as Settings does, was then verified by hand (Android stops the app's process; started again,
-     the folder fails with the message, nothing changed) and by a wake-up in a later run (a real-path folder failed with
-     the message in the background), and the script now sets both. Covered: the virtual SD card's root and the internal storage's root in the picker, Download offered,
-     Android/data and obb hidden, the tree contract 14/14 on the real path, TwoWay both ways with `async-cli` at the SD
-     card's root, a SAF folder switched to its real path with "0 up, 0 down, 0 deleted", revoked → "All files access was
-     turned off" in the app and in a WorkManager wake-up with nothing deleted, turned on again → syncs. Two full runs with
-     the background sections never got a clean pass of the section: the test reset the permission after bringing the
-     app up, which stops the app again (fixed: reset first); the last full run was stopped by the machine running out
-     of memory early on. Those runs also failed checks in sections this task did not change: once the documents
-     provider's "a replaced file keeps a version" (the replace landed, no version listed), once the Wi-Fi-only checks of
-     M4-2 on an emulator reused from earlier runs (metered state unknown). Only compiled or reasoned about: Android 8–10's
-     storage permission and legacy storage, real USB drives and SD cards (the emulator's virtual SD card stands in), an
-     OEM Settings without the per-app page (the fallback page).
+     a full run on a fresh emulator (128 checks, the UnifiedPush part skipped without the ntfy APK) passed every check
+     of the background sections and all 31 of the new section, and failed 5 documents-provider checks that all hang on
+     one intermittent rename failure (below); a second pass with the background sections skipped passed all 113 checks.
+     The new section covers: the explanation, the system page with its switch, the in-app picker at the internal
+     storage's root (Download offered) and at the virtual SD card's root, Android/data and obb hidden, the tree contract
+     14/14 on the real path, TwoWay both ways with `async-cli` at the SD card's root, nothing of Android/data synced, a SAF
+     folder switched to its real path with "0 up, 0 down, 0 deleted" (and back to SAF by hand: the same), revoked (the
+     test sets the uid's appops mode as the Settings switch does: the package's alone is overridden; Android stops the
+     app's process) → "All files access was turned off" in the app and in a WorkManager wake-up with the process killed,
+     nothing deleted on either side, turned on again → syncs. Found on the way: the picker's folder names were white on
+     the light theme's white card (a headless test checks the colour now).
+     **Documents provider, two intermittent failures (M4-3 code):** "a replaced file keeps a version" failed once
+     because the automation's `docs write` answered before the save had started: the provider uploads from the
+     descriptor's close callback, which Android runs on the provider's handler thread after the writer's close()
+     returned, so `PendingWrites` could still read 0. The test now waits for the provider to have handled the close
+     (`AndroidDocuments.ClosesHandled`) before waiting for the upload; it passed in every run since. A rename once failed
+     with a FileNotFoundException whose message the trimmed build hid; it passed in the next pass and in 40 repetitions of
+     the sequence (create, write, replace, version check, rename) with the folder's own copy at its real path and on its
+     SAF tree, with and without waiting for that copy to follow. Cause not found; the automation now answers with the Java
+     message and the check prints the provider's log, so a recurrence says why. Only compiled or reasoned about: Android
+     8–10's storage permission and legacy storage, real USB drives and SD cards (the emulator's virtual SD card stands in),
+     an OEM Settings without the per-app page (the fallback page).
      Next: the VFS on the desktops (Cloud Files, File Provider, FUSE), photos/contacts/calendars, iOS.
 6. **M5 — hardening:** OpenTelemetry, and whatever is left of the gap list below. Later: Google Drive,
    OneDrive and Dropbox adapters.

@@ -5,6 +5,22 @@
              xmlns:sys="using:System"
              x:Class="ASync.App.Views.LocalFolderView"
              x:DataType="vm:LocalFolderViewModel">
+  <UserControl.Styles>
+    <!-- A folder row: the page's text colour, not the primary button's (white on the light theme's white). -->
+    <Style Selector="Button.entry">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource Text}" />
+      <Setter Property="FontWeight" Value="Normal" />
+    </Style>
+    <Style Selector="Button.entry:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentFaint}" />
+      <Setter Property="Foreground" Value="{DynamicResource Text}" />
+    </Style>
+    <Style Selector="Button.entry:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentSoft}" />
+      <Setter Property="Foreground" Value="{DynamicResource Text}" />
+    </Style>
+  </UserControl.Styles>
   <Panel>
     <!-- Without All files access: one short screen on why, the system page, or the system picker instead. -->
     <Border Classes="card" Name="Explanation" IsVisible="{Binding IsExplaining}" VerticalAlignment="Center" BoxShadow="0 8 32 0 #40000000">

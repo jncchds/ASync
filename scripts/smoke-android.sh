@@ -525,7 +525,7 @@ wait_for 90 phone_note "replaced in the Files app" && pass "and the phone's copy
 conflicts=$(adb shell ls /sdcard/ASyncSmoke/docs 2>/dev/null | tr -d '\r' | grep -c conflict || true)
 [[ "$conflicts" == 0 ]] && pass "no conflict copies from the provider's own writes" || fail "conflict copies" "$(adb shell ls /sdcard/ASyncSmoke/docs)"
 renamed=$(docs_ctl "rename $new provider-renamed.txt")
-[[ "$renamed" == "f/$docs/provider-renamed.txt" ]] && server_has "$docs" provider-renamed.txt >/dev/null && pass "renamed to $renamed" || fail "rename" "$renamed"
+[[ "$renamed" == "f/$docs/provider-renamed.txt" ]] && server_has "$docs" provider-renamed.txt >/dev/null && pass "renamed to $renamed" || fail "rename" "$renamed $(adb logcat -d -s ASync | grep Documents | tail -5)"
 dir=$(docs_ctl "mkdir f/$docs Scans")
 docs_ctl "list f/$docs" | jq -e '.entries | any(._display_name == "Scans" and .mime_type == "vnd.android.document/directory")' >/dev/null \
   && pass "a new directory ($dir) is listed (kept on the phone until a file goes in)" || fail "mkdir" "$dir"

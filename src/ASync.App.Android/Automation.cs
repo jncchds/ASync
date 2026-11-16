@@ -42,7 +42,7 @@ public sealed class Automation : BroadcastReceiver
             {
                 string answer;
                 try { answer = await BackgroundCommandAsync(context!.ApplicationContext ?? context, command); }
-                catch (Exception e) { answer = $"error: {e.GetType().Name}: {e.Message}"; }
+                catch (Exception e) { answer = $"error: {e.GetType().Name}: {(e is Java.Lang.Throwable t ? t.LocalizedMessage ?? e.Message : e.Message)}"; }
                 pending.ResultCode = Result.Ok;
                 pending.ResultData = answer;
                 pending.Finish();
@@ -53,7 +53,7 @@ public sealed class Automation : BroadcastReceiver
         {
             string answer;
             try { answer = await RunAsync(command); }
-            catch (Exception e) { answer = $"error: {e.GetType().Name}: {e.Message}"; }
+            catch (Exception e) { answer = $"error: {e.GetType().Name}: {(e is Java.Lang.Throwable t ? t.LocalizedMessage ?? e.Message : e.Message)}"; }
             pending.ResultCode = Result.Ok;
             pending.ResultData = answer;
             pending.Finish();

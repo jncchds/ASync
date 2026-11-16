@@ -341,7 +341,11 @@ public sealed class AllFilesAccessTests : IDisposable
         storage.RaiseChanged();
         await Pump(() => Shows(window, "UseThisFolder"));
         Assert.Equal("Internal storage", Named<TextBlock>(window, "Breadcrumb").Text);
-        Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "Download" && t.IsEffectivelyVisible);
+        var download = window.GetVisualDescendants().OfType<TextBlock>().First(t => t.Text == "Download" && t.IsEffectivelyVisible);
+        // Readable: the page's text colour, not the primary button's white (which vanished on the light theme's white card).
+        var color = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(download.Foreground).Color;
+        Assert.NotEqual(Avalonia.Media.Colors.White, color);
+        Assert.True(color.R + color.G + color.B < 3 * 160, $"folder names are drawn in {color}, too light on a white card");
         Assert.True(Named<Border>(window, "Picker").Bounds.Width <= 360);
 
         f.Shell.FolderDialog!.CancelCommand.Execute(null);

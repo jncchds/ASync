@@ -116,6 +116,16 @@ public static class AndroidDocuments
     /// <summary>Saves still being uploaded after their descriptor closed (the smoke test waits for them).</summary>
     public static int PendingWrites => Volatile.Read(ref _pendingWrites);
 
+    /// <summary>
+    /// Written descriptors whose close the provider has handled. The close arrives on the provider's handler thread after
+    /// the writer's own close() returned, so a writer that waits for <see cref="PendingWrites"/> must first wait for this.
+    /// </summary>
+    public static int ClosesHandled => Volatile.Read(ref _closesHandled);
+
+    private static int _closesHandled;
+
+    internal static void CloseHandled() => Interlocked.Increment(ref _closesHandled);
+
     internal static void WriteStarted() => Interlocked.Increment(ref _pendingWrites);
     internal static void WriteDone() => Interlocked.Decrement(ref _pendingWrites);
 }
@@ -394,9 +404,11 @@ public sealed class AsyncDocumentsProvider : DocumentsProvider
         {
             if (closeError is not null) Log.Warn("ASync", $"Documents: {id.Name} was closed with an error ({closeError.Message}); nothing saved.");
             TryDelete(temp);
+            AndroidDocuments.CloseHandled();
             return;
         }
-        AndroidDocuments.WriteStarted();
+        AndroidDocuments.WriteStarted(); // before CloseHandled: a waiter that sees the close also sees the pending save
+        AndroidDocuments.CloseHandled();
         var context = Context!;
         _ = Task.Run(async () =>
         {

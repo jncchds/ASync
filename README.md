@@ -442,6 +442,13 @@ no web UI buttons there.
 
 ### Folders anywhere on the phone
 
+<p>
+  <img src="docs/screenshots/android-allfiles-explain-light.png" alt="Why ASync asks for All files access" width="24%">
+  <img src="docs/screenshots/android-allfiles-system-light.png" alt="Android's All files access switch for ASync" width="24%">
+  <img src="docs/screenshots/android-allfiles-picker-light.png" alt="ASync's folder picker at the top of the storage" width="24%">
+  <img src="docs/screenshots/android-allfiles-settings-dark.png" alt="Settings: Folders on this phone" width="24%">
+</p>
+
 Android's own folder picker refuses the top level of the internal storage, of an SD card or USB drive, and Download
 ("to protect your privacy"). To sync those, ASync can use **All files access**, as file managers and sync apps such as
 FolderSync, Solid Explorer and Syncthing-fork do (the APK is installed from our releases, not Google Play, whose rules
