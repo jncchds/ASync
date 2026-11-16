@@ -20,6 +20,9 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
   const [localPath, setLocalPath] = useState(existing?.localPath ?? '')
   const [direction, setDirection] = useState<MirrorDirection>(existing?.direction ?? 'Upload')
   const [paused, setPaused] = useState(existing?.paused ?? false)
+  const [unmeteredOnly, setUnmeteredOnly] = useState(existing?.conditions?.unmeteredOnly ?? false)
+  const [chargingOnly, setChargingOnly] = useState(existing?.conditions?.chargingOnly ?? false)
+  const [batteryNotLow, setBatteryNotLow] = useState(existing?.conditions?.batteryNotLow ?? false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState(false)
@@ -32,7 +35,7 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
     try {
       await attachFolderDevice(folder.id, {
         deviceId, localPath: localPath.trim(), direction: folder.mode === 'Mirror' ? direction : null, paused,
-        expectedRevision: startRevision,
+        expectedRevision: startRevision, conditions: { unmeteredOnly, chargingOnly, batteryNotLow },
       })
       onSaved()
     } catch (err) {
@@ -79,6 +82,22 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
       <label className="checkbox">
         <input type="checkbox" checked={paused} onChange={e => setPaused(e.target.checked)} /> Paused
       </label>
+      <fieldset className="fieldset">
+        <legend>Run by itself only</legend>
+        <label className="checkbox">
+          <input type="checkbox" checked={unmeteredOnly} onChange={e => setUnmeteredOnly(e.target.checked)} /> On Wi-Fi (not on mobile data or a metered hotspot)
+        </label>
+        <label className="checkbox">
+          <input type="checkbox" checked={chargingOnly} onChange={e => setChargingOnly(e.target.checked)} /> While charging
+        </label>
+        <label className="checkbox">
+          <input type="checkbox" checked={batteryNotLow} onChange={e => setBatteryNotLow(e.target.checked)} /> When the battery is not low
+        </label>
+        <p className="hint">
+          Scheduled runs, file changes and wake-ups wait for these; Sync now on the device does not. Phones honour all three;
+          computers the power rules, and metered networks on Linux (NetworkManager).
+        </p>
+      </fieldset>
       {conflict && (
         <p className="error-msg">
           The folder was changed meanwhile. <button type="button" className="secondary small" onClick={onReload}>Reload</button> and

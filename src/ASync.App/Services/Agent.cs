@@ -34,6 +34,13 @@ public interface IAgentSession : IAsyncDisposable
     Task<AgentStatusDto> EnrollAsync(string server, string code, string name, DevicePlatform platform, CancellationToken ct);
     Task<PendingEnrollmentDto> StartDeviceCodeAsync(string server, string name, DevicePlatform platform, CancellationToken ct);
     Task<string> ForgetAsync(CancellationToken ct);
+
+    /// <summary>A folder's run conditions on this device (only on Wi-Fi, while charging, not on a low battery).</summary>
+    Task<string> SetConditionsAsync(int folderId, RunConditionsDto conditions, CancellationToken ct) =>
+        throw new ControlException("This agent cannot change run conditions.");
+
+    /// <summary>Stops the running run of a folder, or of all (null).</summary>
+    Task<string> CancelAsync(int? folderId, CancellationToken ct) => throw new ControlException("This agent cannot stop runs.");
 }
 
 /// <summary>The agent of a config directory, over its Unix socket or named pipe.</summary>
@@ -56,6 +63,8 @@ public sealed class ControlAgentConnector(string configDirectory) : IAgentConnec
         public Task<PendingEnrollmentDto> StartDeviceCodeAsync(string server, string name, DevicePlatform platform, CancellationToken ct) =>
             client.StartDeviceCodeAsync(server, name, platform, ct);
         public Task<string> ForgetAsync(CancellationToken ct) => client.ForgetAsync(ct);
+        public Task<string> SetConditionsAsync(int folderId, RunConditionsDto conditions, CancellationToken ct) => client.SetConditionsAsync(folderId, conditions, ct);
+        public Task<string> CancelAsync(int? folderId, CancellationToken ct) => client.CancelAsync(folderId, ct);
         public ValueTask DisposeAsync() => client.DisposeAsync();
     }
 }

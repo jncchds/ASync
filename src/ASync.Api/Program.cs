@@ -6,6 +6,7 @@ using ASync.Api.HostedServices;
 using ASync.Api.Hubs;
 using ASync.Api.Services;
 using ASync.Api.Services.Alerts;
+using ASync.Api.Services.Push;
 using ASync.Core.Interfaces;
 using ASync.Core.Models;
 using ASync.Infrastructure.Data;
@@ -81,9 +82,16 @@ builder.Services.AddSingleton<PurgeSignal>();
 builder.Services.AddHostedService<PurgeWorker>();
 
 // ── Alerts (overdue detection; webhook, ntfy, e-mail) and push mode ───────────
-// Alerts need no push: they work from what devices report. Push__Mode only has None until the mobile apps (M4).
+// Alerts need no push: they work from what devices report. Push__Mode: UnifiedPush (default) or None; see PushSettings.
 var pushSettings = PushSettings.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(pushSettings);
+builder.Services.AddSingleton<PushQueue>();
+builder.Services.AddSingleton<PushThrottle>();
+builder.Services.AddScoped<PushService>();
+builder.Services.AddHostedService<PushDispatcher>();
+// Device-supplied endpoints: the same stance as alert webhooks (http/https only, no redirects, a short timeout).
+builder.Services.AddHttpClient(PushService.HttpClientName, c => c.Timeout = pushSettings.Timeout)
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, ConnectTimeout = pushSettings.Timeout });
 builder.Services.AddSingleton(AlertOptions.FromConfiguration(builder.Configuration));
 builder.Services.AddSingleton(SmtpOptions.FromConfiguration(builder.Configuration));
 builder.Services.AddSingleton(new ServerStarted(DateTime.UtcNow));

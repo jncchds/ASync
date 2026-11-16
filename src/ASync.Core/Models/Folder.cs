@@ -78,6 +78,14 @@ public class FolderDevice
     /// <summary>The first failed run of the current streak; null after a success.</summary>
     public DateTime? FailingSince { get; set; }
 
+    // Run conditions (M4-2): automatic runs on this device wait until they hold. "Sync now" ignores them.
+    /// <summary>Only on unmetered networks (Wi-Fi, Ethernet): not on mobile data or a metered hotspot.</summary>
+    public bool UnmeteredOnly { get; set; }
+    /// <summary>Only while the device is charging.</summary>
+    public bool ChargingOnly { get; set; }
+    /// <summary>Not while the battery is low (Android's "battery low": about 15 %).</summary>
+    public bool BatteryNotLow { get; set; }
+
     public Folder? Folder { get; set; }
     public Device? Device { get; set; }
 }

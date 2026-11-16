@@ -30,6 +30,8 @@
     <PackageVersion Include="Avalonia.Android" Version="12.1.6" />
     <!-- The Android app's QR scanner: a pure .NET decoder over the camera's preview frames (no Google Play services) -->
     <PackageVersion Include="ZXing.Net" Version="0.16.10" />
+    <!-- The Android app's background work: periodic and expedited jobs, the dataSync foreground service while transfers run -->
+    <PackageVersion Include="Xamarin.AndroidX.Work.Runtime" Version="2.11.0.1" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.6" />
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.6" />
     <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.1.6" />

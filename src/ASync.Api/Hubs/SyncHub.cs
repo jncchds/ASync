@@ -44,6 +44,9 @@ public class DeviceConnections(ILogger<DeviceConnections> logger)
 
     public void Remove(string connectionId) => _open.TryRemove(connectionId, out _);
 
+    /// <summary>Whether the device has a live connection now (then it hears events; no wake-up is needed).</summary>
+    public bool IsConnected(Guid deviceId) => _open.Values.Any(e => e.DeviceId == deviceId);
+
     /// <summary>Closes every connection of the device; returns how many there were.</summary>
     public int Abort(Guid deviceId)
     {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  errorMessage, getDevices, getEnrollments, renameDevice, revokeDevice, revokeEnrollment,
+  errorMessage, getDevices, getEnrollments, renameDevice, revokeDevice, revokeEnrollment, testDevicePush,
   type Device, type Enrollment,
 } from '../api'
 import AddDevicePanel from '../components/AddDevicePanel'
@@ -13,6 +13,7 @@ export default function Devices() {
   const [adding, setAdding] = useState(false)
   const [approveCode, setApproveCode] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const navigate = useNavigate()
 
   const load = useCallback(() => Promise.all([getDevices(), getEnrollments()])
@@ -35,6 +36,16 @@ export default function Devices() {
     try { await revokeDevice(device.id); await load() } catch (err) { setError(errorMessage(err)) }
   }
 
+  const testPush = async (device: Device) => {
+    setError('')
+    setNotice('')
+    try {
+      await testDevicePush(device.id)
+      setNotice(`Wake-up sent to "${device.name}": it syncs its folders now.`)
+      await load()
+    } catch (err) { setError(errorMessage(err, 'The wake-up could not be sent.')); await load() }
+  }
+
   const cancelCode = async (e: Enrollment) => {
     try { await revokeEnrollment(e.id); await load() } catch (err) { setError(errorMessage(err)) }
   }
@@ -50,6 +61,7 @@ export default function Devices() {
       </div>
 
       {error && <p className="error-msg">{error}</p>}
+      {notice && <p className="success-msg">{notice}</p>}
 
       {adding && (
         <AddDevicePanel
@@ -65,7 +77,7 @@ export default function Devices() {
         <div className="table-wrap">
           <table className="stack">
             <thead>
-              <tr><th>Name</th><th>Platform</th><th>Version</th><th>Last seen</th><th>Added</th><th></th></tr>
+              <tr><th>Name</th><th>Platform</th><th>Version</th><th>Last seen</th><th>Wake-ups</th><th>Added</th><th></th></tr>
             </thead>
             <tbody>
               {active.map(d => (
@@ -76,7 +88,21 @@ export default function Devices() {
                   <td data-label="Last seen" className="nowrap" title={d.lastSeenAt ? formatDate(d.lastSeenAt) : undefined}>
                     <span>{d.lastSeenAt ? relativeTime(d.lastSeenAt) : 'Never'}</span>
                   </td>
-                  <td data-label="Added" className="muted nowrap"><span>{formatDate(d.createdAt)}</span></td>
+                  <td data-label="Wake-ups" className="wrap">
+                    {d.push ? (
+                      <span title={`UnifiedPush through ${d.push.host}, registered ${formatDate(d.push.registeredAt)}` +
+                        (d.push.lastWakeAt ? `\nLast wake-up ${formatDate(d.push.lastWakeAt)}${d.push.lastWakeError ? `: ${d.push.lastWakeError}` : ''}` : '')}>
+                        <span className={`pill ${!d.push.enabled ? '' : d.push.lastWakeOk === false ? 'pill-danger' : 'pill-success'}`}>
+                          {d.push.lastWakeOk === false ? '⚠ ' : ''}UnifiedPush
+                        </span>
+                        <span className="status-msg">
+                          {d.push.enabled ? d.push.host : 'off on this server (Push__Mode=None)'}
+                          {d.push.enabled && <> · <button type="button" className="link" onClick={() => testPush(d)}>Send wake-up</button></>}
+                        </span>
+                      </span>
+                    ) : <span className="muted">{d.platform === 'Android' ? 'Own schedule' : '—'}</span>}
+                  </td>
+                  <td data-label="Added" className="muted nowrap" title={formatDate(d.createdAt)}><span>{new Date(d.createdAt).toLocaleDateString()}</span></td>
                   <td className="actions-cell">
                     <div className="row-actions">
                       <button className="secondary small" onClick={() => rename(d)}>Rename</button>

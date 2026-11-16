@@ -1,5 +1,31 @@
 # Release notes
 
+## v0.1.5 — 2026-11-16
+
+- feat(android): **The Android app syncs and backs up in the background, and the server can wake it.** Folders run on
+  their interval with the app closed (at least every 15 minutes, Android's shortest; also after a restart of the phone),
+  and every folder runs when the app is opened. While a folder runs, a notification shows its progress with a *Cancel*
+  button and Android keeps the network for it; a transfer that is cut off continues where it stopped at the next run.
+  The first time, the app explains and offers to lift Android's battery optimisation for ASync (with what Xiaomi,
+  Samsung, Huawei and other makers additionally need, as text). With a UnifiedPush distributor such as ntfy installed
+  (*Settings → Background sync → Wake-ups*), the server wakes the phone when another device changed a folder it
+  downloads, and while it is overdue; the wake-up carries no data. Without one, everything still syncs on its schedule.
+  A phone notification says when a folder has not synced for 3 days (1–14 or never). Tried on an Android 15 emulator.
+- feat: **Run conditions per device and folder:** *only on Wi-Fi*, *only while charging*, *not on a low battery*, set in
+  the web UI's device form of a folder or in the app (*Conditions…*). Scheduled runs and wake-ups wait for them and the
+  app shows why ("Waiting for Wi-Fi"); *Sync now* ignores them. Phones honour all three; computers the charging and
+  battery rules, and the Wi-Fi rule on Linux with NetworkManager (ignored on Windows and macOS).
+- feat(server): **Wake-ups through UnifiedPush.** `Push__Mode=UnifiedPush` is the new default: the server posts a tiny
+  "wake" to the address a phone registered (http/https only, no redirects, 10 s), at most once a minute per phone for
+  changes (`Push__ChangedSeconds`) and every 6 hours while overdue (`Push__OverdueHours`). Phones without a distributor
+  are never contacted; `Push__Mode=None` turns it off. The Devices page shows which devices can be woken, through which
+  server, the last wake-up, and *Send wake-up* to try it.
+- fix(server): continuing an interrupted large upload could fail with "500 Internal Server Error" when a part the
+  server had already stored was sent again (the device was cut off before it heard back); it is stored again now.
+  Found by the end-to-end test.
+- fix(android): a file written in the last 10 seconds waits for the next run, so Android touching its time once more no
+  longer uploads it twice (one version instead of two).
+
 ## v0.1.4 — 2026-11-16
 
 - feat(cli): **The agent runs in the background as a service.** `async-cli service install` sets it up for your

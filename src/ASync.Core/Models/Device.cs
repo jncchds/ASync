@@ -20,6 +20,19 @@ public class Device
     public DateTime? LastSeenAt { get; set; }
     public DateTime? RevokedAt { get; set; }
 
+    /// <summary>
+    /// Where the server can wake this device (M4-2): a UnifiedPush endpoint the device's distributor (ntfy, say) gave it.
+    /// Null = no push; the device relies on its own scheduling. The URL is a capability: anyone holding it can wake the
+    /// app, so it is never shown in full. Later also relay/APNs/FCM tokens (<see cref="PushType"/>).
+    /// </summary>
+    public string? PushTarget { get; set; }
+    public PushTargetType? PushType { get; set; }
+    public DateTime? PushRegisteredAt { get; set; }
+    /// <summary>The last wake-up the server sent, and how it went (for the Devices page).</summary>
+    public DateTime? LastPushAt { get; set; }
+    public bool? LastPushOk { get; set; }
+    public string? LastPushError { get; set; }
+
     public AppUser? User { get; set; }
 }
 

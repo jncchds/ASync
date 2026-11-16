@@ -53,6 +53,13 @@ public static class ControlProtocol
         public const string DeviceCode = "device-code";
         /// <summary>Forget this device's identity (sign out): stops syncing, deletes the identity and cancels a pending enrollment.</summary>
         public const string Forget = "forget";
+
+        // Added for background work (M4-2, still protocol 1).
+
+        /// <summary>Set a folder's run conditions on this device (<c>folderId</c>, <c>conditions</c>); the server keeps them.</summary>
+        public const string SetConditions = "set-conditions";
+        /// <summary>Stop the running run of a folder (<c>folderId</c>) or of all; they continue when next due.</summary>
+        public const string Cancel = "cancel";
     }
 }
 
@@ -75,6 +82,8 @@ public sealed record ControlRequest
     public string? Name { get; init; }
     /// <summary><c>enroll</c>, <c>device-code</c>: what to register the device as (default Cli).</summary>
     public DevicePlatform? Platform { get; init; }
+    /// <summary><c>set-conditions</c>: the folder's new run conditions.</summary>
+    public RunConditionsDto? Conditions { get; init; }
 }
 
 public sealed record ControlResponse
@@ -193,6 +202,10 @@ public sealed record FolderStatusDto
     public DateTimeOffset? NextRunAt { get; init; }
     /// <summary>What the server's overdue detection reports for this folder and device (null: nothing, or not known yet).</summary>
     public List<FolderAlertDto>? Alerts { get; init; }
+    /// <summary>This device's run conditions for the folder (null: an older agent, or none).</summary>
+    public RunConditionsDto? Conditions { get; init; }
+    /// <summary>Why automatic runs wait now ("Waiting for Wi-Fi…"), or null.</summary>
+    public string? Waiting { get; init; }
 }
 
 /// <summary>
@@ -202,7 +215,8 @@ public sealed record FolderStatusDto
 public sealed record ProgressDto(int Files, int? TotalFiles, long Bytes, long? TotalBytes, string? CurrentFile);
 
 /// <summary>A run's result. <paramref name="Conflicts"/>: conflict copies the run made (TwoWay).</summary>
-public sealed record FolderRunDto(int FolderId, string Name, bool Ok, string Message, bool Skipped, DateTimeOffset At, int Conflicts = 0);
+/// <summary>A run's outcome. <paramref name="Deferred"/>: it did not run (conditions, or stopped) and runs again when next due.</summary>
+public sealed record FolderRunDto(int FolderId, string Name, bool Ok, string Message, bool Skipped, DateTimeOffset At, int Conflicts = 0, bool Deferred = false);
 
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     UseStringEnumConverter = true)]

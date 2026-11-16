@@ -12,6 +12,13 @@
 #   on that SAF tree (selftest); sync both ways with a second device (async-cli), including an edit, a delete and a large
 #   file with live progress; pause/resume; the Back button closing settings; a Backup folder on a SAF tree backed up and
 #   restored by async-cli, byte for byte; the app restarted (identity and folders survive, the device signs in again).
+#   Background work (M4-2): the foreground-service notification during the large transfer; the battery prompt and the
+#   system's exemption question; the folders' periodic WorkManager jobs; with the app in the background and its process
+#   killed (am kill), a file changed by async-cli arrives through the folder's periodic job, which the system runs in a
+#   process it starts (made due in 25 s: enqueued afresh with an initial delay); a Wi-Fi-only folder on mobile data (svc wifi disable:
+#   the emulator's cellular network is metered) does not run, its job waits for UNMETERED, and runs once Wi-Fi is back;
+#   UnifiedPush with the ntfy app as the distributor and an ntfy server container: the endpoint registered with the
+#   server, and a change on another device wakes the killed app, which syncs it down; the local reminder.
 #
 # Needs: an Android SDK (ANDROID_HOME or ~/Android/Sdk: platform-tools, emulator), an AVD (AVD=name, default async-smoke)
 # or a running emulator/device, docker, jq, curl, python3, a .NET SDK with the android workload (DOTNET=…) unless APK=… is
@@ -23,6 +30,7 @@
 #   NO_BUILD=1 IMAGE=async-desktop-smoke-async-server:latest …   # reuse a server image instead of building one
 #   KEEP=1 …                                                # leave the stack, the emulator and artifacts/android-smoke
 # The checks read `condition && pass … || fail …`: pass never fails, so fail runs only when the condition does.
+#   NTFY_APK=path/to/ntfy.apk …   # the ntfy app (F-Droid io.heckel.ntfy) for the UnifiedPush checks; skipped without it
 # shellcheck disable=SC2015
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -47,7 +55,13 @@ section() { printf '\n\033[1m── %s\033[0m\n' "$1"; }
 need() { command -v "$1" >/dev/null || { echo "error: $1 not found" >&2; exit 2; }; }
 for t in adb docker jq curl python3; do need "$t"; done
 
-compose() { docker compose -p "$project" "$@"; }
+ntfy_port="${ASYNC_SMOKE_NTFY_PORT:-8093}"
+# An ntfy server for the UnifiedPush checks, at a fixed address on the stack's network: the server container posts to it
+# directly, and the emulator reaches it too (its user-mode network connects through the host, which routes to the bridge).
+# Not 10.0.2.2 (the emulator's name for the host means nothing to a container) nor host-gateway (the host's firewall may
+# drop a container's traffic to the host's own ports).
+compose_override="$work/compose.override.yml"
+compose() { docker compose -p "$project" -f docker-compose.yml -f "$compose_override" "$@"; }
 started_emulator=0
 cleanup() {
   local status=$?
@@ -62,6 +76,12 @@ cleanup() {
 trap cleanup EXIT
 
 api() {
+  # The admin's access token lasts 15 minutes and the run is longer: sign in again every 10.
+  if [[ -n "${token:-}" && $((SECONDS - ${token_at:-0})) -gt 600 ]]; then
+    token=$(curl -fsS -X POST "$server/api/auth/login" -H "Content-Type: application/json" \
+      --data '{"username":"admin","password":"smoke-password-1"}' | jq -r .accessToken)
+    token_at=$SECONDS
+  fi
   local args=(-fsS -X "$1" "$server$2" -H "Content-Type: application/json")
   [[ -n "${token:-}" ]] && args+=(-H "Authorization: Bearer $token")
   [[ -n "${3:-}" ]] && args+=(--data "$3")
@@ -87,14 +107,21 @@ wait_state() { wait_for "${2:-30}" has "$1"; }
 folder_json() { state | jq -c --arg n "$1" '.folders[] | select(.name == $n)'; }
 server_has() { api GET "/api/folders/$1/files" | jq -e --arg n "$2" '.entries | any(.name == $n)'; }
 on_phone() { adb shell "cat '$1'" 2>/dev/null | tr -d '\r'; }
+# contains TEXT COMMAND…: the command's output contains TEXT (not `cmd | grep -q`: with pipefail, grep leaving early kills
+# the writer with SIGPIPE and the pipeline fails although the text was there).
+contains() { local text="$1" out; shift; out=$("$@" 2>/dev/null | tr -d '\r') || true; [[ "$out" == *"$text"* ]]; }
+logged() { contains "$1" adb logcat -d -s ASync; }
 # settle FILE…: waits until the files' modification times stop changing. Android updates a new file's time a few seconds
 # after it was closed (the media scanner); a sync in between uploads it a second time (same content, one more version).
 settle() {
   local before now
   for _ in $(seq 1 20); do
     before=$(adb shell stat -c %Y "$@" | tr -d '\r'); sleep 4; now=$(adb shell stat -c %Y "$@" | tr -d '\r')
-    [[ "$before" == "$now" ]] && return 0
+    [[ "$before" == "$now" ]] && break
   done
+  # The app leaves files modified in the last 10 seconds for its next run (its settle time, AGENTS.md "Android background
+  # work"): a run asked for at once would sync everything but them.
+  sleep 11
 }
 top_is() { adb shell dumpsys activity activities | grep -m1 'ResumedActivity' | grep -q "$1"; } # the activity in front
 
@@ -143,6 +170,23 @@ shot_system() { # a system screen (no in-app theme): light and dark by night mod
 }
 
 mkdir -p "$work"
+cat >"$compose_override" <<YAML
+services:
+  ntfy:
+    image: binwiederhier/ntfy:v2.11.0
+    command: serve
+    environment:
+      - NTFY_BASE_URL=http://172.31.250.10:$ntfy_port
+      - NTFY_LISTEN_HTTP=:$ntfy_port
+    networks:
+      default:
+        ipv4_address: 172.31.250.10
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+YAML
 rm -rf "$work/cli-config" "$work/cli-docs" "$work/restored" # the second device starts afresh each run
 section "build and start"
 if [[ -z "${APK:-}" ]]; then
@@ -155,17 +199,28 @@ if [[ -z "${CLI:-}" ]]; then
   CLI="$work/cli/async-cli"
 fi
 cli() { "$CLI" --config "$work/cli-config" "$@"; }
+# cli_sync: async-cli syncs Phone docs; again while the phone holds the folder's lease (it syncs by itself too).
+cli_sync() {
+  local out
+  for _ in 1 2 3 4 5 6; do
+    out=$(cli sync --folder "$docs" 2>&1) || true
+    [[ "$out" != *"Another device is syncing"* ]] && return 0
+    sleep 5
+  done
+  echo "$out" >&2
+}
 pass "async-cli published"
 
 compose down -v --remove-orphans >/dev/null 2>&1 || true
 if [[ -n "${NO_BUILD:-}" ]]; then
   [[ -n "${IMAGE:-}" ]] && docker tag "$IMAGE" "$project-async-server:latest"
-  compose up -d --no-build --wait async-server postgres >"$work/compose-up.log" 2>&1 || { cat "$work/compose-up.log"; exit 1; }
+  compose up -d --no-build --wait async-server postgres ntfy >"$work/compose-up.log" 2>&1 || { cat "$work/compose-up.log"; exit 1; }
 else
-  compose up -d --build --wait async-server postgres >"$work/compose-up.log" 2>&1 || { cat "$work/compose-up.log"; exit 1; }
+  compose up -d --build --wait async-server postgres ntfy >"$work/compose-up.log" 2>&1 || { cat "$work/compose-up.log"; exit 1; }
 fi
 wait_for 120 curl -fsS "$server/api/auth/setup" || { echo "the server did not come up" >&2; exit 1; }
 token=$(api POST /api/auth/register '{"username":"admin","password":"smoke-password-1"}' | jq -r .accessToken)
+token_at=$SECONDS
 backend=$(api POST /api/storage-backends '{"name":"smoke","settings":{"type":"Local","path":"/data/android-smoke"}}' | jq -r .id)
 pass "server on $server (the phone uses $phone_server), account admin, storage $backend"
 
@@ -259,7 +314,7 @@ cli_device=$(jq -r .deviceId "$work/cli-config/identity.json")
 mkdir -p "$work/cli-docs"
 echo "from the computer" > "$work/cli-docs/from-cli.txt"
 api PUT "/api/folders/$docs/devices" "{\"deviceId\":\"$cli_device\",\"localPath\":\"$work/cli-docs\"}" >/dev/null
-cli sync --folder "$docs" >/dev/null
+cli_sync
 server_has "$docs" from-cli.txt >/dev/null && pass "async-cli put from-cli.txt on the server" || fail "cli upload"
 
 # The agent also syncs by itself (a new path, the server's change events), so a test waits for the very run it asked
@@ -289,12 +344,12 @@ last=$(sync_phone "$docs")
 jq -e '.ok' <<<"$last" >/dev/null && pass "Sync now: $(jq -r .message <<<"$last")" || fail "phone sync" "$last"
 [[ "$(on_phone /sdcard/ASyncSmoke/docs/from-cli.txt)" == "from the computer" ]] && pass "down: from-cli.txt is on the phone" || fail "download to SAF"
 server_has "$docs" hello-phone.txt >/dev/null && pass "up: hello-phone.txt is on the server" || fail "upload from SAF"
-cli sync --folder "$docs" >/dev/null
+cli_sync
 [[ "$(cat "$work/cli-docs/hello-phone.txt" 2>/dev/null)" == "from the phone" ]] && pass "and on the other device" || fail "cli download"
 
 # An edit on the computer, a delete on the phone, a large file from the phone with live progress.
 echo "edited on the computer" > "$work/cli-docs/from-cli.txt"
-cli sync --folder "$docs" >/dev/null
+cli_sync
 adb shell rm /sdcard/ASyncSmoke/docs/hello-phone.txt
 adb shell "dd if=/dev/urandom of=/sdcard/ASyncSmoke/docs/video.bin bs=1048576 count=200 2>/dev/null"
 settle /sdcard/ASyncSmoke/docs/video.bin
@@ -306,13 +361,24 @@ for _ in $(seq 1 120); do
   sleep 0.5
 done
 [[ -n "$seen" ]] && pass "the folder shows Syncing with live progress while it runs" || fail "syncing state"
+# The transfer keeper: a dataSync foreground service with a progress notification and Cancel, while the run goes on.
+transfer_notice() { contains "channel=async-transfers" adb shell dumpsys notification --noredact; }
+wait_for 30 transfer_notice && pass "the foreground-service notification (channel async-transfers) shows during the transfer" \
+  || fail "transfer notification" "$(adb shell dumpsys notification --noredact | grep -A3 "pkg=$pkg" | head -20)"
+logged "Transfers: running as a foreground service." && pass "WorkManager's foreground service (type dataSync) holds the transfer" \
+  || fail "foreground service" "$(adb logcat -d -s ASync | grep -i transfers | tail -5)"
+if [[ -n "$shots" ]]; then
+  adb shell cmd statusbar expand-notifications; sleep 2
+  shot_system transfer-notification
+  adb shell cmd statusbar collapse
+fi
 big=$(wait_run "$ticket" 300)
 jq -e '.ok' <<<"$big" >/dev/null && pass "run finished: $(jq -r .message <<<"$big")" || fail "big run" "$big"
 [[ "$(on_phone /sdcard/ASyncSmoke/docs/from-cli.txt)" == "edited on the computer" ]] && pass "the edit reached the phone" || fail "edit down"
 server_has "$docs" video.bin >/dev/null && pass "the 200 MB file went up in parts" || fail "large upload"
 server_has "$docs" hello-phone.txt >/dev/null && fail "the delete did not reach the server" || pass "the delete on the phone reached the server"
 phone_sum=$(adb shell sha256sum /sdcard/ASyncSmoke/docs/video.bin | cut -d' ' -f1 | tr -d '\r')
-cli sync --folder "$docs" >/dev/null
+cli_sync
 [[ "$(sha256sum "$work/cli-docs/video.bin" | cut -d' ' -f1)" == "$phone_sum" ]] && pass "video.bin arrived on the computer byte for byte" || fail "large file content"
 again=$(sync_phone "$docs" | jq -r .message)
 [[ "$again" == "0 up, 0 down, 0 deleted"* ]] && pass "a second run changes nothing (SAF times are not set, nothing looks changed)" || fail "idempotent" "$again"
@@ -349,6 +415,154 @@ cli restore --folder "$photos" --snapshot latest --target "$work/restored" >/dev
   && [[ "$(sha256sum "$work/restored/2026/clip.mp4" | cut -d' ' -f1)" == "$(adb shell sha256sum /sdcard/ASyncSmoke/photos/2026/clip.mp4 | cut -d' ' -f1 | tr -d '\r')" ]] \
   && pass "the restored files match the phone's byte for byte" || fail "restore content" "$(ls -R "$work/restored" 2>&1)"
 shot dashboard
+
+section "background work: WorkManager, battery, conditions"
+stamp=$(date +%s) # file names of this run: a rerun on a kept phone must not find the last run's files
+bgstate() { ctl bg; }
+bg_has() { bgstate | jq -e "$1" >/dev/null; }
+wait_bg() { wait_for "${2:-30}" bg_has "$1"; }
+alive() { [[ -n "$(adb shell pidof "$pkg" | tr -d '\r')" ]]; }
+# work_id TAG: the WorkManager id of the live work with that tag (folder-<id>, wake, transfers, reminder).
+work_id() { bgstate | jq -r --arg t "$1" '[.works[] | select((.tags | split(",") | index($t)) and .state != "CANCELLED" and .state != "SUCCEEDED")][0].id // empty'; }
+# job_of WORK-ID: "<namespace> <id>" of the JobScheduler job WorkManager made for that work (the app reads its own jobs'
+# extras; dumpsys redacts them). Forcing such a job (cmd jobscheduler run -f) does not help: WorkManager skips periodic
+# work that is not due yet; the automation command `bg-due` makes it due instead, and the system runs it.
+job_of() { bgstate | jq -r --arg w "$1" '[.jobs[] | select(.work == $w)][0] | if . then "\(.namespace // "") \(.id)" else empty end'; }
+# job_dump ID: the dumpsys block of one of the app's jobs.
+job_dump() { adb shell dumpsys jobscheduler "$pkg" | tr -d '\r' | awk -v id="/$1:" '/^  JOB /{p = index($0, id) > 0} p'; }
+# background_app: Home, then kill the process once the app is idle (`am kill` only kills a cached process: one that holds
+# the transfer keeper's foreground service, or runs a job, survives it).
+idle() { bg_has '(.keeperRunning | not) and all(.folders[]; .activity == "Idle")'; }
+background_app() {
+  adb shell input keyevent KEYCODE_HOME
+  for _ in $(seq 1 12); do
+    wait_for 60 idle || true
+    sleep 3; adb shell am kill "$pkg"; sleep 2
+    alive || return 0
+  done
+}
+open_app() { adb shell am start -W -n "$pkg/$pkg.MainActivity" >/dev/null; wait_state '.page == "DashboardViewModel"' 60; }
+
+wait_state '.batteryPrompt == true' 20 && pass "the dashboard explains why and offers the battery-optimisation exemption" || fail "battery prompt" "$(state)"
+shot battery-prompt
+ctl bg-battery >/dev/null
+sleep 2; dismiss_anr
+shot_system battery-dialog
+tap_text '^allow$' 20 && wait_bg '.batteryUnrestricted' 20 \
+  && pass "Allow opens the system's question; ASync is exempt now" || fail "battery exemption" "$(ui_dump | head -c 600)"
+ctl refresh >/dev/null
+wait_state '.batteryPrompt == false' 10 && pass "and the prompt is gone" || fail "prompt gone" "$(state)"
+wait_bg ".works | any(.tags == \"folder-$docs\" and .state == \"ENQUEUED\") and any(.tags == \"folder-$photos\")" 30 \
+  && pass "each folder has its periodic WorkManager job" || fail "periodic jobs" "$(bgstate)"
+docs_work=$(work_id "folder-$docs")
+docs_job=$(job_of "$docs_work")
+[[ -n "$docs_job" ]] && pass "JobScheduler holds the job of Phone docs (work $docs_work, job $docs_job)" || fail "job in JobScheduler" "$(bgstate | jq -c .jobs)"
+
+# Scheduled work with the app closed: a file changes elsewhere, the folder's periodic work becomes due in 25 s
+# (enqueued afresh with an initial delay: WorkManager never runs periodic work early, not even a forced job), the app goes to the
+# background and its process is killed; the system starts it for the job.
+asleep_text="changed on the computer while the phone slept ($stamp)"
+echo "$asleep_text" > "$work/cli-docs/while-asleep.txt"
+cli_sync
+due=$(ctl "bg-due $docs 25")
+background_app
+adb logcat -c
+alive && fail "am kill left the process running" "$(adb shell pidof "$pkg")" || pass "the work is $due; the app is in the background and its process is gone (am kill)"
+asleep_arrived() { [[ "$(on_phone /sdcard/ASyncSmoke/docs/while-asleep.txt)" == "$asleep_text" ]]; }
+wait_for 180 asleep_arrived \
+  && pass "while-asleep.txt synced down with the app closed" || fail "scheduled sync" "$(adb logcat -d | grep -E 'ASync|WM-' | tail -20)"
+# What started the process (for information: the job's service, or a broadcast of WorkManager's own when the job was
+# due before the kill took): the scheduled run below is the check.
+started=$(adb logcat -d 2>/dev/null | tr -d '\r' | sed -n "s/.*Start proc [0-9]*:$pkg\/[^ ]* for \([a-z]*\) {\([^}]*\)}.*/\1 \2/p" | head -1) || true
+echo "    (the app's process was started for: ${started:-nothing since the log was cleared})"
+wait_for 60 logged 'Background run of "Phone docs" (scheduled)' && pass "the scheduled run: $(adb logcat -d -s ASync | grep -m1 -o 'Background run of "Phone docs" (scheduled).*')" \
+  || fail "background log" "$(adb logcat -d -s ASync | tail -10)"
+top_is "$pkg/.MainActivity" && fail "the app came to the front" || pass "without the app coming to the front"
+
+section "background work: a Wi-Fi-only folder on mobile data"
+open_app || fail "app opens" "$(state)"
+api PUT "/api/folders/$docs/devices" "{\"deviceId\":\"$device\",\"localPath\":\"$tree\",\"conditions\":{\"unmeteredOnly\":true,\"chargingOnly\":false,\"batteryNotLow\":false}}" >/dev/null
+wait_state ".folders[] | select(.name == \"Phone docs\") | .unmeteredOnly" 30 && pass "Wi-Fi only, set in the web UI, reaches the phone" || fail "conditions on the phone" "$(state)"
+wait_bg ".works | any(.tags == \"folder-$docs\" and .state == \"ENQUEUED\")" 30 || true
+docs_work=$(work_id "folder-$docs")
+docs_job=$(job_of "$docs_work")
+ctl "editconditions $docs" >/dev/null
+shot folder-conditions
+ctl "editconditions $docs" >/dev/null
+adb shell svc data enable
+adb shell svc wifi disable
+wait_bg '.conditions.metered == true' 60 && pass "Wi-Fi off: the phone is on the emulator's (metered) mobile network" || fail "metered network" "$(bgstate | jq -c .conditions)"
+unsatisfied() { job_dump "${docs_job#* }" | grep -m1 'Unsatisfied constraints'; }
+unsatisfied_network() { [[ "$(unsatisfied)" == *CONNECTIVITY* ]]; }
+wait_for 30 unsatisfied_network \
+  && pass "the folder's job waits for an unmetered network ($(unsatisfied | xargs))" \
+  || fail "job constraint" "$(job_dump "${docs_job#* }" | grep -iE 'constraint|Network type')"
+echo "made while the phone was on mobile data" > "$work/cli-docs/on-mobile-data-$stamp.txt"
+cli_sync
+adb logcat -c
+ctl "bg-wake changed" >/dev/null
+wait_for 60 bash -c "adb logcat -d -s ASync | grep 'Background run of \"Phone docs\" (changed): Waiting for Wi-Fi'" \
+  && pass "a wake-up on mobile data: the run waits (\"Waiting for Wi-Fi\")" || fail "gate on mobile data" "$(adb logcat -d -s ASync | tail -10)"
+sleep 5
+adb shell ls /sdcard/ASyncSmoke/docs/on-mobile-data-$stamp.txt >/dev/null 2>&1 && fail "the file came down over mobile data" || pass "nothing was downloaded over mobile data"
+wait_state ".folders[] | select(.name == \"Phone docs\") | .waiting | strings | test(\"Wi-Fi\")" 20 && pass "the app shows why it waits" || fail "waiting shown" "$(state)"
+shot folder-waiting
+adb shell svc wifi enable
+# The emulator's Wi-Fi does not always join its network again by itself.
+sleep 5; adb shell cmd wifi connect-network AndroidWifi open >/dev/null 2>&1 || true
+wait_bg '.conditions.metered == false' 90 && pass "Wi-Fi back" || fail "wifi back" "$(bgstate | jq -c .conditions)"
+adb logcat -c
+ctl "bg-due $docs 5" >/dev/null
+wait_for 120 bash -c "adb shell cat /sdcard/ASyncSmoke/docs/on-mobile-data-$stamp.txt 2>/dev/null | grep -q mobile" \
+  && pass "on Wi-Fi the file comes down" || fail "sync on wifi" "$(adb logcat -d -s ASync | tail -10)"
+wait_for 60 logged 'Background run of "Phone docs" (scheduled)' && pass "through the folder's job, now that its constraint holds" \
+  || fail "job on wifi" || fail "sync on wifi" "$(adb logcat -d -s ASync | tail -10)"
+api PUT "/api/folders/$docs/devices" "{\"deviceId\":\"$device\",\"localPath\":\"$tree\",\"conditions\":{\"unmeteredOnly\":false,\"chargingOnly\":false,\"batteryNotLow\":false}}" >/dev/null
+
+section "background work: UnifiedPush wake-ups (ntfy)"
+if [[ -z "${NTFY_APK:-}" || ! -f "${NTFY_APK:-}" ]]; then
+  echo "    (skipped: set NTFY_APK to the ntfy app's APK)"
+else
+  adb install -r "$NTFY_APK" >/dev/null && pass "the ntfy app is installed (the UnifiedPush distributor)" || fail "ntfy install"
+  adb shell pm grant io.heckel.ntfy android.permission.POST_NOTIFICATIONS 2>/dev/null || true
+  # ntfy's default server for UnifiedPush: the ntfy container, set in ntfy's settings as a person would.
+  ntfy_server="http://172.31.250.10:$ntfy_port"
+  adb shell monkey -p io.heckel.ntfy -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 5; dismiss_anr
+  tap_text '^(OK|Got it|Continue|Allow)$' 3 || true
+  tap_text '^More options$' 10 && tap_text '^Settings$' 10 && tap_text '^Default server$' 15 && sleep 1 \
+    && adb shell input text "$ntfy_server" && tap_text '^(OK|Save)$' 10 || true
+  sleep 1
+  contains "172.31.250.10" ui_dump && pass "ntfy's default server is $ntfy_server" || fail "ntfy default server" "$(ui_dump | head -c 1200)"
+  open_app || true
+  ctl refresh >/dev/null
+  wait_bg '.push.distributors | index("io.heckel.ntfy")' 20 && pass "ASync finds ntfy as a distributor" || fail "distributor found" "$(bgstate | jq -c .push)"
+  ctl "bg-push io.heckel.ntfy" >/dev/null
+  wait_bg '.push.endpoint and .push.registered' 90 && pass "registered with ntfy; the endpoint went to the server" \
+    || fail "push registration" "$(bgstate | jq -c .push) $(adb logcat -d | grep -iE 'unifiedpush|ntfy' | tail -8)"
+  api GET /api/devices | jq -e --arg d "$device" '.[] | select(.id == $d) | .push.host == "172.31.250.10" and .push.enabled' >/dev/null \
+    && pass "the Devices page shows UnifiedPush through the ntfy server (its host; the endpoint itself is not shown)" || fail "server push target" "$(api GET /api/devices | jq -c '.[].push')"
+  ctl settings >/dev/null
+  sleep 1
+  adb shell input swipe 540 1700 540 600 400; sleep 1
+  shot settings-background
+  ctl back >/dev/null
+  # The real thing: the app closed, another device changes the folder, the server wakes the phone through ntfy.
+  background_app
+  alive && fail "am kill left the process running" || pass "the app is closed again (process killed)"
+  adb logcat -c
+  echo "pushed awake" > "$work/cli-docs/pushed-$stamp.txt"
+  cli_sync
+  wait_for 120 bash -c "adb shell cat /sdcard/ASyncSmoke/docs/pushed-$stamp.txt 2>/dev/null | grep -q awake" \
+    && pass "the change reached the closed app through a UnifiedPush wake-up" || fail "push wake" "$(adb logcat -d | grep -E 'ASync|ntfy' | tail -20)"
+  wait_for 60 logged "woken by the server (changed)" && pass "logged: woken by the server (changed)" || fail "wake log" "$(adb logcat -d -s ASync | tail -10)"
+  api GET /api/devices | jq -e --arg d "$device" '.[] | select(.id == $d) | .push.lastWakeOk == true' >/dev/null \
+    && pass "the server recorded the wake-up as delivered" || fail "server wake recorded" "$(api GET /api/devices | jq -c '.[].push')"
+  open_app || true
+fi
+ctl "bg-reminder 3" >/dev/null
+r=$(ctl "bg-remind-now $docs")
+[[ "$r" == "Phone docs: nothing synced for 3 days" ]] && pass "the local reminder notification: $r" || fail "reminder" "$r"
+wait_bg '.works | any(.tags == "reminder" and .state == "ENQUEUED")' 20 && pass "reminders are scheduled (moved on after each successful run)" || fail "reminder scheduled" "$(bgstate | jq -c .works)"
 
 section "restart"
 adb shell am force-stop "$pkg"

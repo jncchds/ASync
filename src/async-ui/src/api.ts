@@ -127,7 +127,24 @@ export interface Device {
   createdAt: string
   lastSeenAt: string | null
   revokedAt: string | null
+  /** Where the server can wake it (UnifiedPush); null = it relies on its own schedule. */
+  push: DevicePush | null
 }
+
+/** A device's UnifiedPush registration: only the endpoint's host (the full address can wake the device). */
+export interface DevicePush {
+  type: 'UnifiedPush'
+  host: string
+  registeredAt: string
+  lastWakeAt: string | null
+  lastWakeOk: boolean | null
+  lastWakeError: string | null
+  /** The server sends wake-ups (Push__Mode is not None). */
+  enabled: boolean
+}
+
+/** Sends a test wake-up to the device now; it syncs when it gets it. */
+export const testDevicePush = (id: string) => api.post<Device>(`/devices/${id}/push/test`).then(r => r.data)
 
 export interface Enrollment {
   id: number
@@ -309,6 +326,15 @@ export interface FolderDevice {
   lastSyncAt: string | null
   lastSyncOk: boolean | null
   lastSyncMessage: string | null
+  /** When the device may run the folder by itself (null from an older server = none). */
+  conditions: RunConditions | null
+}
+
+/** Automatic runs wait for these; "Sync now" on the device ignores them. */
+export interface RunConditions {
+  unmeteredOnly: boolean
+  chargingOnly: boolean
+  batteryNotLow: boolean
 }
 
 export interface Folder {
@@ -437,6 +463,8 @@ export interface AttachDevice {
   direction: MirrorDirection | null
   paused: boolean
   expectedRevision?: number
+  /** Omitted = keep the device's current ones. */
+  conditions?: RunConditions
 }
 
 export const getFolders = () => api.get<Folder[]>('/folders').then(r => r.data)

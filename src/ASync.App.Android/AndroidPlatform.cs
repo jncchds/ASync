@@ -142,6 +142,11 @@ public sealed class AndroidPlatform(Func<MainActivity?> activity) : IPlatformSer
 
     public void ApplyTheme(ThemeChoice theme) => App.ApplyTheme(theme);
 
+    /// <summary>Android checks all three run conditions.</summary>
+    public string? ConditionsNote => null;
+
+    public IBackgroundServices? Background => AndroidBackgroundServices.Instance;
+
     public bool SupportsStartAtLogin => false;
     public bool IsStartAtLoginEnabled() => false;
     public void SetStartAtLogin(bool enabled) { }

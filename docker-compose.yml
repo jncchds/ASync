@@ -68,9 +68,13 @@ services:
       # - Smtp__Password=
       # - Smtp__From=ASync <async@example.com>
       # - Smtp__Security=StartTls               # StartTls, SslOnConnect or None
-      # ── Push (wake-ups for mobile devices; comes with the mobile apps) ────────
-      # Only None exists so far. Alerts and every device's own schedule work without push.
-      # - Push__Mode=None
+      # ── Push (wake-ups for phones, README "Background sync on Android") ──────
+      # UnifiedPush (default): POST a "wake" to the endpoint a phone registered from its distributor (ntfy, say); phones
+      # without one are never contacted. None: no wake-ups. Alerts and every device's own schedule work without push.
+      # - Push__Mode=UnifiedPush
+      # - Push__ChangedSeconds=60               # at most one "changed" wake per device in this time
+      # - Push__OverdueHours=6                  # at most one "overdue" wake per device in this time
+      # - Push__TimeoutSeconds=10
     volumes:
       - async_data:/data                      # or a host path, e.g. /mnt/backups:/data
     depends_on:

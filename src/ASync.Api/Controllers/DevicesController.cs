@@ -1,6 +1,7 @@
 using ASync.Api.Auth;
 using ASync.Api.Hubs;
 using ASync.Api.Services;
+using ASync.Api.Services.Push;
 using ASync.Contracts;
 using ASync.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -17,9 +18,11 @@ public class DevicesController : ControllerBase
     private readonly IDeviceRepository _devices;
     private readonly DeviceProvisioningService _provisioning;
     private readonly PublicUrl _publicUrl;
+    private readonly PushService _push;
 
-    public DevicesController(IDeviceRepository devices, DeviceProvisioningService provisioning, PublicUrl publicUrl)
+    public DevicesController(IDeviceRepository devices, DeviceProvisioningService provisioning, PublicUrl publicUrl, PushService push)
     {
+        _push = push;
         _devices = devices;
         _provisioning = provisioning;
         _publicUrl = publicUrl;
@@ -27,7 +30,7 @@ public class DevicesController : ControllerBase
 
     [HttpGet]
     public async Task<ActionResult<List<DeviceDto>>> GetAll() =>
-        (await _devices.GetForUserAsync(User.UserId())).Select(DeviceProvisioningService.ToDto).ToList();
+        (await _devices.GetForUserAsync(User.UserId())).Select(d => DeviceProvisioningService.ToDto(d, _push)).ToList();
 
     [HttpPatch("{id:guid}")]
     public async Task<ActionResult<DeviceDto>> Rename(Guid id, [FromBody] RenameDeviceRequest req)
@@ -40,7 +43,18 @@ public class DevicesController : ControllerBase
             return BadRequest(new { message = "A device name of 1–100 characters is required." });
         device.Name = name;
         await _devices.UpdateAsync(device);
-        return DeviceProvisioningService.ToDto(device);
+        return DeviceProvisioningService.ToDto(device, _push);
+    }
+
+    /// <summary>Sends a test wake-up to the device's push endpoint now (the device syncs when it gets it).</summary>
+    [HttpPost("{id:guid}/push/test")]
+    public async Task<ActionResult<DeviceDto>> TestPush(Guid id)
+    {
+        var device = await _devices.GetAsync(id);
+        if (device is null || device.UserId != User.UserId()) return NotFound();
+        var outcome = await _push.WakeAsync(id, PushWake.Test, force: true, HttpContext.RequestAborted);
+        if (!outcome.Sent || !outcome.Ok) return BadRequest(new { message = outcome.Message });
+        return DeviceProvisioningService.ToDto((await _devices.GetAsync(id))!, _push);
     }
 
     /// <summary>

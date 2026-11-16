@@ -29,7 +29,7 @@ namespace ASync.Api.Services;
 /// </summary>
 public class FolderService(
     IFolderRepository folders, IStorageBackendRepository backends, IDeviceRepository devices, FolderBackendCache backendCache, IDataProtectionProvider dataProtection, ISyncNotifier notifier, TimeProvider clock,
-    MaintenanceClaims claims, ILogger<FolderService> logger, IPurgeJobRepository? purges = null)
+    MaintenanceClaims claims, ILogger<FolderService> logger, IPurgeJobRepository? purges = null, Push.PushQueue? push = null)
 {
     /// <summary>The Data Protection purpose of <see cref="Folder.ProtectedRepositoryKey"/>.</summary>
     public const string RepositoryKeyPurpose = "ASync.Folder.RepositoryKey.v1";
@@ -53,7 +53,7 @@ public class FolderService(
         f.IntervalMinutes, f.Excludes, Retention(f), f.VersionsKeepDays, f.TrashKeepDays, f.Revision, f.RepositoryReady,
         [.. f.Devices.OrderBy(d => d.Device?.Name).Select(d => new FolderDeviceDto(
             d.DeviceId, d.Device?.Name ?? "", d.Device?.Platform ?? DevicePlatform.Unknown, d.LocalPath, d.Direction, d.Paused,
-            d.LastSyncAt, d.LastSyncOk, d.LastSyncMessage))],
+            d.LastSyncAt, d.LastSyncOk, d.LastSyncMessage, Conditions(d)))],
         f.CreatedAt, f.PruneIntervalDays, f.CheckIntervalDays, f.CheckReadDataPercent,
         f.LastPruneAt is { } pruned ? new MaintenanceStatusDto(pruned, f.LastPruneOk == true, f.LastPruneMessage, f.LastPruneBy) : null,
         f.LastCheckAt is { } checkedAt ? new MaintenanceStatusDto(checkedAt, f.LastCheckOk == true, f.LastCheckMessage, f.LastCheckBy) : null,
@@ -61,7 +61,15 @@ public class FolderService(
 
     public static DeviceFolderDto ToDeviceDto(Folder f, FolderDevice m) => new(
         f.Id, f.Name, f.Mode, f.Encryption, f.Kind, f.IntervalMinutes, f.Excludes, Retention(f), f.VersionsKeepDays, f.TrashKeepDays,
-        f.Revision, f.RepositoryReady, m.LocalPath, m.Direction, m.Paused);
+        f.Revision, f.RepositoryReady, m.LocalPath, m.Direction, m.Paused, Conditions(m));
+
+    public static RunConditionsDto Conditions(FolderDevice m) => new(m.UnmeteredOnly, m.ChargingOnly, m.BatteryNotLow);
+
+    private static void Apply(FolderDevice m, RunConditionsDto? conditions)
+    {
+        if (conditions is null) return;
+        (m.UnmeteredOnly, m.ChargingOnly, m.BatteryNotLow) = (conditions.UnmeteredOnly, conditions.ChargingOnly, conditions.BatteryNotLow);
+    }
 
     // ── Create, update, delete ────────────────────────────────────────────────
 
@@ -328,6 +336,7 @@ public class FolderService(
         membership.Direction = folder.Mode == SyncMode.Mirror ? req.Direction : null;
         if (membership.Paused && !req.Paused) membership.AttachedAt = Now; // resumed: overdue detection starts afresh
         membership.Paused = req.Paused;
+        Apply(membership, req.Conditions);
         await SaveAndNotifyAsync(folder);
         return ServiceResult<Folder>.Ok(folder);
     }
@@ -357,6 +366,7 @@ public class FolderService(
             if (membership.Paused && !paused) membership.AttachedAt = Now; // resumed: overdue detection starts afresh
             membership.Paused = paused;
         }
+        Apply(membership, req.Conditions);
         await SaveAndNotifyAsync(folder, extraDevices: [membership.DeviceId]);
         return ServiceResult<Folder>.Ok(folder);
     }
@@ -446,10 +456,16 @@ public class FolderService(
         logger.LogInformation("End-to-end repository of folder {FolderId} initialised by a device.", folder.Id);
     }
 
-    /// <summary>Content changed on one device: tell the folder's other devices.</summary>
-    public Task NotifyChangedAsync(Folder folder, Guid originDeviceId) =>
-        notifier.ToDevicesAsync(folder.Devices.Select(d => d.DeviceId).Where(id => id != originDeviceId),
+    /// <summary>
+    /// Content changed on one device: tell the folder's other devices, and wake those that download changes but have no
+    /// live connection (UnifiedPush; checked when the wake is sent).
+    /// </summary>
+    public Task NotifyChangedAsync(Folder folder, Guid originDeviceId)
+    {
+        push?.FolderChanged(folder, originDeviceId);
+        return notifier.ToDevicesAsync(folder.Devices.Select(d => d.DeviceId).Where(id => id != originDeviceId),
             SyncEvents.FolderChanged, folder.Id, originDeviceId);
+    }
 
     private async Task SaveAndNotifyAsync(Folder folder, IEnumerable<Guid>? extraDevices = null)
     {

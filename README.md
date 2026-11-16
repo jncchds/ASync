@@ -6,8 +6,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 > **Status: early development.** The server, the web UI (folders, devices, storage, snapshot and file browsing), the
 > headless CLI agent and the desktop app (Linux; built for Windows and macOS, not tried there yet) work: devices sync
 > and back up folders through the server today. Desktop installers with self-update are built for every release (tried
-> on Linux; not code-signed yet). The Android app syncs while it is open (an APK to sideload; background syncing is
-> next); iOS comes later. The current version is in [VERSION](VERSION), changes are in
+> on Linux; not code-signed yet). The Android app (an APK to sideload) syncs and backs up in the background too, and the
+> server can wake it through UnifiedPush (ntfy); iOS comes later. The current version is in [VERSION](VERSION), changes are in
 > [RELEASE_NOTES.md](RELEASE_NOTES.md), and the design, roadmap and known gaps are in [AGENTS.md](AGENTS.md).
 
 <p>
@@ -166,8 +166,9 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   tried; Setup.exe, the macOS .pkg/.dmg and their updates are built in CI but not tried on a real machine yet. The
   builds are not code-signed (see "Installing the desktop app").
 
-- The Android app syncs only while it is open, and was tried on an Android 15 emulator (not on a phone yet). See
-  "The Android app" for what else it cannot do yet.
+- The Android app was tried on an Android 15 emulator only (not on a phone yet), background work and UnifiedPush
+  included. Phones of some makers stop background work beyond what Android does: see
+  [Background sync on Android](#background-sync-on-android). See "The Android app" for what else it cannot do yet.
 
 What comes next is listed in [AGENTS.md](AGENTS.md) under "Milestones and current stage" (the mobile apps).
 
@@ -200,7 +201,8 @@ Open http://localhost:5100 and create the admin account. Settings are environmen
 | `Alerts__PollSeconds`, `Alerts__Enabled` | How often the server looks for problems (default 300); `false` turns alerts off. `Alerts__RetryMinutes` (15): wait after a message no channel took. |
 | `Smtp__Host`, `Smtp__Port`, `Smtp__Username`, `Smtp__Password`, `Smtp__From`, `Smtp__Security` | The mail account for e-mail alerts. Without `Smtp__Host` and `Smtp__From`, e-mail is not offered. Port 465 uses TLS on connect, others STARTTLS; `Smtp__Security=None` for a local relay. |
 | `Usage__ScanIntervalHours`, `Quotas__WarnPercent`, `Health__IntervalMinutes`, `Health__RetryMinutes`, `Health__FailuresBeforeAlert` | Usage counting, the quota warning and storage health checks (defaults 6, 90, 60, 5, 2): see [Quotas and storage health](#quotas-and-storage-health). |
-| `Push__Mode` | How the server wakes devices. Only `None` (the default) exists so far; alerts and every device's own schedule work without push. |
+| `Push__Mode` | How the server wakes phones: `UnifiedPush` (the default) posts a tiny "wake" (no data) to the address a phone registered from its UnifiedPush distributor, when another device changes a folder it downloads and it is not connected, and while it is overdue; phones without a distributor are never contacted. `None`: no wake-ups. `Relay` and `Direct` (Google/Apple push) do not exist yet and act as `UnifiedPush`. Alerts and every device's own schedule work without push. |
+| `Push__ChangedSeconds`, `Push__OverdueHours`, `Push__TimeoutSeconds` | At most one "changed" wake per phone in this many seconds (default 60), one "overdue" wake in this many hours (6); how long one wake may take (10 s). |
 
 To move a generated signing key into the environment:
 
@@ -421,12 +423,53 @@ The same pages as the desktop app, on Android 8 and later. **What works so far (
   another app's storage). Two-way, Mirror and Backup folders work there; *Sync now*, pause and resume, live progress,
   unlocking end-to-end folders, and the settings (theme, sign out) as on the desktop. The Back button closes dialogs and
   settings.
-- **Not yet:** syncing in the background (with the app closed, on a schedule, or woken by a push) comes next; until then
-  a folder syncs while the app is open: on its interval, and on *Sync now*. Photos, contacts and calendars come later.
-  Files changed on the phone are noticed on the next run, not at once. Android's folder picker cannot keep file times:
-  files downloaded to the phone carry the time they were downloaded, and names a storage cannot hold (`:`, `?`… on
-  SD cards) fail that file with a message. A file synced in the seconds right after another app wrote it may be
-  uploaded twice (Android touches its time once more); the copy on the server is the same, with one extra version.
+- **In the background (M4-2):** folders keep syncing and backing up with the app closed, on their interval (Android runs
+  background work at most every 15 minutes), only on Wi-Fi or while charging if you say so, and the server can wake the
+  phone when another device changed something: see [Background sync on Android](#background-sync-on-android).
+- **Not yet:** photos, contacts and calendars come later. Files changed on the phone are noticed on the next run, not at
+  once. Android's folder picker cannot keep file times: files downloaded to the phone carry the time they were
+  downloaded, and names a storage cannot hold (`:`, `?`… on SD cards) fail that file with a message. A file written in
+  the last 10 seconds waits for the next run (Android touches a new file's time once more a few seconds after it was
+  written, which would otherwise upload it twice).
+
+### Background sync on Android
+
+<p>
+  <img src="docs/screenshots/android-battery-prompt-light.png" alt="The battery prompt" width="24%">
+  <img src="docs/screenshots/android-transfer-notification-light.png" alt="The transfer notification" width="24%">
+  <img src="docs/screenshots/android-folder-conditions-dark.png" alt="A folder's conditions" width="24%">
+  <img src="docs/screenshots/android-settings-background-light.png" alt="Background settings: battery, UnifiedPush, reminder" width="24%">
+</p>
+
+- **On a schedule:** each folder runs at its interval (at least every 15 minutes, Android's shortest), also after a
+  restart of the phone and with the app swiped away. Opening the app runs every folder at once; *Sync now* runs one at
+  once whatever its conditions.
+- **Conditions:** *Conditions…* on a folder (or the folder's device form in the web UI) chooses *On Wi-Fi* (not on
+  mobile data or a metered hotspot), *While charging* and *When the battery is not low*. Scheduled runs and wake-ups wait
+  for them; the folder shows why it waits ("Waiting for Wi-Fi"). Computers honour the charging and battery rules, and the
+  Wi-Fi rule where the system says a network is metered (Linux with NetworkManager); elsewhere it is ignored.
+- **Long transfers:** while a folder runs, a notification shows its progress with a *Cancel* button, and Android keeps the
+  network for it. A transfer that is cut off (Cancel, the phone going to sleep, Android 15's limit of six hours of such
+  transfers a day) continues where it stopped at the next run.
+- **Battery:** the first time, the app explains and offers *Allow*: Android then asks whether ASync may run in the
+  background without battery optimisation. Without it, Android may hold background runs back for hours when the phone
+  is idle. *Settings → Background sync* shows the state, opens Android's battery list, and says what else your phone's
+  maker needs: Xiaomi, Huawei/Honor, Samsung, OnePlus/OPPO/realme, vivo and others stop background apps beyond Android's
+  rules (see [dontkillmyapp.com](https://dontkillmyapp.com)).
+- **Reminder:** when a folder has not synced for 3 days (*Settings → Remind me when nothing synced for*: 1–14 days or
+  never), the phone itself shows a notification. It is moved on after every successful run and needs neither the
+  server nor push. The server's own overdue alerts (see [Alerts](#alerts)) work as before.
+- **Wake-ups (UnifiedPush):** install a UnifiedPush distributor, for example [ntfy](https://ntfy.sh) (F-Droid or its
+  GitHub releases; no Google services needed), then in ASync *Settings → Background sync → Wake-ups*, choose it and *Use
+  for wake-ups*. The distributor gives the phone an address that the server posts a tiny "wake" to (it carries no file
+  names or data) when another device changed a two-way or download folder while the phone was not connected, and while
+  the phone is overdue. The Devices page in the web UI shows *UnifiedPush* and the distributor's server (the address
+  itself is secret: it can wake the phone) with *Send wake-up* to try it. Without a distributor everything still syncs
+  on its schedule.
+  - **With your own ntfy server:** run ntfy (e.g. `docker run -p 8090:80 binwiederhier/ntfy serve`, behind https for
+    phones outside your network), and in the ntfy app *Settings → Default server* set its address *before* choosing it
+    in ASync. The ASync server must be able to reach that address (it posts there); with the public ntfy.sh it can.
+  - Google's push (FCM) and a relay for Play-store builds are not built yet; the app needs neither.
 
 ### Installing the Android app
 

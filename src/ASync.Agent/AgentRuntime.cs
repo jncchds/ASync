@@ -42,6 +42,16 @@ public sealed record AgentOptions
 
     /// <summary>What a folder's local path opens (directories; the Android app adds its document trees).</summary>
     public ASync.Engine.Local.ILocalTreeFactory LocalTrees { get; init; } = ASync.Engine.Local.FileSystemTreeFactory.Instance;
+
+    /// <summary>The device's network and power for the folders' run conditions (the desktop's by default; Android's own).</summary>
+    public IDeviceConditionsProbe? Conditions { get; init; } = DesktopConditions.Instance;
+
+    /// <summary>See <see cref="SyncAgent.SettleTime"/> (0 on desktops; a few seconds on Android).</summary>
+    public TimeSpan SettleTime { get; init; }
+
+    /// <summary>See <see cref="SyncAgent.RunAtStart"/> and <see cref="SyncAgent.RunOnInterval"/> (both off on Android: WorkManager schedules).</summary>
+    public bool RunAtStart { get; init; } = true;
+    public bool RunOnInterval { get; init; } = true;
 }
 
 /// <summary>
@@ -214,9 +224,19 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     {
         _logger.LogInformation("ASync agent {Version}: {Device} → {Server}", _options.Version, identity.DeviceName, identity.ServerUrl);
         using var api = new AsyncApiClient(identity.ServerUrl, identity) { AppVersion = _options.Version, TokenCache = _store, DeviceKeys = _options.DeviceKeys };
-        var agent = new SyncAgent(api, _store, _logger) { AllowMassDeletion = _options.AllowMassDeletion, LocalTrees = _options.LocalTrees };
+        var agent = new SyncAgent(api, _store, _logger)
+        {
+            AllowMassDeletion = _options.AllowMassDeletion, LocalTrees = _options.LocalTrees, Conditions = _options.Conditions,
+            SettleTime = _options.SettleTime, RunAtStart = _options.RunAtStart, RunOnInterval = _options.RunOnInterval,
+        };
         agent.StatusChanged += () => Publish(StatusEvent());
+        agent.StatusChanged += () => RaiseObserver(FoldersChanged);
         agent.FolderStatusChanged += OnFolderChanged;
+        agent.FolderRan += r =>
+        {
+            try { FolderRan?.Invoke(r); }
+            catch (Exception e) { _logger.LogDebug("A run listener failed: {Message}", e.Message); }
+        };
         _api = api;
         _agent = agent;
         Publish(StatusEvent());
@@ -301,10 +321,84 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
 
     private void Publish(ControlEvent e) => _events.Publish(e);
 
+    private void RaiseObserver(Action? handler)
+    {
+        try { handler?.Invoke(); }
+        catch (Exception e) { _logger.LogDebug("A status listener failed: {Message}", e.Message); }
+    }
+
+    // ── For a host in the same process (the Android app's background work) ──
+
+    /// <summary>After every folder run that reached the server (not skipped ones). Handlers must be quick.</summary>
+    public event Action<FolderRunResult>? FolderRan;
+
+    /// <summary>The folder list or the connection changed (and when a device starts or stops). Handlers must be quick.</summary>
+    public event Action? FoldersChanged;
+
+    /// <summary>The running device's folders (empty while not enrolled or starting).</summary>
+    public IReadOnlyList<FolderState> Folders => _agent?.Folders ?? [];
+
+    /// <summary>Whether the device's agent is running (enrolled, signed in or trying to).</summary>
+    public bool DeviceRunning => _agent is not null;
+
+    /// <summary>The running device's folder list was fetched at least once.</summary>
+    public bool FoldersLoaded => _agent?.FoldersLoaded == true;
+
+    /// <summary>Whether a folder is running now.</summary>
+    public bool AnyActive => _agent?.AnyActive == true;
+
+    /// <summary>
+    /// An automatic run of one folder (background work, a wake-up), with its run conditions; waits for the device's agent to
+    /// start and load the folder (up to <paramref name="startTimeout"/>). Throws <see cref="ControlException"/> when there is
+    /// no such folder or no agent.
+    /// </summary>
+    public async Task<FolderRunResult> RunAutomaticAsync(int folderId, TimeSpan startTimeout, CancellationToken ct)
+    {
+        var deadline = DateTimeOffset.UtcNow + startTimeout;
+        while (_agent is not { } agent || agent.Folders.All(f => f.Folder.FolderId != folderId))
+        {
+            if (DateTimeOffset.UtcNow > deadline)
+                throw new ControlException(_agent is null ? "The agent did not start in time." : $"Folder {folderId} is not assigned to this device.");
+            await Task.Delay(250, ct);
+        }
+        for (var attempt = 0; ; attempt++)
+        {
+            try { return await _agent!.RequestRunAsync(folderId, ct: ct, automatic: true); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested && attempt < 3) { await Task.Delay(200, ct); } // worker replaced
+            catch (KeyNotFoundException e) { throw new ControlException(e.Message); }
+        }
+    }
+
+    /// <summary>A folder's activity, progress or last result changed (any thread; handlers must be quick).</summary>
+    public event Action<int>? FolderChanged;
+
+    /// <summary>
+    /// Registers (an endpoint) or removes (null) where the server can wake this device. Throws <see cref="ControlException"/>
+    /// when the agent is not running, or with the server's message when it refuses.
+    /// </summary>
+    public async Task SetPushTargetAsync(PushTargetRequest? target, CancellationToken ct)
+    {
+        var (_, api) = Running();
+        try
+        {
+            if (target is null) await api.UnregisterPushAsync(ct);
+            else await api.RegisterPushAsync(target, ct);
+        }
+        catch (ApiException e) { throw new ControlException(e.Message); }
+        catch (HttpRequestException e) { throw new ControlException($"Cannot reach the server: {e.Message}"); }
+    }
+
+    /// <summary>Starts an automatic run of every folder (the app was opened).</summary>
+    public void TriggerAll(string reason) => _agent?.TriggerAll(reason);
+
+    /// <summary>Stops running runs (all, or one folder's); returns how many.</summary>
+    public int CancelRuns(int? folderId = null) => _agent?.CancelRuns(folderId) ?? 0;
+
     private ControlEvent StatusEvent() => new() { Kind = ControlEventKinds.Status, Status = BuildStatus() };
 
     private void OnFolderChanged(int folderId)
     {
+        RaiseObserver(FolderChanged is { } changed ? () => changed(folderId) : null);
         if (_events.SubscriberCount == 0 || _agent?.Folders.FirstOrDefault(f => f.Folder.FolderId == folderId) is not { } state) return;
         var dto = Map(state);
         var previous = _publishedResults.GetValueOrDefault(folderId);
@@ -393,10 +487,12 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             LastResult = s.LastResult is { } r ? Map(r, s.LastRunAt ?? DateTimeOffset.UtcNow) : null,
             NextRunAt = s.NextRunAt,
             Alerts = _alerts.GetValueOrDefault(f.FolderId),
+            Conditions = f.Conditions,
+            Waiting = f.Paused ? null : s.Waiting,
         };
     }
 
-    private static FolderRunDto Map(FolderRunResult r, DateTimeOffset at) => new(r.FolderId, r.Name, r.Ok, r.Message, r.Skipped, at, r.Conflicts);
+    private static FolderRunDto Map(FolderRunResult r, DateTimeOffset at) => new(r.FolderId, r.Name, r.Ok, r.Message, r.Skipped, at, r.Conflicts, r.Deferred);
 
     // ── Control requests ──────────────────────────────────────────────────────
 
@@ -490,6 +586,26 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         // Back it up now rather than at the next interval.
         _ = agent.RequestRunAsync(folderId, ct: CancellationToken.None).ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
         return $"\"{folder.Name}\" is unlocked on this device; it will back up unattended.";
+    }
+
+    public async Task<string> SetConditionsAsync(int folderId, RunConditionsDto conditions, CancellationToken ct)
+    {
+        var (agent, api) = Running();
+        var folder = await FolderAsync(api, folderId, ct);
+        await api.UpdateOwnSettingsAsync(folder.FolderId, new UpdateDeviceFolderRequest(Conditions: conditions, ExpectedRevision: folder.Revision), ct);
+        await agent.ReloadAsync(ct);
+        var rules = new List<string>();
+        if (conditions.UnmeteredOnly) rules.Add("only on Wi-Fi");
+        if (conditions.ChargingOnly) rules.Add("only while charging");
+        if (conditions.BatteryNotLow) rules.Add("not on a low battery");
+        return rules.Count == 0 ? $"\"{folder.Name}\" runs whenever it is due." : $"\"{folder.Name}\" runs {string.Join(", ", rules)}.";
+    }
+
+    public Task<string> CancelAsync(int? folderId, CancellationToken ct)
+    {
+        var (agent, _) = Running();
+        var stopped = agent.CancelRuns(folderId);
+        return Task.FromResult(stopped == 0 ? "Nothing was running." : $"Stopped {stopped} run(s); they continue when next due.");
     }
 
     // ── Enrollment and sign-out (the desktop app) ─────────────────────────────

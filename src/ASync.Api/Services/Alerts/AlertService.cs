@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using ASync.Api.Services.Push;
 using ASync.Contracts;
 using ASync.Core.Alerts;
 using ASync.Core.Interfaces;
@@ -178,22 +179,4 @@ public class AlertService(
     public static AlertIncidentDto ToDto(AlertIncident i) =>
         new(i.Id, i.Kind, i.FolderId, i.FolderName, i.DeviceId, i.DeviceName, i.Detail, i.OpenedAt, i.ResolvedAt, i.NotifiedAt,
             i.StorageBackendId, i.StorageBackendName);
-}
-
-/// <summary>
-/// <c>Push__Mode</c>: how this server wakes devices. Only <c>None</c> exists so far (Relay and Direct come with the
-/// mobile apps, M4); alerts never need push.
-/// </summary>
-public enum PushMode { None, Relay, Direct }
-
-public sealed record PushSettings(PushMode Mode, string? Warning)
-{
-    public static PushSettings FromConfiguration(IConfiguration c)
-    {
-        var raw = c["Push:Mode"];
-        if (string.IsNullOrWhiteSpace(raw) || raw.Equals("None", StringComparison.OrdinalIgnoreCase)) return new(PushMode.None, null);
-        return new(PushMode.None, Enum.TryParse<PushMode>(raw, ignoreCase: true, out _)
-            ? $"Push__Mode={raw} is not available yet (it comes with the mobile apps); the server sends no wake-ups. Overdue alerts work without push."
-            : $"Push__Mode={raw} is not a known mode (None, Relay, Direct); using None.");
-    }
 }

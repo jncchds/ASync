@@ -21,6 +21,15 @@ public sealed record SyncOptions
     public bool AllowMassDeletion { get; init; }
     /// <summary>Wait before continuing a broken-off download (times the attempt number; three attempts per run).</summary>
     public TimeSpan RetryDelay { get; init; } = TimeSpan.FromSeconds(2);
+    /// <summary>
+    /// A local file modified less than this long ago is left alone in this run (no upload, download, delete or conflict
+    /// for its path) and picked up by the next one: it may still be written to, and Android touches a new file's
+    /// modification time again a few seconds after it was closed, which would otherwise upload it twice (two versions of
+    /// the same content). Zero = off (the default; the Android agent uses a few seconds).
+    /// </summary>
+    public TimeSpan SettleTime { get; init; }
+    /// <summary>The clock <see cref="SettleTime"/> is measured with.</summary>
+    public TimeProvider Clock { get; init; } = TimeProvider.System;
 }
 
 public sealed record SyncResult
@@ -34,6 +43,8 @@ public sealed record SyncResult
     /// <summary>Bytes of downloads that continued an interrupted one (already on this device, not fetched again).</summary>
     public long BytesResumed { get; set; }
     public List<string> Errors { get; } = [];
+    /// <summary>Paths left for the next run because their local file changed moments ago (<see cref="SyncOptions.SettleTime"/>).</summary>
+    public int Unsettled { get; set; }
     /// <summary>True when this run changed the storage (other devices should sync).</summary>
     public bool ChangedRemote => Uploaded > 0 || DeletedRemote > 0;
     public bool Ok => Errors.Count == 0;
@@ -120,7 +131,13 @@ public sealed class FolderSyncer
             remote.TryGetValue(path, out var r);
             _state.Files.TryGetValue(path, out var b);
             if (b is not null && _excludes.Matches(path)) { plan.Add((path, Action.Forget)); continue; }
-            plan.Add((path, Decide(l, r, b)));
+            var action = Decide(l, r, b);
+            if (action is not (Action.None or Action.Forget) && l is not null && Unsettled(l))
+            {
+                result.Unsettled++;
+                continue; // as if the path were not there this run: its state stays as it was
+            }
+            plan.Add((path, action));
         }
         CheckMassDeletion(plan);
         if (Progress is { } progress)
@@ -175,6 +192,14 @@ public sealed class FolderSyncer
         await CleanUpIfDueAsync(ct);
         SaveState();
         return result;
+    }
+
+    /// <summary>Modified within the settle time (a time in the future, a wrong clock, does not count as unsettled).</summary>
+    private bool Unsettled(LocalFile l)
+    {
+        if (_options.SettleTime <= TimeSpan.Zero) return false;
+        var age = _options.Clock.GetUtcNow().ToUnixTimeMilliseconds() - l.Modified;
+        return age >= 0 && age < _options.SettleTime.TotalMilliseconds;
     }
 
     private Action Decide(LocalFile? l, RemoteFile? r, BaseEntry? b)

@@ -34,12 +34,28 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
     [ObservableProperty] public partial string LastRunText { get; private set; } = "";
     [ObservableProperty] public partial string NextRunText { get; private set; } = "";
 
+    /// <summary>This device's run conditions in words ("Runs by itself only on Wi-Fi, while charging"), or null.</summary>
+    [ObservableProperty] public partial string? ConditionsText { get; private set; }
+
+    /// <summary>Why automatic runs wait now (the conditions), or null.</summary>
+    [ObservableProperty] public partial string? WaitingText { get; private set; }
+
+    /// <summary>The run-conditions editor is open.</summary>
+    [ObservableProperty] public partial bool EditingConditions { get; private set; }
+    [ObservableProperty] public partial bool EditUnmeteredOnly { get; set; }
+    [ObservableProperty] public partial bool EditChargingOnly { get; set; }
+    [ObservableProperty] public partial bool EditBatteryNotLow { get; set; }
+
+    /// <summary>What this platform ignores of the conditions.</summary>
+    public string? ConditionsNote => shell.Platform.ConditionsNote;
+    public bool HasConditionsNote => ConditionsNote is not null;
+
     /// <summary>What the server's overdue detection says (Overdue, Failing, a failed check).</summary>
     [ObservableProperty] public partial string? AlertText { get; private set; }
 
     /// <summary>A request of this folder is running (sync now, pause, a new path).</summary>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(SyncNowCommand), nameof(TogglePauseCommand), nameof(ChooseFolderCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SyncNowCommand), nameof(TogglePauseCommand), nameof(ChooseFolderCommand), nameof(SaveConditionsCommand))]
     public partial bool Working { get; private set; }
 
     public string PauseText => Paused ? "Resume" : "Pause";
@@ -82,6 +98,8 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         HasLastResult = f.LastResult is not null;
         LastResultOk = f.LastResult is { Ok: true } or { Skipped: true };
         LastResultText = f.LastResult is { } r ? (r.Ok || r.Skipped ? r.Message : $"Failed: {r.Message}") : "Not run on this device yet";
+        ConditionsText = Describe(f.Conditions);
+        WaitingText = f.Waiting;
         AlertText = f.Alerts is { Count: > 0 } alerts
             ? string.Join("\n", alerts.Select(a => $"{Format.Alert(a.Kind)} (server): {a.Detail}"))
             : null;
@@ -97,6 +115,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             { LastResult: { Ok: false, Skipped: false } } => new Pill("Failed", PillKind.Danger),
             { Alerts: [{ Kind: AlertKind.Failing or AlertKind.CheckFailed or AlertKind.PruneFailed }, ..] } => new Pill("Problem", PillKind.Danger),
             { Alerts: [{ Kind: AlertKind.Overdue }, ..] } => new Pill("Overdue", PillKind.Warning),
+            { Waiting: not null } => new Pill("Waiting", PillKind.Muted),
             { LastResult: not null } => new Pill("Up to date", PillKind.Success),
             _ => new Pill("Waiting", PillKind.Muted),
         };
@@ -118,6 +137,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             { Paused: true } => "Paused",
             { Locked: true } => "Waits to be unlocked",
             { LocalPath.Length: 0 } => "Waits for a local folder",
+            { Waiting: { } waiting } => waiting,
             { NextRunAt: { } next } => $"Next run {Format.In(next, now)}",
             _ => $"Every {_folder.IntervalMinutes} min",
         };
@@ -168,4 +188,37 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
 
     [RelayCommand(CanExecute = nameof(Locked))]
     private void Unlock() => shell.Dialog = new UnlockViewModel(shell, Id, Name);
+
+    public static string? Describe(RunConditionsDto? c)
+    {
+        if (c is null || !c.Any) return null;
+        var parts = new List<string>();
+        if (c.UnmeteredOnly) parts.Add("on Wi-Fi");
+        if (c.ChargingOnly) parts.Add("while charging");
+        if (c.BatteryNotLow) parts.Add("when the battery is not low");
+        return $"Runs by itself only {string.Join(", ", parts)}";
+    }
+
+    [RelayCommand]
+    private void EditConditions()
+    {
+        var c = _folder.Conditions ?? RunConditionsDto.None;
+        (EditUnmeteredOnly, EditChargingOnly, EditBatteryNotLow) = (c.UnmeteredOnly, c.ChargingOnly, c.BatteryNotLow);
+        EditingConditions = true;
+    }
+
+    [RelayCommand]
+    private void CancelConditions() => EditingConditions = false;
+
+    [RelayCommand(CanExecute = nameof(CanChange))]
+    private async Task SaveConditions()
+    {
+        Working = true;
+        try
+        {
+            var conditions = new RunConditionsDto(EditUnmeteredOnly, EditChargingOnly, EditBatteryNotLow);
+            if (await shell.RunAsync((s, ct) => s.SetConditionsAsync(Id, conditions, ct)!)) EditingConditions = false;
+        }
+        finally { Working = false; }
+    }
 }

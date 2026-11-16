@@ -43,6 +43,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public UpdatesViewModel Updates => _shell.Updates;
 
+    public BackgroundViewModel? Background => _shell.Background;
+    public bool HasBackground => Background is not null;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanSignOut))]
     public partial string? DeviceText { get; private set; }

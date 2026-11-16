@@ -104,6 +104,9 @@ public sealed class MainActivity : AvaloniaMainActivity
         _current = new WeakReference<MainActivity>(this);
         base.OnResume();
         DeliverPendingLink();
+        AndroidAgent.AppOpened();
+        // Back from the system's battery question or a distributor: show what changed.
+        if (AndroidShellApp.Shell?.Background is { } background) Dispatcher.UIThread.Post(background.Refresh);
     }
 
     /// <summary>A pairing link to fill in when the activity shows (from <see cref="LinkActivity"/>).</summary>

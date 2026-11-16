@@ -19,7 +19,8 @@ namespace ASync.Api.Services.Alerts;
 public class AlertMonitor(
     IFolderRepository folders, IUserRepository users, IAlertRepository alerts, AlertService service, IAlertSender sender,
     AlertOptions options, ServerStarted started, ISyncNotifier notifier, TimeProvider clock, ILogger<AlertMonitor> logger,
-    IUsageRepository? usage = null, IStorageBackendRepository? storage = null, UsageOptions? usageOptions = null, HealthOptions? health = null)
+    IUsageRepository? usage = null, IStorageBackendRepository? storage = null, UsageOptions? usageOptions = null, HealthOptions? health = null,
+    Push.PushQueue? push = null)
 {
     public async Task RunAsync(CancellationToken ct)
     {
@@ -63,6 +64,13 @@ public class AlertMonitor(
         foreach (var i in changes.Resolved)
             logger.LogInformation("Alert resolved for user {UserId}: {Kind} \"{Folder}\" {Device}.", user.Id, i.Kind, i.FolderName, i.DeviceName);
         incidents.AddRange(changes.Opened);
+
+        // Overdue devices that registered a push endpoint are woken (at most every Push__OverdueHours): a phone whose
+        // background work was stopped may start its run. The person is alerted either way.
+        if (push is not null)
+            foreach (var deviceId in incidents.Where(i => i.ResolvedAt is null && i.Kind == AlertKind.Overdue && i.DeviceId is not null)
+                         .Select(i => i.DeviceId!.Value).Distinct())
+                push.Enqueue(deviceId, PushWake.Overdue);
 
         var notice = AlertDispatch.Compose(incidents, settings ?? new AlertSettings { UserId = user.Id }, policy, now, options.RetryAfter);
         if (notice is not null)

@@ -4,6 +4,20 @@
              x:Class="ASync.App.Views.DashboardView"
              x:DataType="vm:DashboardViewModel">
   <StackPanel Spacing="12">
+    <!-- Phones: Android's battery optimisation holds background work back (dismissable). -->
+    <Border Classes="card" Name="BatteryPrompt" IsVisible="{Binding Shell.Background.ShowBatteryPrompt, FallbackValue=False}">
+      <StackPanel Spacing="8">
+        <TextBlock Text="Let ASync sync in the background" FontWeight="SemiBold" />
+        <TextBlock Classes="muted" Text="{x:Static vm:BackgroundViewModel.BatteryExplanation}" TextWrapping="Wrap" />
+        <TextBlock Classes="muted small" Text="{Binding Shell.Background.VendorHint, FallbackValue=''}" TextWrapping="Wrap"
+                   IsVisible="{Binding Shell.Background.HasVendorHint, FallbackValue=False}" />
+        <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <Button Name="AllowBackground" Content="Allow" Command="{Binding Shell.Background.AllowBatteryCommand, FallbackValue={x:Null}}" />
+          <Button Classes="secondary" Name="NotNow" Content="Not now" Command="{Binding Shell.Background.DismissBatteryPromptCommand, FallbackValue={x:Null}}" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
+
     <!-- This device and its server. -->
     <Border Classes="card">
       <StackPanel Spacing="10">
@@ -67,6 +81,24 @@
                 <Run Text="{Binding LastRunText}" /><Run Text=" · " /><Run Text="{Binding LastResultText}" />
               </TextBlock>
               <TextBlock Classes="muted small" Text="{Binding NextRunText}" />
+              <TextBlock Classes="muted small" Text="{Binding ConditionsText}" TextWrapping="Wrap"
+                         IsVisible="{Binding ConditionsText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+              <Border Classes="notice" IsVisible="{Binding EditingConditions}">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="small" FontWeight="SemiBold" Text="Run by itself only" />
+                  <CheckBox Name="UnmeteredOnly" Content="On Wi-Fi (not on mobile data or a metered hotspot)" IsChecked="{Binding EditUnmeteredOnly}" />
+                  <CheckBox Name="ChargingOnly" Content="While charging" IsChecked="{Binding EditChargingOnly}" />
+                  <CheckBox Name="BatteryNotLow" Content="When the battery is not low" IsChecked="{Binding EditBatteryNotLow}" />
+                  <TextBlock Classes="muted small" TextWrapping="Wrap"
+                             Text="Scheduled runs, changes and wake-ups wait for these. Sync now runs at once." />
+                  <TextBlock Classes="muted small" TextWrapping="Wrap" Text="{Binding ConditionsNote}" IsVisible="{Binding HasConditionsNote}" />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button Classes="small" Name="SaveConditions" Content="Save" Command="{Binding SaveConditionsCommand}" />
+                    <Button Classes="small secondary" Content="Cancel" Command="{Binding CancelConditionsCommand}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
 
               <Border Classes="notice" IsVisible="{Binding AlertText, Converter={x:Static ObjectConverters.IsNotNull}}">
                 <TextBlock Classes="small" Text="{Binding AlertText}" />
@@ -82,6 +114,8 @@
                 <Button Classes="small secondary" Content="{Binding PauseText}" Command="{Binding TogglePauseCommand}" />
                 <Button Classes="small secondary" Content="Open folder" Command="{Binding OpenFolderCommand}" IsVisible="{Binding HasLocalPath}" />
                 <Button Classes="small secondary" Content="Change folder…" Command="{Binding ChooseFolderCommand}" IsVisible="{Binding HasLocalPath}" />
+                <Button Classes="small secondary" Name="EditConditions" Content="Conditions…" Command="{Binding EditConditionsCommand}"
+                        IsVisible="{Binding !EditingConditions}" />
               </WrapPanel>
             </StackPanel>
           </Border>

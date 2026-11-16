@@ -27,6 +27,13 @@ public interface IControlHandler
 
     /// <summary>Forgets the identity (and cancels a pending enrollment).</summary>
     Task<string> ForgetAsync(CancellationToken ct) => throw new ControlException("This agent cannot forget its identity.");
+
+    /// <summary>Sets a folder's run conditions on this device (stored on the server).</summary>
+    Task<string> SetConditionsAsync(int folderId, RunConditionsDto conditions, CancellationToken ct) =>
+        throw new ControlException("This agent cannot change run conditions.");
+
+    /// <summary>Stops the running run of a folder, or of all.</summary>
+    Task<string> CancelAsync(int? folderId, CancellationToken ct) => throw new ControlException("This agent cannot stop runs.");
 }
 
 /// <summary>An error the agent reports to the client as it is (no stack trace).</summary>
@@ -177,6 +184,12 @@ public sealed class ControlServer : IAsyncDisposable
                     Enrollment = await _handler.StartDeviceCodeAsync(Need(r.Server, "server"), Need(r.Name, "name"), r.Platform ?? DevicePlatform.Cli, ct),
                 },
                 ControlProtocol.Ops.Forget => new ControlResponse { Id = r.Id, Ok = true, Message = await _handler.ForgetAsync(ct) },
+                ControlProtocol.Ops.SetConditions => new ControlResponse
+                {
+                    Id = r.Id, Ok = true,
+                    Message = await _handler.SetConditionsAsync(Folder(), r.Conditions ?? throw new ControlException("\"set-conditions\" needs conditions."), ct),
+                },
+                ControlProtocol.Ops.Cancel => new ControlResponse { Id = r.Id, Ok = true, Message = await _handler.CancelAsync(r.FolderId, ct) },
                 _ => new ControlResponse { Id = r.Id, Error = $"Unknown operation \"{r.Op}\" (this agent speaks control protocol {ControlProtocol.Version})." },
             };
         }

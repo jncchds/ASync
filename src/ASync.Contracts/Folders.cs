@@ -43,7 +43,20 @@ public record MaintenanceStatusDto(DateTime At, bool Ok, string? Message, string
 
 public record FolderDeviceDto(
     Guid DeviceId, string DeviceName, DevicePlatform Platform, string LocalPath, MirrorDirection? Direction, bool Paused,
-    DateTime? LastSyncAt, bool? LastSyncOk, string? LastSyncMessage);
+    DateTime? LastSyncAt, bool? LastSyncOk, string? LastSyncMessage, RunConditionsDto? Conditions = null);
+
+/// <summary>
+/// When a device may run a folder by itself (its interval, file changes, wake-ups): only on unmetered networks, only
+/// while charging, not on a low battery. All false = always. A person's "Sync now" ignores them. Platforms honour what
+/// they can see (see AGENTS.md "Run conditions"): Android all three; desktops the power rules, metered networks on Linux
+/// (NetworkManager).
+/// </summary>
+public record RunConditionsDto(bool UnmeteredOnly = false, bool ChargingOnly = false, bool BatteryNotLow = false)
+{
+    public static readonly RunConditionsDto None = new();
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool Any => UnmeteredOnly || ChargingOnly || BatteryNotLow;
+}
 
 /// <summary>
 /// Create or edit a folder. Mode, encryption, kind, back-end and root path are fixed after creation.
@@ -69,7 +82,9 @@ public record IssueRecoveryKeyRequest(string? Password = null, bool Confirm = fa
 /// </summary>
 public record RecoveryKeyDto(string RecoveryKey, DateTime CreatedAt, string StoragePath);
 
-public record AttachDeviceRequest(Guid DeviceId, string LocalPath, MirrorDirection? Direction = null, bool Paused = false, long? ExpectedRevision = null);
+/// <summary>Attach a device, or change its settings. <paramref name="Conditions"/>: null keeps them (none for a new device).</summary>
+public record AttachDeviceRequest(Guid DeviceId, string LocalPath, MirrorDirection? Direction = null, bool Paused = false, long? ExpectedRevision = null,
+    RunConditionsDto? Conditions = null);
 
 // ── What devices see ──────────────────────────────────────────────────────────
 
@@ -77,7 +92,7 @@ public record AttachDeviceRequest(Guid DeviceId, string LocalPath, MirrorDirecti
 public record DeviceFolderDto(
     int FolderId, string Name, SyncMode Mode, FolderEncryption Encryption, FolderKind Kind,
     int IntervalMinutes, string[] Excludes, RetentionDto Retention, int VersionsKeepDays, int TrashKeepDays,
-    long Revision, bool RepositoryReady, string LocalPath, MirrorDirection? Direction, bool Paused);
+    long Revision, bool RepositoryReady, string LocalPath, MirrorDirection? Direction, bool Paused, RunConditionsDto? Conditions = null);
 
 /// <summary>A device changing its own settings for a folder (from the device's UI or CLI). Null = unchanged.</summary>
 /// <summary>
@@ -86,7 +101,8 @@ public record DeviceFolderDto(
 /// </summary>
 public record DeviceFolderAlertDto(int FolderId, AlertKind Kind, string Detail, DateTime OpenedAt);
 
-public record UpdateDeviceFolderRequest(string? LocalPath = null, MirrorDirection? Direction = null, bool? Paused = null, long? ExpectedRevision = null);
+public record UpdateDeviceFolderRequest(string? LocalPath = null, MirrorDirection? Direction = null, bool? Paused = null, long? ExpectedRevision = null,
+    RunConditionsDto? Conditions = null);
 
 public record SyncReportRequest(bool Ok, string? Message, int Uploaded = 0, int Downloaded = 0, int Deleted = 0, int Conflicts = 0, long Bytes = 0);
 
