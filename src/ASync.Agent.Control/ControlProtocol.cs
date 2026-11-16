@@ -120,9 +120,12 @@ public sealed record ControlEvent
 
 public sealed record HelloDto(int Protocol, string AgentVersion, int ProcessId, AgentMode Mode, string ConfigDirectory);
 
-/// <summary>How the agent was started: the foreground <c>async-cli run</c>, or as a service (systemd, Windows, launchd).</summary>
+/// <summary>
+/// How the agent was started: the foreground <c>async-cli run</c>, as a service (systemd, Windows, launchd), or inside a
+/// mobile app's process (<c>InApp</c>: reached in-process only, never over the channel, so older clients never see it).
+/// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<AgentMode>))]
-public enum AgentMode { Foreground, Service }
+public enum AgentMode { Foreground, Service, InApp }
 
 [JsonConverter(typeof(JsonStringEnumConverter<AgentState>))]
 public enum AgentState

@@ -1,6 +1,6 @@
 # Release notes
 
-## v0.1.4 — 2026-11-15
+## v0.1.4 — 2026-11-16
 
 - feat(cli): **The agent runs in the background as a service.** `async-cli service install` sets it up for your
   user and starts it: a systemd user unit on Linux (logs in the journal), a LaunchAgent on macOS, a logon task on
@@ -160,6 +160,19 @@
   notifications now show under "ASync". The builds are not code-signed yet (the README says how to open them); signing
   switches on in CI once certificates are added. Tried on Linux (the `.deb`/`.rpm` on Debian and Fedora, the AppImage
   including an update with the agent restart); the Windows and macOS installers are built in CI but not tried yet.
+- feat: **The Android app (first part: syncing while it is open).** A sideloadable APK for Android 8 and later
+  (`ASync-<version>-android.apk` in the release; not in Google Play). Add the phone by scanning the QR code of *Devices →
+  Add device*, by opening or pasting its `async://pair` link, with the code, or by approving it in the browser. Its key
+  is made in the Android Keystore and never leaves it, and what the app stores about the device is encrypted with
+  another Keystore key. Folders attached to the phone in the web UI are placed with Android's own folder picker
+  (internal storage, SD cards, USB drives, other apps' storage); two-way, Mirror and Backup folders work there, with Sync
+  now, pause/resume, live progress and unlocking end-to-end folders, as on the desktop. It syncs while the app is open;
+  background syncing comes next. Tried on an Android 15 emulator against a real server, with a computer syncing the
+  same folder and a backup restored with `async-cli`.
+- refactor: the sync engine reads and writes a device's files through a "local file tree", so the same sync and backup
+  code works on Android's content URIs; nothing changes for the desktop and the CLI, and the storage format is the same.
+  A device run that fails for an unexpected reason no longer stops the background agent: it tries again after 30
+  seconds.
 
 ## v0.1.3 — 2026-11-12
 

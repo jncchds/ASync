@@ -1,6 +1,7 @@
 using ASync.Contracts;
 using ASync.Engine.Backup;
 using ASync.Engine.Crypto;
+using ASync.Engine.Local;
 using ASync.Engine.Maintenance;
 using ASync.Engine.Repository;
 using ASync.Engine.Storage;
@@ -54,18 +55,22 @@ public static class RepositoryAccess
 
 /// <summary>One backup run of a Backup folder: snapshot the local folder, then forget snapshots per the retention policy.</summary>
 /// <param name="deviceName">Recorded as the snapshot's host name (what `snapshots` shows); default the machine name.</param>
-public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid deviceId, string? deviceName = null)
+/// <param name="local">What is backed up: by default the folder's local path as a directory.</param>
+public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid deviceId, string? deviceName = null, ILocalTree? local = null)
 {
     /// <summary>One device's backups of a folder form one source (retention applies per source).</summary>
     public string Source => deviceId.ToString("N");
 
     public async Task<(Snapshot Snapshot, int Forgotten)> RunAsync(IProgress<BackupProgress>? progress = null, CancellationToken ct = default)
     {
-        if (!Directory.Exists(folder.LocalPath))
-            throw new SyncRefusedException($"The folder {folder.LocalPath} does not exist (is the disk mounted?).");
+        var tree = local ?? new FileSystemTree(folder.LocalPath);
+        if (!tree.Exists())
+            throw new SyncRefusedException(tree.FileSystemPath is null
+                ? $"The folder {tree.Location} cannot be used (was it deleted, or its permission taken back?). Choose the folder again."
+                : $"The folder {folder.LocalPath} does not exist (is the disk mounted?).");
 
         var parent = (await repository.ListSnapshotsAsync(ct)).LastOrDefault(s => s.Source == Source);
-        var snapshot = await new BackupRunner(repository).RunAsync(folder.LocalPath, new BackupOptions
+        var snapshot = await new BackupRunner(repository).RunAsync(tree, new BackupOptions
         {
             Source = Source,
             DeviceId = deviceId.ToString(),

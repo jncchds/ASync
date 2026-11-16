@@ -247,10 +247,73 @@ jobs:
           path: artifacts/packages/${{ matrix.rid }}/
           if-no-files-found: error
 
+  # The Android app (src/ASync.App.Android, not in ASync.slnx: it needs the android workload): one sideloadable APK for
+  # arm64 phones and x86_64 emulators, plus an AAB. Signed with the release keystore when its secrets exist
+  # (ANDROID_KEYSTORE: the .jks in base64, ANDROID_KEY_ALIAS, ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD), otherwise with
+  # the runner's throw-away debug keystore (such an APK cannot update one signed differently).
+  android:
+    runs-on: ubuntu-24.04
+    env:
+      HAS_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Check the tag against VERSION
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION ($version). Tag v$version instead."
+            exit 1
+          fi
+
+      - name: Install the android workload and the SDK parts the project needs
+        run: |
+          dotnet workload install android
+          dotnet build src/ASync.App.Android/ASync.App.Android.csproj -t:InstallAndroidDependencies -f net10.0-android \
+            -p:AndroidSdkDirectory="$ANDROID_HOME" -p:AcceptAndroidSDKLicenses=True
+
+      - name: Release keystore
+        if: env.HAS_ANDROID_KEYSTORE == 'true'
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$ANDROID_KEYSTORE" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          {
+            echo "ASYNC_ANDROID_KEYSTORE=$RUNNER_TEMP/release.keystore"
+            echo "ASYNC_ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS"
+            echo "ASYNC_ANDROID_STORE_PASSWORD=$ANDROID_STORE_PASSWORD"
+            echo "ASYNC_ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Build the APK
+        run: scripts/package-android.sh --aab
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-android
+          path: artifacts/packages/android/
+          if-no-files-found: error
+
   # A draft GitHub Release for the tag with every package and the Velopack feed (releases.<channel>.json per target): the
   # desktop app's update check reads the published releases, so nothing reaches anyone until a person publishes it.
   release:
-    needs: [test, e2e, agent-desktop, package]
+    needs: [test, e2e, agent-desktop, package, android]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
@@ -272,6 +335,7 @@ jobs:
             rid=${dir#dist/packages-}
             find "$dir" -maxdepth 1 -type f -exec cp {} release/ \;
             feed="$dir/velopack"
+            [ -d "$feed" ] || continue # the Android APK has no Velopack feed
             # This release's own Velopack files (assets.<rid>.json): not the previous release vpk downloaded for deltas.
             jq -r '.[].RelativeFileName' "$feed/assets.$rid.json" | while read -r f; do cp "$feed/$f" release/; done
             names=$(jq -c '[.[].RelativeFileName]' "$feed/assets.$rid.json")
@@ -296,6 +360,7 @@ jobs:
           | macOS (Apple silicon) | `ASync-<version>-osx-arm64.dmg`, or `ASync.Desktop-osx-arm64-Setup.pkg` |
           | Linux (x64, ARM64) | `ASync.Desktop-linux-<arch>.AppImage` (updates itself), or `async-desktop` .deb / .rpm |
           | async-cli | `async-cli-<version>-<rid>` archives, `async-cli` .deb / .rpm, or the Docker image |
+          | Android 8+ | `ASync-<version>-android.apk` (sideload: see "Installing the Android app" in the README) |
 
           These builds are not code-signed yet: see "Installing the desktop app" in the README for what Windows and macOS
           show and how to open them. `SHA256SUMS` lists every file's checksum.

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- The dark tokens (Bg #130c17). -->
+  <color name="async_bg">#130c17</color>
+  <color name="async_surface">#1c1221</color>
+  <color name="async_accent">#c026d3</color>
+  <style name="ASyncTheme" parent="Theme.AppCompat.NoActionBar">
+    <item name="android:windowBackground">@color/async_bg</item>
+    <item name="android:statusBarColor">@color/async_surface</item>
+    <item name="android:navigationBarColor">@color/async_bg</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="colorAccent">@color/async_accent</item>
+    <item name="colorPrimary">@color/async_accent</item>
+  </style>
+</resources>

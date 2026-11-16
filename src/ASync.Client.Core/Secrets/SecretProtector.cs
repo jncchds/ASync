@@ -26,6 +26,22 @@ public interface ISecretProtector
 
     /// <summary>Removes what <see cref="Protect"/> kept outside the file (a Keychain item); no-op otherwise.</summary>
     void Forget(string id);
+
+    /// <summary>
+    /// Reads a value of this protector's own format, for formats <see cref="SecretProtectors.Unprotect"/> does not know
+    /// (a platform head's, such as the Android Keystore's <c>androidks:</c>). False for any other value.
+    /// </summary>
+    bool TryUnprotect(string stored, out byte[] secret)
+    {
+        secret = [];
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the store's whole identity and token files go through <see cref="Protect"/> too, not only the secrets in
+    /// them (the Android Keystore's AES key: nothing about the device is readable without it).
+    /// </summary>
+    bool SealsFiles => false;
 }
 
 public static class SecretProtectors
@@ -47,11 +63,13 @@ public static class SecretProtectors
         return PlainSecretProtector.Instance;
     }
 
-    /// <summary>Which format a stored value is in.</summary>
+    /// <summary>Which format a stored value is in: the prefix before <c>:</c> (base64, the plain file format, has none).</summary>
     public static string KindOf(string stored) =>
-        stored.StartsWith(DpapiPrefix, StringComparison.Ordinal) ? "dpapi"
-        : stored.StartsWith(KeychainPrefix, StringComparison.Ordinal) ? "keychain"
-        : "file";
+        stored.IndexOf(':', StringComparison.Ordinal) is > 0 and var colon ? stored[..colon] : "file";
+
+    /// <summary>Reads a value in any of the formats (see <see cref="ISecretProtector"/>), trying <paramref name="protector"/>'s own first.</summary>
+    public static byte[] Unprotect(string stored, string storeRoot, ISecretProtector protector) =>
+        protector.TryUnprotect(stored, out var secret) ? secret : Unprotect(stored, storeRoot);
 
     /// <summary>Reads a value in any of the formats (see <see cref="ISecretProtector"/>).</summary>
     public static byte[] Unprotect(string stored, string storeRoot)

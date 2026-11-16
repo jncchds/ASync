@@ -40,6 +40,9 @@ public sealed class AsyncApiClient : IDisposable
     /// <summary>Optional: where the access token is kept between processes (the CLI's config directory).</summary>
     public ITokenCache? TokenCache { get; init; }
 
+    /// <summary>Makes the key of a new enrollment and signs the challenges (a keystore on mobile; in memory elsewhere).</summary>
+    public IDeviceKeyStore DeviceKeys { get; init; } = SoftwareDeviceKeys.Instance;
+
     public AsyncApiClient(string serverUrl, DeviceIdentity? identity = null, HttpMessageHandler? handler = null)
     {
         Server = new Uri(serverUrl.TrimEnd('/') + "/");
@@ -56,11 +59,25 @@ public sealed class AsyncApiClient : IDisposable
     /// <summary>Joins an account with a code from the web UI. Returns the identity to store.</summary>
     public async Task<DeviceIdentity> EnrollAsync(string code, string name, DevicePlatform platform, CancellationToken ct = default)
     {
-        var (privateKey, publicKey) = DeviceIdentity.NewKeyPair();
-        var enrolled = await SendAsync<EnrolledDto>(HttpMethod.Post, "api/device-auth/enroll",
-            new EnrollRequest(code, name, platform, publicKey, AppVersion), auth: false, ct);
-        Identity = new DeviceIdentity(Server.ToString().TrimEnd('/'), enrolled.DeviceId, enrolled.UserId, enrolled.Username, name, privateKey);
-        return Identity;
+        var (privateKey, publicKey) = DeviceKeys.Create();
+        try
+        {
+            var enrolled = await SendAsync<EnrolledDto>(HttpMethod.Post, "api/device-auth/enroll",
+                new EnrollRequest(code, name, platform, publicKey, AppVersion), auth: false, ct);
+            Identity = new DeviceIdentity(Server.ToString().TrimEnd('/'), enrolled.DeviceId, enrolled.UserId, enrolled.Username, name, privateKey);
+            return Identity;
+        }
+        catch
+        {
+            ForgetKey(privateKey); // a keystore key nobody will use
+            throw;
+        }
+    }
+
+    private void ForgetKey(string key)
+    {
+        try { DeviceKeys.Delete(key); }
+        catch (Exception) { /* best effort: an unused key does no harm */ }
     }
 
     /// <summary>
@@ -70,25 +87,33 @@ public sealed class AsyncApiClient : IDisposable
     public async Task<DeviceIdentity> EnrollWithDeviceCodeAsync(string name, DevicePlatform platform, Action<DeviceCodeDto> show,
         CancellationToken ct = default)
     {
-        var (privateKey, publicKey) = DeviceIdentity.NewKeyPair();
-        var started = await SendAsync<DeviceCodeDto>(HttpMethod.Post, "api/device-auth/device-code",
-            new DeviceCodeRequest(name, platform, publicKey, AppVersion), auth: false, ct);
-        show(started);
-        while (true)
+        var (privateKey, publicKey) = DeviceKeys.Create();
+        try
         {
-            await Task.Delay(TimeSpan.FromSeconds(started.IntervalSeconds), ct);
-            var poll = await SendAsync<DeviceCodePollDto>(HttpMethod.Post, "api/device-auth/device-code/poll",
-                new DeviceCodePollRequest(started.DeviceCode), auth: false, ct);
-            switch (poll.Status)
+            var started = await SendAsync<DeviceCodeDto>(HttpMethod.Post, "api/device-auth/device-code",
+                new DeviceCodeRequest(name, platform, publicKey, AppVersion), auth: false, ct);
+            show(started);
+            while (true)
             {
-                case DeviceCodeStatus.Approved when poll.Device is { } d:
-                    Identity = new DeviceIdentity(Server.ToString().TrimEnd('/'), d.DeviceId, d.UserId, d.Username, name, privateKey);
-                    return Identity;
-                case DeviceCodeStatus.Denied:
-                    throw new ApiException(HttpStatusCode.Forbidden, "The request was denied in the web UI.");
-                case DeviceCodeStatus.Expired:
-                    throw new ApiException(HttpStatusCode.Gone, "The code expired before it was approved. Start again.");
+                await Task.Delay(TimeSpan.FromSeconds(started.IntervalSeconds), ct);
+                var poll = await SendAsync<DeviceCodePollDto>(HttpMethod.Post, "api/device-auth/device-code/poll",
+                    new DeviceCodePollRequest(started.DeviceCode), auth: false, ct);
+                switch (poll.Status)
+                {
+                    case DeviceCodeStatus.Approved when poll.Device is { } d:
+                        Identity = new DeviceIdentity(Server.ToString().TrimEnd('/'), d.DeviceId, d.UserId, d.Username, name, privateKey);
+                        return Identity;
+                    case DeviceCodeStatus.Denied:
+                        throw new ApiException(HttpStatusCode.Forbidden, "The request was denied in the web UI.");
+                    case DeviceCodeStatus.Expired:
+                        throw new ApiException(HttpStatusCode.Gone, "The code expired before it was approved. Start again.");
+                }
             }
+        }
+        catch
+        {
+            ForgetKey(privateKey);
+            throw;
         }
     }
 
@@ -115,7 +140,7 @@ public sealed class AsyncApiClient : IDisposable
             try
             {
                 token = await SendAsync<DeviceTokenDto>(HttpMethod.Post, "api/device-auth/token",
-                    new DeviceTokenRequest(identity.DeviceId, challenge.Nonce, identity.Sign(challenge.Nonce), AppVersion), auth: false, ct);
+                    new DeviceTokenRequest(identity.DeviceId, challenge.Nonce, identity.Sign(challenge.Nonce, DeviceKeys), AppVersion), auth: false, ct);
             }
             catch (ApiException e) when (e.Status == HttpStatusCode.Unauthorized)
             {

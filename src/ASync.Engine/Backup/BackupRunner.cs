@@ -1,3 +1,4 @@
+using ASync.Engine.Local;
 using ASync.Engine.Repository;
 
 namespace ASync.Engine.Backup;
@@ -21,22 +22,30 @@ public sealed record BackupOptions
 public sealed record BackupProgress(string CurrentPath, int Files, long BytesProcessed, long BytesAdded);
 
 /// <summary>
-/// Backs a directory up into a snapshot: walks it, chunks changed files, stores new chunks and directory trees,
+/// Backs a local tree up into a snapshot: walks it, chunks changed files, stores new chunks and directory trees,
 /// and records a snapshot. Unreadable files are reported in <see cref="SnapshotStats.Errors"/> and skipped,
-/// so one locked file does not fail a whole backup. Symlinks are stored as links, never followed.
+/// so one locked file does not fail a whole backup. Symlinks are stored as links, never followed. The tree is a
+/// directory on disk (<see cref="FileSystemTree"/>) or any other <see cref="ILocalTree"/> (Android's document trees).
 /// </summary>
 public sealed class BackupRunner(Repository.Repository repository)
 {
     private const int MaxReportedErrors = 100;
 
-    public async Task<Snapshot> RunAsync(string directory, BackupOptions? options = null, IProgress<BackupProgress>? progress = null,
+    public Task<Snapshot> RunAsync(string directory, BackupOptions? options = null, IProgress<BackupProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var tree = new FileSystemTree(directory);
+        if (!tree.Exists()) throw new DirectoryNotFoundException($"'{directory}' does not exist.");
+        return RunAsync(tree, options, progress, ct);
+    }
+
+    public async Task<Snapshot> RunAsync(ILocalTree root, BackupOptions? options = null, IProgress<BackupProgress>? progress = null,
         CancellationToken ct = default)
     {
         options ??= new BackupOptions();
-        var root = new DirectoryInfo(Path.GetFullPath(directory));
-        if (!root.Exists) throw new DirectoryNotFoundException($"'{directory}' does not exist.");
+        if (!root.Exists()) throw new DirectoryNotFoundException($"'{root.Location}' does not exist.");
 
-        await using var repoLock = await repository.LockAsync(exclusive: false, $"backup of {root.FullName}", ct);
+        await using var repoLock = await repository.LockAsync(exclusive: false, $"backup of {root.Location}", ct);
         await repository.LoadIndexAsync(ct); // dedup against everything stored so far, by anyone
         var excludes = new Glob(options.Excludes);
         var stats = new SnapshotStats();
@@ -54,7 +63,7 @@ public sealed class BackupRunner(Repository.Repository repository)
             if (stats.Errors.Count < MaxReportedErrors) stats.Errors.Add($"{path}: {e.Message}");
         }
 
-        async Task<BlobId> BackupDirectoryAsync(DirectoryInfo dir, string relative, BlobId? parentTreeId)
+        async Task<BlobId> BackupDirectoryAsync(string relative, BlobId? parentTreeId)
         {
             Dictionary<string, TreeNode> previous = [];
             if (parentTreeId is BlobId pid)
@@ -64,8 +73,8 @@ public sealed class BackupRunner(Repository.Repository repository)
             }
 
             var nodes = new List<TreeNode>();
-            IEnumerable<FileSystemInfo> children;
-            try { children = dir.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = false }).ToList(); }
+            IReadOnlyList<LocalEntry> children;
+            try { children = root.List(relative); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Error(relative, e); children = []; }
 
             foreach (var child in children.OrderBy(c => c.Name, StringComparer.Ordinal))
@@ -76,21 +85,21 @@ public sealed class BackupRunner(Repository.Repository repository)
                 previous.TryGetValue(child.Name, out var old);
                 try
                 {
-                    if (child.LinkTarget is { } target)
+                    switch (child.Kind)
                     {
-                        nodes.Add(new TreeNode { Name = child.Name, Type = NodeType.Symlink, LinkTarget = target, Modified = Ms(child.LastWriteTimeUtc) });
-                    }
-                    else if (child is DirectoryInfo sub)
-                    {
-                        var subtree = await BackupDirectoryAsync(sub, childPath, old?.Type == NodeType.Directory ? old.Subtree : null);
-                        stats.Directories++;
-                        nodes.Add(new TreeNode { Name = child.Name, Type = NodeType.Directory, Subtree = subtree, Modified = Ms(sub.LastWriteTimeUtc), Mode = ModeOf(sub) });
-                    }
-                    else if (child is FileInfo file)
-                    {
-                        nodes.Add(await BackupFileAsync(file, childPath, old));
-                        progress?.Report(new BackupProgress(childPath, stats.FilesNew + stats.FilesChanged + stats.FilesUnmodified, stats.BytesProcessed, stats.BytesAdded));
-                        await RefreshLockIfDueAsync();
+                        case LocalEntryKind.Symlink:
+                            nodes.Add(new TreeNode { Name = child.Name, Type = NodeType.Symlink, LinkTarget = child.LinkTarget, Modified = child.Modified });
+                            break;
+                        case LocalEntryKind.Directory:
+                            var subtree = await BackupDirectoryAsync(childPath, old?.Type == NodeType.Directory ? old.Subtree : null);
+                            stats.Directories++;
+                            nodes.Add(new TreeNode { Name = child.Name, Type = NodeType.Directory, Subtree = subtree, Modified = child.Modified, Mode = child.Mode });
+                            break;
+                        default:
+                            nodes.Add(await BackupFileAsync(child, childPath, old));
+                            progress?.Report(new BackupProgress(childPath, stats.FilesNew + stats.FilesChanged + stats.FilesUnmodified, stats.BytesProcessed, stats.BytesAdded));
+                            await RefreshLockIfDueAsync();
+                            break;
                     }
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -103,19 +112,18 @@ public sealed class BackupRunner(Repository.Repository repository)
             return await repository.SaveTreeAsync(new Tree(nodes), ct);
         }
 
-        async Task<TreeNode> BackupFileAsync(FileInfo file, string relative, TreeNode? old)
+        async Task<TreeNode> BackupFileAsync(LocalEntry file, string relative, TreeNode? old)
         {
-            var modified = Ms(file.LastWriteTimeUtc);
-            if (old is { Type: NodeType.File, Content: not null } && old.Size == file.Length && old.Modified == modified
+            if (old is { Type: NodeType.File, Content: not null } && old.Size == file.Size && old.Modified == file.Modified
                 && old.Content.All(repository.HasBlob))
             {
                 stats.FilesUnmodified++;
-                return old with { Mode = ModeOf(file) };
+                return old with { Mode = file.Mode };
             }
 
             var content = new List<BlobId>();
             long size = 0;
-            await using (var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 20, useAsync: true))
+            await using (var stream = root.OpenRead(relative))
             {
                 await foreach (var chunk in repository.Chunker.SplitAsync(stream, ct))
                 {
@@ -132,10 +140,10 @@ public sealed class BackupRunner(Repository.Repository repository)
                 }
             }
             if (old is null) stats.FilesNew++; else stats.FilesChanged++;
-            return new TreeNode { Name = file.Name, Type = NodeType.File, Size = size, Modified = modified, Mode = ModeOf(file), Content = content };
+            return new TreeNode { Name = file.Name, Type = NodeType.File, Size = size, Modified = file.Modified, Mode = file.Mode, Content = content };
         }
 
-        var treeId = await BackupDirectoryAsync(root, "", options.Parent?.Tree);
+        var treeId = await BackupDirectoryAsync("", options.Parent?.Tree);
         await repository.FlushAsync(ct); // data before the snapshot that refers to it
 
         var snapshot = new Snapshot
@@ -154,7 +162,5 @@ public sealed class BackupRunner(Repository.Repository repository)
         return snapshot;
     }
 
-    internal static long Ms(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
-
-    private static int? ModeOf(FileSystemInfo info) => OperatingSystem.IsWindows() ? null : (int)info.UnixFileMode;
+    internal static long Ms(DateTime utc) => FileSystemTree.Ms(utc);
 }

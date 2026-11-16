@@ -141,6 +141,14 @@ internal sealed class FakePlatform : IPlatformServices
     public bool SupportsStartAtLogin => true;
     public bool IsStartAtLoginEnabled() => StartAtLogin;
     public void SetStartAtLogin(bool enabled) => StartAtLogin = enabled;
+
+    /// <summary>A phone-like platform: a camera to scan with, and content URIs shown by name.</summary>
+    public bool Phone { get; set; }
+    public string? NextScan { get; set; }
+    public bool CanScanQrCode => Phone;
+    public Task<string?> ScanQrCodeAsync() => Task.FromResult(NextScan);
+    public string DisplayPath(string location) => Phone && location.StartsWith("content://", StringComparison.Ordinal) ? "Internal storage › " + location.Split("%3A")[^1] : location;
+    public string DeviceNoun => Phone ? "phone" : "computer";
 }
 
 internal sealed class MemorySettings : ISettingsStore
@@ -185,6 +193,14 @@ internal sealed class ShellFixture : IAsyncDisposable
         Shell = new ShellViewModel(Agent, Service, Platform, Settings, updates: Updates) { RetryInterval = TimeSpan.FromMilliseconds(50) };
         Shell.Updates.InitialDelay = TimeSpan.Zero;
         Shell.Start();
+        return this;
+    }
+
+    /// <summary>Starts the shell and waits for its first status.</summary>
+    public async Task<ShellFixture> StartAndWait(AgentStatusDto status)
+    {
+        Start(status);
+        await Until(() => Shell.Status is not null, "the first status");
         return this;
     }
 

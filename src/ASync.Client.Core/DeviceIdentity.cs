@@ -18,11 +18,14 @@ public sealed record DeviceIdentity(string ServerUrl, Guid DeviceId, int UserId,
         return key;
     }
 
-    public string Sign(string nonce)
+    public string Sign(string nonce) => Sign(nonce, SoftwareDeviceKeys.Instance);
+
+    /// <summary>The challenge signature (base64, IEEE P1363) made by the store that holds <see cref="PrivateKey"/>.</summary>
+    /// <param name="keys">A keystore; a key it does not own (a software key from before) is signed in memory.</param>
+    public string Sign(string nonce, IDeviceKeyStore keys)
     {
-        using var key = Key();
-        return Convert.ToBase64String(key.SignData(DeviceAuthMessage.Build(DeviceId, nonce), HashAlgorithmName.SHA256,
-            DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
+        var store = keys.Owns(PrivateKey) ? keys : SoftwareDeviceKeys.Instance;
+        return Convert.ToBase64String(store.Sign(PrivateKey, DeviceAuthMessage.Build(DeviceId, nonce)));
     }
 
     /// <summary>A new key pair: the private key (PKCS#8, base64) to keep, and the public key (SPKI, base64) to enroll.</summary>
@@ -93,19 +96,45 @@ public sealed class FileClientStore : IClientStore, ITokenCache
 
     private string IdentityPath => Path.Combine(Root, "identity.json");
 
+    /// <summary>How a key held by a keystore is written: only its reference (no secret: the key never leaves the keystore).</summary>
+    private const string KeyReferencePrefix = "ref:";
+
     public DeviceIdentity? LoadIdentity()
     {
         if (!File.Exists(IdentityPath)) return null;
-        var stored = JsonSerializer.Deserialize<DeviceIdentity>(File.ReadAllText(IdentityPath), Json);
+        var text = ReadSealed(File.ReadAllText(IdentityPath), out var wasSealed);
+        var stored = JsonSerializer.Deserialize<DeviceIdentity>(text, Json);
         if (stored is null) return null;
-        var identity = stored with { PrivateKey = Convert.ToBase64String(SecretProtectors.Unprotect(stored.PrivateKey, Root)) };
-        if (SecretProtectors.KindOf(stored.PrivateKey) != Protector.Kind) TryMigrate(() => SaveIdentity(identity));
+        if (stored.PrivateKey.StartsWith(KeyReferencePrefix, StringComparison.Ordinal))
+        {
+            var reference = stored with { PrivateKey = stored.PrivateKey[KeyReferencePrefix.Length..] };
+            if (wasSealed != Protector.SealsFiles) TryMigrate(() => SaveIdentity(reference));
+            return reference;
+        }
+        var identity = stored with { PrivateKey = Convert.ToBase64String(SecretProtectors.Unprotect(stored.PrivateKey, Root, Protector)) };
+        if (SecretProtectors.KindOf(stored.PrivateKey) != Protector.Kind || wasSealed != Protector.SealsFiles) TryMigrate(() => SaveIdentity(identity));
         return identity;
     }
 
     public void SaveIdentity(DeviceIdentity identity) =>
-        WriteSecret(IdentityPath, JsonSerializer.SerializeToUtf8Bytes(
-            identity with { PrivateKey = Protector.Protect(DeviceKeyId, Convert.FromBase64String(identity.PrivateKey)) }, Json));
+        WriteSecret(IdentityPath, Seal("identity", JsonSerializer.SerializeToUtf8Bytes(identity with
+        {
+            PrivateKey = SoftwareDeviceKeys.Instance.Owns(identity.PrivateKey)
+                ? Protector.Protect(DeviceKeyId, Convert.FromBase64String(identity.PrivateKey))
+                : KeyReferencePrefix + identity.PrivateKey,
+        }, Json)));
+
+    /// <summary>A whole file through the protector, when it seals files (<see cref="ISecretProtector.SealsFiles"/>).</summary>
+    private byte[] Seal(string id, byte[] json) =>
+        Protector.SealsFiles ? System.Text.Encoding.ASCII.GetBytes(Protector.Protect(id, json)) : json;
+
+    /// <summary>The JSON of a file written by <see cref="Seal"/>, sealed or not (a store's files move from one to the other).</summary>
+    private string ReadSealed(string text, out bool wasSealed)
+    {
+        var trimmed = text.Trim();
+        wasSealed = !trimmed.StartsWith('{');
+        return wasSealed ? System.Text.Encoding.UTF8.GetString(SecretProtectors.Unprotect(trimmed, Root, Protector)) : text;
+    }
 
     public void DeleteIdentity()
     {
@@ -121,9 +150,9 @@ public sealed class FileClientStore : IClientStore, ITokenCache
     {
         try
         {
-            return File.Exists(TokenPath) ? JsonSerializer.Deserialize<CachedToken>(File.ReadAllText(TokenPath), Json) : null;
+            return File.Exists(TokenPath) ? JsonSerializer.Deserialize<CachedToken>(ReadSealed(File.ReadAllText(TokenPath), out _), Json) : null;
         }
-        catch (Exception e) when (e is JsonException or IOException)
+        catch (Exception e) when (e is JsonException or IOException or FormatException or System.Security.Cryptography.CryptographicException)
         {
             return null; // a damaged cache only costs a sign-in
         }
@@ -131,8 +160,8 @@ public sealed class FileClientStore : IClientStore, ITokenCache
 
     public void SaveToken(CachedToken token)
     {
-        try { WriteSecret(TokenPath, JsonSerializer.SerializeToUtf8Bytes(token, Json), unique: true); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* the token stays in memory */ }
+        try { WriteSecret(TokenPath, Seal("token", JsonSerializer.SerializeToUtf8Bytes(token, Json)), unique: true); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) { /* the token stays in memory */ }
     }
 
     private string KeyPath(int folderId) => Path.Combine(Root, "keys", $"{folderId}.key");
@@ -143,7 +172,7 @@ public sealed class FileClientStore : IClientStore, ITokenCache
     {
         if (!File.Exists(KeyPath(folderId))) return null;
         var stored = File.ReadAllText(KeyPath(folderId)).Trim();
-        var keys = SecretProtectors.Unprotect(stored, Root);
+        var keys = SecretProtectors.Unprotect(stored, Root, Protector);
         if (SecretProtectors.KindOf(stored) != Protector.Kind) TryMigrate(() => SaveRepositoryKeys(folderId, keys));
         return keys;
     }

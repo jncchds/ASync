@@ -53,13 +53,15 @@ src/
   ASync.Contracts/        DTOs and enums shared by server and clients (no deps). Single source of truth for the API.
   ASync.Core/             Domain models, repository interfaces, pure logic (Security/Codes, Security/DeviceKeys)
   ASync.Engine/           storage interface + LocalBackend, chunking (FastCDC), crypto, repository format, backup/restore,
-                          retention/prune/check, plain layout. BCL-only: shared by the server and every client
+                          retention/prune/check, plain layout, Local/ (ILocalTree: the device's file tree). BCL-only:
+                          shared by the server and every client
   ASync.Storage/          remote back-ends: S3, WebDAV, SFTP, SMB + factory and connection test
   ASync.Infrastructure/   EF Core (AppDbContext, Migrations/), Repositories/
   ASync.Api/              Controllers/, Auth/, Services/, HostedServices/, Program.cs; wwwroot/ = built SPA
   async-ui/               React 19 + Vite 8 + TS: axios api.ts, react-router 7, one index.css
   ASync.Tests/            xUnit, hand-written fakes
-  ASync.Client.Core/      device side: identity/store (Secrets/: file, DPAPI, Keychain), API client, RemoteStorageBackend,
+  ASync.Client.Core/      device side: identity/store (Secrets/: file, DPAPI, Keychain), device keys (IDeviceKeyStore,
+                          DER → P1363), API client, RemoteStorageBackend,
                           FolderSyncer, BackupJob, SyncAgent, RunProgress
   ASync.Agent.Control/    the agent's local control channel: versioned JSON-lines protocol, endpoint (Unix socket /
                           named pipe), ControlClient, ControlServer. BCL + System.Text.Json source generation only, so the
@@ -71,12 +73,15 @@ src/
                           init-encryption, unlock, snapshots, restore (also offline: --repo), prune, check, forget,
                           service install/uninstall/status/run. References ASync.Storage for offline restores
   ASync.App/              Avalonia 12 shared UI (CommunityToolkit.Mvvm): views, view models, theme (the web UI's tokens),
-                          Services/ (IAgentConnector over ASync.Agent.Control, IAgentServiceManager, IPlatformServices)
+                          Services/ (IAgentConnector over ASync.Agent.Control or in-process, IAgentServiceManager,
+                          IPlatformServices)
   ASync.App.Desktop/      Win/Linux/macOS head (async-desktop): window, tray, single instance, start at login,
                           notifications, installs the agent service; also *is* the service (`async-desktop service run`)
   ASync.App.Tests/        xunit v3: view models with a fake agent, views in Avalonia.Headless
   ASync.App.iOS/          (later) PhotoKit, Contacts, EventKit, BGTaskScheduler, APNs, background URLSession
-  ASync.App.Android/      (later) MediaStore, Contacts/CalendarProvider, WorkManager, FCM/UnifiedPush
+  ASync.App.Android/      Android head (M4-1): the agent in-process, Android Keystore keys and sealed store, SAF trees,
+                          QR scanner, async://pair links (not in ASync.slnx: needs the android workload). Later:
+                          MediaStore, Contacts/CalendarProvider, WorkManager, UnifiedPush
   ASync.Push/             (later) APNs/FCM/UnifiedPush sender, used by the server (direct mode) and the relay
   ASync.PushRelay/        (later) ASync.Push behind POST /v1/wake, Docker image async-push-relay
 relay/cloudflare-worker/  (later) the same relay in TypeScript for free Cloudflare Workers (our hosted relay)
@@ -87,6 +92,8 @@ scripts/
   e2e-sync.sh / .cs       end-to-end sync test: throw-away server stack + real async-cli agents (local and Docker)
   smoke-agent-service.sh  the agent as a real systemd user service: install, sync, restart, uninstall (Linux)
   smoke-desktop.sh        the real desktop app under Xvfb with the real agent service and server stack (Linux)
+  package-android.sh      the Android APK (and AAB): both ABIs, signed (release keystore from CI secrets, else debug)
+  smoke-android.sh        the Android app on an emulator: enroll, the system folder picker, SAF sync both ways, backup
   test-backends-env.sh    ASYNC_TEST_* variables for the containers of docker-compose.test.yml
 ```
 
@@ -217,7 +224,8 @@ Planned (none of this exists yet):
 ## Device provisioning
 
 A device generates an ECDSA P-256 key pair and keeps the private key in the OS keystore. That is the Secure
-Enclave or Keychain on Apple platforms, the Android Keystore on Android, DPAPI on Windows, and libsecret or a
+Enclave or Keychain on Apple platforms, the Android Keystore on Android (generated inside it, non-exportable, StrongBox
+or TEE; its DER signatures converted to P1363: see "Android app (M4-1)"), DPAPI on Windows, and libsecret or a
 0600 file on Linux and the CLI. The server stores only the public key, as base64 SubjectPublicKeyInfo. The
 code lives in `Services/DeviceProvisioningService.cs` (API: `DevicesController` for people,
 `DeviceAuthController` for devices).
@@ -1352,6 +1360,134 @@ under Xvfb with B's release folder as the feed, installs the agent from the app 
 B (banner, tray, Settings), installs it, and checks the app and the agent both run B (a new agent process), then
 `uninstall` and `uninstall --remove-data`.
 
+## Local file trees (M4-1)
+
+What a device syncs or backs up is an `ILocalTree` (`ASync.Engine/Local/LocalTree.cs`), not a directory path, so the same
+`FolderSyncer`, `BackupRunner` and `BackupJob` work on Android's Storage Access Framework, where folders are content URIs
+and files are reached through a documents provider. The engine format is unchanged: only where the bytes come from.
+
+- **Shape:** paths relative to the tree's root with `/` (`""` is the root), always through `StoragePath.Normalize`.
+  `List(dir)` (entries: name, kind file/directory/symlink, size, modified in Unix ms, link target, Unix mode), `Stat`,
+  `OpenRead`, `OpenAppend` (creates the file and its parents; how partial downloads continue), `Move(from, to, overwrite)`
+  (creates the target's parents), `DeleteFile`, `DeleteDirectory`, `TrySetModified` with `CanSetModified`, `Exists`,
+  `Location` (for messages), `Name` (the default snapshot source) and `FileSystemPath` (for the file watcher; null when
+  the tree is not on a file system). A directory that cannot be listed throws (`UnauthorizedAccessException`,
+  `DirectoryNotFoundException`): it must never look empty, or a sync would delete its files elsewhere.
+- **Implementations:** `FileSystemTree` (desktop, CLI: exactly the old behaviour; symlinks reported, never followed) and
+  `SafTree` in the Android head. `ILocalTreeFactory` opens a folder's local path (`FileSystemTreeFactory`, or
+  `AndroidTreeFactory`: content URIs → `SafTree`, paths → `FileSystemTree`) and validates a new one (`set-path`).
+  `SyncAgent.LocalTrees`/`AgentOptions.LocalTrees` choose it.
+- **Changes in the syncer:** the local trash's age comes from its directory's name (the deletion time it is named after),
+  else its modification time, not the creation time (trees do not all have one); a tree that cannot set modification
+  times keeps the download's own time, which the sync state records, so nothing looks changed on the next run (tested:
+  `LocalTreeTests.TwoWay_OnATreeWithoutModificationTimes_DoesNotSeeFalseChanges`).
+- **Contract tests:** `src/ASync.Tests/Local/LocalTreeContract.cs` is plain C# (no test framework): xUnit runs it against
+  `FileSystemTree`, and the Android app links the same file and runs it against `SafTree` on a device (automation command
+  `selftest`, in `scripts/smoke-android.sh`).
+- **Restores** still write to a directory (`RestoreRunner`): restoring into a SAF tree is not needed yet (the CLI and the
+  web UI restore; the phone's own restore comes with the documents provider below).
+
+## Android app (M4-1)
+
+`src/ASync.App.Android` (net10.0-android, API 26+, application id `ua.pp.chds.async`) is the Avalonia Android head of the
+shared `ASync.App`. M4-1 is the foreground app: enroll, show and sync folders while it runs. Background scheduling
+(WorkManager, a foreground service), UnifiedPush, photos/contacts/calendars are the next tasks. It is not in `ASync.slnx`
+(the `android` workload would be needed for every build): `scripts/package-android.sh` or
+`dotnet build src/ASync.App.Android`.
+
+**The agent runs in the app's process** (`AndroidAgent`): the same `AgentRuntime` as the desktop service, created once per
+process by `AndroidApplication.OnCreate`, with `AgentOptions.ControlChannel = false` (no socket: nothing outside the
+process talks to it), `WaitForIdentity`, the Keystore protector and device keys, and `AndroidTreeFactory`. The shared view
+models reach it through `InProcessAgentConnector` (`ASync.App/Services/InProcessAgent.cs`): an `IAgentConnector` over the
+runtime's `IControlHandler` and its `ControlEventHub` (the hub `ControlServer` now uses for its `subscribe` connections
+too). It behaves like the control channel: the same refusals of missing fields, every error as a `ControlException` with
+the agent's message, cancellation as cancellation, a status first then the events, the stream ending when the agent stops
+(`ControlEventHub.Complete`), a slow subscriber losing its oldest events. Several sessions may be open at once; none owns
+the agent. That is what the next tasks plug into: a foreground service or WorkManager job calls `AndroidAgent.EnsureStarted`
+and `Runtime.SyncAsync`, the UI keeps its own session. A device run that throws (a key gone from the Keystore, say) no
+longer ends a waiting agent: it is retried after `RestartDelay` (30 s) or when the identity changes, its message as the
+status's problem (on the desktop a service manager restarted the process instead).
+
+**Device identity:**
+- `IDeviceKeyStore` (`ASync.Client.Core/DeviceKeys.cs`) makes the key of a new enrollment and signs challenges;
+  `AsyncApiClient.DeviceKeys` uses it. `SoftwareDeviceKeys` is the PKCS#8 key as before. `KeystoreDeviceKeys` generates
+  an EC P-256 key in the Android Keystore (`KeyGenParameterSpec`, SIGN, SHA-256 only, StrongBox when the phone has one,
+  else the TEE; the emulator's Keystore is software), never exportable. The identity's `PrivateKey` then holds only
+  `androidkeystore:<alias>`; the store writes it as `ref:androidkeystore:<alias>`. A key the keystore does not own (an
+  identity from before) still signs in memory.
+- Java's `SHA256withECDSA` returns DER; the server checks IEEE P1363 (`DeviceAuthMessage` signatures, "Device
+  provisioning"). `EcdsaSignatures.DerToP1363` converts (strict: one SEQUENCE of two positive INTEGERs no longer than the
+  field, minimal lengths), unit-tested against .NET's own DER signatures and malformed input.
+- Sign-out (`forget`) and a replaced revoked identity delete the Keystore key; a failed enrollment deletes the key it made.
+- **The store is sealed:** `KeystoreSecretProtector` keeps an AES-256-GCM key in the Keystore (non-exportable) and writes
+  `androidks:<id>:base64(IV ‖ ciphertext ‖ tag)` with the id as associated data. `ISecretProtector.SealsFiles` makes
+  `FileClientStore` seal whole files with it (identity.json, token.json), not only the secrets in them, and
+  `TryUnprotect` lets a platform protector read its own format; files written another way are read and rewritten sealed.
+  The unlocked keys of end-to-end folders go through it as before (`keys/<folder>.key`). The store lives in the app's
+  private files (`files/async`); `allowBackup` is off.
+
+**Enrollment** (the shared `EnrollViewModel`): server and code, a pasted `async://pair` link, an *opened* one (the activity's
+intent filter for `async://pair`; `MainActivity` hands it to `EnrollViewModel.ApplyLink`), *Scan the QR code*
+(`IPlatformServices.ScanQrCode`, shown when the platform has a camera: `QrScanActivity` decodes the camera's preview frames
+with ZXing.Net, no Google Play services; the old `android.hardware.Camera` API, on every version without AndroidX camera
+libraries) which enrolls at once, and the device-code flow. Plain `http://` servers work (`usesCleartextTraffic`, as the
+desktop allows them).
+
+**Folders on SAF:** *Choose folder…* opens ACTION_OPEN_DOCUMENT_TREE (`AndroidPlatform.PickFolderAsync`), takes the
+persisted read/write permission and releases the replaced folder's; the local path stored on the server is the tree's
+content URI, shown as "Internal storage › Sync" (`IPlatformServices.DisplayPath`). `SafTree` resolves paths name by name
+through `DocumentsContract` (child queries; a small id cache dropped on any miss), opens files as file descriptors
+(`FileStream` over the `ParcelFileDescriptor`), creates directories and files, renames and moves (`moveDocument`; copy and
+delete where a provider cannot move), deletes. SAF limits and how they are handled:
+- modification times cannot be set through SAF: `TrySetModified` tries `futimens` on the descriptor once, checks it
+  stuck, and otherwise says so (`CanSetModified` false); see "Local file trees" for why the sync does not mind;
+- a provider renaming a file on create or rename (FAT rules turn `:`, `?`… into `_`; " (1)" on clashes) is detected and that
+  file fails with an `IOException` instead of landing under another name;
+- no file-change events: such folders sync on their interval and on *Sync now* (a `ContentObserver` could come later);
+- Android changes a new file's modification time a few seconds after it was closed (seen on the emulator: the media
+  scanner/FUSE layer). A run in between uploads the file, and the next run sees it "changed" and uploads it again: same
+  content, one more version on the server, nothing lost. Left open: a settle time for files modified moments ago (the
+  smoke test waits for new files to settle);
+- a revoked permission or a deleted folder makes `Exists()` false: the run fails with "Choose the folder again".
+
+**Platform:** `AndroidPlatform` (`IPlatformServices`): the phone's name (Settings → device name, else the model), links in
+the browser, *Open folder* in the Files app (best effort), notifications on a channel (Android 13's permission asked when
+the first one is due), the theme, no start at login; `DeviceNoun` "phone" for the texts. The Back button closes the dialog,
+then the settings, then the message, then leaves (`ShellViewModel.GoBack`). Layouts are the shared ones (360 px tested
+headless on the desktop); the activity handles rotation and keyboard changes itself (one view model per process).
+
+**Build and signing:** `scripts/package-android.sh` builds Release (`TrimMode=partial`: only the framework is trimmed, so
+the client library's reflection JSON keeps working, with `JsonSerializerIsReflectionEnabledByDefault`), one APK for
+android-arm64 and android-x64 (52.8 MB; x64 alone 28 MB), `--aab` an App Bundle too, the version from `VERSION`
+(versionCode major·10000 + minor·100 + patch). Signed by the release keystore when `ASYNC_ANDROID_KEYSTORE`… are set (CI:
+secrets), else by the SDK's debug keystore. Two build quirks: `UseDefaultPublishRuntimeIdentifier=false` (otherwise the SDK
+adds linux-x64 to a trimmed Release build's RIDs and asks for a Mono pack that does not exist), and the ABI list comes as
+`AndroidAbis` with commas through the environment (a `-p:` would split it; property functions escape `;`, hence the
+`[MSBuild]::Unescape`).
+
+**Automation (tests only):** `Automation` is a broadcast receiver that only a sender holding `android.permission.DUMP` may
+reach (the adb shell, the system: no installable app can hold it): `adb shell am broadcast -n ua.pp.chds.async/
+ua.pp.chds.async.Automation -a ua.pp.chds.async.AUTOMATION --es cmd state`, answered in the result data (state as JSON,
+enroll, link, device code, scan, choose a folder — the real picker —, sync (answers a ticket; `run <ticket>` gives that
+very run's result, since the agent also syncs by itself), pause/resume, unlock, theme, settings, back, `keyinfo`,
+`selftest`, `stat`). Android 14+ does not let the shell enable a disabled component of a release build, so the permission
+is the lock.
+
+**Tests:** `ASync.Tests`: `LocalTreeTests` (the contract on `FileSystemTree`, symlinks, a tree without modification times
+through TwoWay sync with conflicts, a backup from any tree restored), `DeviceKeyStoreTests` (DER → P1363, keystore-held
+keys signing, sealed store files, migration to sealed); `ASync.App.Tests`: `InProcessAgentTests` (requests, refusals,
+errors, cancellation, the event stream and its end, a slow subscriber, no agent, the shell on a real `AgentRuntime` without
+a channel, the QR scan, opened links, Back, content-URI folders). `scripts/smoke-android.sh` (emulator; see the script's
+header and "Milestones" for what it covers).
+
+**Where a virtual file system plugs in (planned after M4-1):** an Android `DocumentsProvider` exposing the person's ASync
+folders in the Files app and pickers, fetching files on demand. It runs in the app's process, so it reaches the same agent
+(`AndroidAgent.EnsureStarted`, then the runtime or an `InProcessAgentConnector` session) and the device's signed-in
+`AsyncApiClient`; Mirror/TwoWay files come through `RemoteStorageBackend`/`PlainStore` (the storage gateway), Backup
+snapshots read-only through `Repository` (as `async-cli restore` reads them). Nothing in the agent, the gateway client or
+`ILocalTree` assumes the UI is the only caller or that everything is on local disk. The desktop equivalents (Windows Cloud
+Files API, macOS/iOS File Provider, Linux FUSE) would sit next to the agent service the same way.
+
 ## Background work and wake-ups (M3–M4)
 
 Planned, except for the desktop agent service ("Agent service and control channel"), the server's overdue
@@ -1566,9 +1702,16 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
     download table (`gh release create --draft --verify-tag`; a re-run uploads with `--clobber`). Installed apps only
     see published releases, so a person reviews and publishes it.
   - Docker images are published as before; the workflow is validated with `actionlint` (and shellcheck).
+- **Android** (job `android`, `ubuntu-24.04`, pull requests, tags and manual runs): .NET 10 with the `android` workload,
+  Temurin 17, the SDK parts from the project's `InstallAndroidDependencies`, then `scripts/package-android.sh --aab`;
+  uploads `packages-android` (the APK and AAB). The release keystore comes from the secrets `ANDROID_KEYSTORE` (base64),
+  `ANDROID_KEY_ALIAS`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_PASSWORD` when they exist (`HAS_ANDROID_KEYSTORE`); without
+  them the APK is signed with the runner's debug keystore, so each build has another signature and cannot update an
+  installed one. `release` waits for it and attaches the APK and AAB (no Velopack feed: the loop skips them). The emulator
+  smoke test is not in CI (no KVM on the standard runners); it is run by hand.
 - **Not yet:** winget/Homebrew/Flathub listings, an apt/dnf repository (the .deb/.rpm are downloads), MSIX.
 - **iOS:** TestFlight and the App Store.
-- **Android:** a Play AAB, plus an APK/F-Droid flavor that uses UnifiedPush.
+- **Android:** the sideloadable APK (above) for now; later a Play AAB and an F-Droid build, both with UnifiedPush.
 
 ## Milestones and current stage
 
@@ -1582,7 +1725,7 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
    (enroll, Backup, Mirror, TwoWay, end-to-end encryption, restore), the `async-cli` Docker image, the
    end-to-end test in CI, and the web UI for folders and for browsing and downloading snapshots.
    "Before M3: gaps to close" is done too (items 1–7).
-4. **M3 — desktop app:** Avalonia, background service, tray, installers, auto-update. **← current stage.**
+4. **M3 — desktop app (done):** Avalonia, background service, tray, installers, auto-update.
    - **M3-1 agent service (done):** the agent as a systemd/launchd/Task Scheduler/Windows service
      (`async-cli service`), the local control channel (`ASync.Agent.Control`), CLI routing and the single-instance
      lock, progress reporting, secrets in DPAPI and the Keychain. Verified on Linux (unit tests, smoke test with a
@@ -1603,7 +1746,22 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
      and macOS packages are only built in CI, never installed or run (Setup.exe, the uninstall hook, toasts under the app
      id, the .pkg/.dmg, `LSUIElement`, their updates). Left open: signing certificates, store/repository listings.
 5. **M4 — mobile:** iOS and Android heads, photos, contacts and calendars, BG tasks, push relay, wake-ups for
-   overdue devices.
+   overdue devices. **← current stage.**
+   - **M4-1 Android app foundation (done):** `ASync.App.Android` with the agent in-process (`InProcessAgentConnector`,
+     `ControlEventHub`), the device key in the Android Keystore and the store sealed with a Keystore AES key, the local
+     file tree abstraction (`ILocalTree`) with a SAF implementation, enrollment by code, link, QR scan and device code,
+     foreground sync, the APK build and CI job (see "Android app (M4-1)" and "Local file trees"). Verified on an Android 15
+     x86_64 emulator (software Keystore, no StrongBox) against a real server stack: `scripts/smoke-android.sh`, 45 checks
+     (device code, an opened pairing link, the scanner opening, enroll by code with the Keystore signature accepted, the
+     sealed store, the real system picker with Allow, the tree contract 14/14 on SAF, TwoWay both ways with a second
+     device including an edit, a delete and a 200 MB file, an idempotent second run, pause/resume, Back, a Backup folder
+     restored byte for byte by `async-cli`, a restart). Only compiled: the arm64 build, StrongBox and TEE keys (no such
+     hardware in the emulator), decoding a real QR code with the camera (the emulator's camera shows a synthetic
+     scene; the decoder path is shared with nothing else), notifications, Open folder in a Files app. Found on the way:
+     on the emulator a request in flight failed as soon as the app went to the background (the system logged "Destroyed
+     live tcp sockets" for its uid), so syncing with the app closed needs the foreground service/WorkManager of the next
+     task; a fresh install's first connection can be cut the same way (the smoke test waits a moment).
+     Next: background work (WorkManager, a foreground service), UnifiedPush, then a DocumentsProvider.
 6. **M5 — hardening:** OpenTelemetry, and whatever is left of the gap list below. Later: Google Drive,
    OneDrive and Dropbox adapters.
 

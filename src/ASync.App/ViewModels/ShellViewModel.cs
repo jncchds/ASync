@@ -395,6 +395,31 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     public void CloseSettings() => SettingsPage = null;
 
+    /// <summary>
+    /// The system's back gesture (Android's back button): closes the dialog (cancelled, its secret cleared), else the
+    /// settings, else the message. False when there is nothing to close: the head then lets the system go back.
+    /// </summary>
+    public bool GoBack()
+    {
+        if (Dialog is { } dialog)
+        {
+            dialog.CancelCommand.Execute(null);
+            Dialog = null;
+            return true;
+        }
+        if (SettingsPage is not null)
+        {
+            CloseSettings();
+            return true;
+        }
+        if (Message is not null)
+        {
+            ShowMessage(null);
+            return true;
+        }
+        return false;
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _stop.CancelAsync();
