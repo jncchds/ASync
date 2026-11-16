@@ -95,6 +95,17 @@ public sealed class ControlClient : IAsyncDisposable
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.DeviceCode, Server = server, Name = name, Platform = platform }, ct)).Enrollment
         ?? throw new InvalidDataException("No enrollment in the answer.");
 
+    public async Task<string> SetConditionsAsync(int folderId, RunConditionsDto conditions, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.SetConditions, FolderId = folderId, Conditions = conditions }, ct)).Message ?? "";
+
+    /// <summary>Sets up a new end-to-end folder; returns its recovery key.</summary>
+    public async Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.InitEncryption, FolderId = folderId, Secret = passphrase }, ct)).RecoveryKey
+        ?? throw new InvalidDataException("No recovery key in the answer.");
+
+    public async Task<string> CancelAsync(int? folderId, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.Cancel, FolderId = folderId }, ct)).Message ?? "";
+
     /// <summary>Forgets this device's identity (sign out of this device).</summary>
     public async Task<string> ForgetAsync(CancellationToken ct = default) =>
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.Forget }, ct)).Message ?? "";

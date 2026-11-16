@@ -56,6 +56,7 @@
   <ItemGroup>
     <PackageReference Include="Avalonia.Android" />
     <PackageReference Include="ZXing.Net" />
+    <PackageReference Include="Xamarin.AndroidX.Work.Runtime" />
   </ItemGroup>
 
   <ItemGroup>

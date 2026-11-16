@@ -22,7 +22,7 @@
 
         <WrapPanel ItemSpacing="16" LineSpacing="4" IsVisible="{Binding IsNotWaiting}">
           <RadioButton Classes="choice" GroupName="method" Name="UseCode" Content="I have a code" IsChecked="{Binding UseCode}" />
-          <RadioButton Classes="choice" GroupName="method" Name="UseDeviceCode" Content="Approve in the browser" IsChecked="{Binding UseDeviceCode}" />
+          <RadioButton Classes="choice" GroupName="method" Name="UseDeviceCode" Content="{Binding DeviceCodeLabel}" IsChecked="{Binding UseDeviceCode}" />
         </WrapPanel>
 
         <!-- A code from Devices → Add device (or the pairing link of its QR code). -->
@@ -41,16 +41,16 @@
         <!-- The device-code flow: start, show the code, wait. -->
         <StackPanel Spacing="10" IsVisible="{Binding UseDeviceCode}">
           <StackPanel Spacing="10" IsVisible="{Binding IsNotWaiting}">
-            <TextBlock Classes="muted" Text="The browser opens the server's approval page; sign in there and approve this device." />
+            <TextBlock Classes="muted" Text="{Binding DeviceCodeIntro}" TextWrapping="Wrap" />
             <Button Name="StartDeviceCode" Content="Get a code" Command="{Binding StartDeviceCodeCommand}" HorizontalAlignment="Left" />
           </StackPanel>
           <Border Classes="notice info" IsVisible="{Binding IsWaiting}">
             <StackPanel Spacing="8">
-              <TextBlock Text="Check that the approval page shows this code, then approve it:" />
               <TextBlock Classes="code" Name="UserCode" Text="{Binding Pending.UserCode}" />
+              <TextBlock Name="ApproveHint" Text="{Binding ApproveHint}" TextWrapping="Wrap" />
               <TextBlock Classes="muted small" Text="{Binding ExpiresText}" />
               <WrapPanel ItemSpacing="8" LineSpacing="8">
-                <Button Classes="small" Content="Open the approval page" Command="{Binding OpenApprovalLinkCommand}" />
+                <Button Classes="small" Content="Open the approval page" Command="{Binding OpenApprovalLinkCommand}" IsVisible="{Binding OffersWebUi}" />
                 <Button Classes="small secondary" Name="CancelPending" Content="Cancel" Command="{Binding CancelPendingCommand}" />
               </WrapPanel>
               <StackPanel Orientation="Horizontal" Spacing="8">

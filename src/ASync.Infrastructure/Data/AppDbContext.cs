@@ -51,6 +51,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(d => d.Name).HasMaxLength(100);
             e.Property(d => d.Platform).HasConversion<string>().HasMaxLength(20);
+            e.Property(d => d.PushTarget).HasMaxLength(2000);
+            e.Property(d => d.PushType).HasConversion<string>().HasMaxLength(20);
+            e.Property(d => d.LastPushError).HasMaxLength(500);
             e.HasOne(d => d.User).WithMany(u => u.Devices).HasForeignKey(d => d.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

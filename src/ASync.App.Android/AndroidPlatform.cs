@@ -41,6 +41,9 @@ public sealed class AndroidPlatform(Func<MainActivity?> activity) : IPlatformSer
 
     public string DeviceNoun => "phone";
 
+    /// <summary>Everything a phone needs is in the app; the web UI is for a computer.</summary>
+    public bool OffersWebUi => false;
+
     public Task OpenUrlAsync(string url)
     {
         try
@@ -141,6 +144,11 @@ public sealed class AndroidPlatform(Func<MainActivity?> activity) : IPlatformSer
     }
 
     public void ApplyTheme(ThemeChoice theme) => App.ApplyTheme(theme);
+
+    /// <summary>Android checks all three run conditions.</summary>
+    public string? ConditionsNote => null;
+
+    public IBackgroundServices? Background => AndroidBackgroundServices.Instance;
 
     public bool SupportsStartAtLogin => false;
     public bool IsStartAtLoginEnabled() => false;

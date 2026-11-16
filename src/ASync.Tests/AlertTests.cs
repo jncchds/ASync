@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using ASync.Api.Services;
 using ASync.Api.Services.Alerts;
+using ASync.Api.Services.Push;
 using ASync.Contracts;
 using ASync.Core.Alerts;
 using ASync.Core.Interfaces;
@@ -478,6 +479,7 @@ public class AlertTests
         public readonly AlertMonitor Monitor;
         public readonly FakeUsageRepository Usage;
         public readonly FakeStorageBackends Backends = new();
+        public readonly PushQueue Push = new();
 
         public Harness(bool smtp = false)
         {
@@ -493,7 +495,7 @@ public class AlertTests
                 PushSettings.FromConfiguration(config), config, Clock);
             Usage = new FakeUsageRepository(Folders);
             Monitor = new AlertMonitor(Folders, Users, Alerts, Service, Sender, options, new ServerStarted(LongAgo), Notifier, Clock,
-                NullLogger<AlertMonitor>.Instance, Usage, Backends, new UsageOptions(config), new HealthOptions(config));
+                NullLogger<AlertMonitor>.Instance, Usage, Backends, new UsageOptions(config), new HealthOptions(config), Push);
         }
 
         public DateTime Now => Clock.GetUtcNow().UtcDateTime;
@@ -555,16 +557,22 @@ public class AlertTests
         var policy = h.Service.PolicyFor(saved);
         Assert.Equal((2.0, TimeSpan.FromHours(1), 3, TimeSpan.Zero), (policy.GraceFactor, policy.MinimumGrace, policy.FailureThreshold, policy.Reminder));
         Assert.Equal(new AlertDefaultsDto(3, 4, 3, 24), h.Service.ToDto(saved).Defaults);
-        Assert.Equal("None", h.Service.ToDto(saved).PushMode);
+        Assert.Equal("UnifiedPush", h.Service.ToDto(saved).PushMode);
     }
 
     [Fact]
-    public void Push_mode_defaults_to_None_and_other_modes_fall_back_with_a_warning()
+    public void Push_mode_defaults_to_UnifiedPush_and_relay_modes_fall_back_with_a_warning()
     {
-        Assert.Equal(new PushSettings(PushMode.None, null), PushSettings.FromConfiguration(new ConfigurationBuilder().Build()));
-        var relay = PushSettings.FromConfiguration(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Push:Mode"] = "Relay" }).Build());
-        Assert.Equal(PushMode.None, relay.Mode);
+        static PushSettings Read(string? mode) => PushSettings.FromConfiguration(
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Push:Mode"] = mode }).Build());
+        Assert.Equal((PushMode.UnifiedPush, (string?)null), (Read(null).Mode, Read(null).Warning));
+        Assert.Equal((PushMode.None, (string?)null), (Read("none").Mode, Read("none").Warning));
+        Assert.False(Read("None").UnifiedPush);
+        var relay = Read("Relay");
+        Assert.Equal(PushMode.UnifiedPush, relay.Mode);
         Assert.Contains("not available yet", relay.Warning);
+        Assert.Contains("not a known mode", Read("Pigeon").Warning);
+        Assert.Contains("not a known mode", Read("2").Warning);
     }
 
     // ── A monitor pass, end to end with fakes ─────────────────────────────────
@@ -608,6 +616,28 @@ public class AlertTests
         await h.Monitor.RunAsync(default);
         Assert.True(h.Sender.Sent[^1].Message.Payload.Reminder);
         Assert.Equal(3, h.Sender.Sent.Count);
+    }
+
+    [Fact]
+    public async Task The_monitor_queues_a_wake_up_for_each_overdue_device_on_every_pass_and_none_once_it_recovered()
+    {
+        var h = new Harness();
+        var (folder, member) = NewFolder();
+        h.Folders.Folders.Add(folder);
+        Succeeded(member, h.Now);
+        await h.Monitor.RunAsync(default);
+        Assert.False(h.Push.Reader.TryRead(out _));
+
+        h.Clock.Advance(TimeSpan.FromHours(5));
+        await h.Monitor.RunAsync(default);
+        Assert.True(h.Push.Reader.TryRead(out var wake));
+        Assert.Equal((member.DeviceId, PushWake.Overdue), (wake.DeviceId, wake.Reason));
+        await h.Monitor.RunAsync(default); // queued again: PushService's throttle decides how often one is sent
+        Assert.True(h.Push.Reader.TryRead(out _));
+
+        Succeeded(member, h.Now);
+        await h.Monitor.RunAsync(default);
+        Assert.False(h.Push.Reader.TryRead(out _));
     }
 
     [Fact]

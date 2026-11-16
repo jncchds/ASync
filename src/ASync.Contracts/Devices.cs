@@ -6,7 +6,33 @@ namespace ASync.Contracts;
 
 public record DeviceDto(
     Guid Id, string Name, DevicePlatform Platform, string? AppVersion,
-    DateTime CreatedAt, DateTime? LastSeenAt, DateTime? RevokedAt);
+    DateTime CreatedAt, DateTime? LastSeenAt, DateTime? RevokedAt, DevicePushDto? Push = null);
+
+// ── Push (wake-ups, M4-2) ─────────────────────────────────────────────────────
+
+/// <summary>How the server can wake a device. Only UnifiedPush so far (relay, APNs and FCM later).</summary>
+public enum PushTargetType { UnifiedPush }
+
+/// <summary>
+/// A device registering where it can be woken (<c>PUT /api/sync/push</c>, device token): for UnifiedPush the endpoint its
+/// distributor gave it. <c>DELETE /api/sync/push</c> removes it.
+/// </summary>
+public record PushTargetRequest(PushTargetType Type, string Endpoint);
+
+/// <summary>
+/// A device's push registration as people see it: the endpoint's host only (the full URL can wake the device), and the
+/// last wake-up. <paramref name="Enabled"/>: the server's <c>Push__Mode</c> sends wake-ups of this type.
+/// </summary>
+public record DevicePushDto(PushTargetType Type, string Host, DateTime RegisteredAt, DateTime? LastWakeAt, bool? LastWakeOk, string? LastWakeError,
+    bool Enabled);
+
+/// <summary>The body of a wake-up (no user data): <c>{"async":"wake","reason":"changed"|"overdue"|"test"}</c>.</summary>
+public static class PushWake
+{
+    public const string Changed = "changed";
+    public const string Overdue = "overdue";
+    public const string Test = "test";
+}
 
 public record RenameDeviceRequest(string Name);
 

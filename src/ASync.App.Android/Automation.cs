@@ -30,6 +30,20 @@ public sealed class Automation : BroadcastReceiver
     {
         var command = intent?.GetStringExtra("cmd") ?? "state";
         var pending = GoAsync()!;
+        if (command.StartsWith("bg", StringComparison.Ordinal))
+        {
+            // Background commands work without the UI (a process WorkManager started, the app swiped away).
+            _ = Task.Run(async () =>
+            {
+                string answer;
+                try { answer = await BackgroundCommandAsync(context!.ApplicationContext ?? context, command); }
+                catch (Exception e) { answer = $"error: {e.GetType().Name}: {e.Message}"; }
+                pending.ResultCode = Result.Ok;
+                pending.ResultData = answer;
+                pending.Finish();
+            });
+            return;
+        }
         Dispatcher.UIThread.Post(async () =>
         {
             string answer;
@@ -134,6 +148,33 @@ public sealed class Automation : BroadcastReceiver
             case "unlock":
                 Folder(arg).UnlockCommand.Execute(null);
                 return "dialog open";
+            case "setup":
+                Folder(arg).SetUpEncryptionCommand.Execute(null);
+                return shell.Dialog is { IsSetup: true } ? "dialog open" : "no setup dialog";
+            case "setup-passphrase":
+            {
+                // The passphrase typed twice and Set up; answers the recovery key the dialog shows (or its error).
+                if (shell.Dialog is not { IsSetup: true } setupDialog) return "no setup dialog";
+                setupDialog.Secret = arg;
+                setupDialog.Confirm = arg;
+                await setupDialog.SetUpCommand.ExecuteAsync(null);
+                return setupDialog.RecoveryKey ?? $"error: {setupDialog.Error}";
+            }
+            case "setup-done":
+                if (shell.Dialog is not { HasRecoveryKey: true } done) return "no recovery key shown";
+                done.DoneCommand.Execute(null);
+                return shell.Message ?? "ok";
+            case "editconditions":
+            {
+                // Opens the folder's run-conditions editor, or closes it when open.
+                var folder = Folder(arg);
+                if (folder.EditingConditions) folder.CancelConditionsCommand.Execute(null);
+                else folder.EditConditionsCommand.Execute(null);
+                return folder.EditingConditions ? "editor open" : "editor closed";
+            }
+            case "refresh":
+                shell.Background?.Refresh();
+                return "ok";
             case "secret":
                 if (shell.Dialog is not { } dialog) return "no dialog";
                 dialog.Secret = arg;
@@ -155,6 +196,108 @@ public sealed class Automation : BroadcastReceiver
                 return await Task.Run(() => SelfTest(arg));
             default:
                 return $"unknown command \"{op}\"";
+        }
+    }
+
+    /// <summary>
+    /// <c>bg</c>: the background side as JSON (scheduled work, the keeper, push, battery, the conditions now, folders);
+    /// <c>bg-push &lt;package&gt;</c> / <c>bg-unpush</c>: UnifiedPush; <c>bg-wake &lt;reason&gt;</c>: as if a push arrived;
+    /// <c>bg-conditions &lt;folder&gt; &lt;unmetered&gt; &lt;charging&gt; &lt;battery&gt;</c> (0/1); <c>bg-reminder &lt;days&gt;</c>;
+    /// <c>bg-remind-now &lt;folder&gt;</c>: posts that folder's reminder at once; <c>bg-battery</c>: the system's question.
+    /// </summary>
+    private static async Task<string> BackgroundCommandAsync(Context context, string line)
+    {
+        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        AndroidAgent.EnsureStarted(context);
+        var runtime = AndroidAgent.Runtime;
+        switch (parts[0])
+        {
+            case "bg":
+            {
+                var list = AndroidX.Work.WorkManager.GetInstance(context).GetWorkInfosByTag(BackgroundWork.Tag).Get()!.JavaCast<Java.Util.IList>()!;
+                var works = new JsonArray();
+                for (var i = 0; i < list.Size(); i++)
+                {
+                    var w = list.Get(i)!.JavaCast<AndroidX.Work.WorkInfo>()!;
+                    works.Add(new JsonObject
+                    {
+                        ["id"] = w.Id.ToString(),
+                        ["tags"] = string.Join(",", w.Tags.Where(t => !t.Contains('.', StringComparison.Ordinal) && t != BackgroundWork.Tag).Order()),
+                        ["state"] = w.GetState().ToString(),
+                        ["attempts"] = w.RunAttemptCount,
+                        ["next"] = w.NextScheduleTimeMillis,
+                        ["stopReason"] = w.StopReason,
+                    });
+                }
+                // The JobScheduler jobs WorkManager made (the test runs one with `cmd jobscheduler run -f -n <namespace>`): only
+                // this process can read their extras, which name the work.
+                var scheduler = (global::Android.App.Job.JobScheduler)context.GetSystemService(Context.JobSchedulerService)!;
+                var pendingJobs = OperatingSystem.IsAndroidVersionAtLeast(34)
+                    ? scheduler.PendingJobsInAllNamespaces.SelectMany(kv => kv.Value.Select(j => ((string?)kv.Key, j)))
+                    : scheduler.AllPendingJobs.Select(j => ((string?)null, j));
+                var jobs = new JsonArray();
+                foreach (var (ns, job) in pendingJobs)
+                    jobs.Add(new JsonObject { ["id"] = job.Id, ["namespace"] = ns, ["work"] = job.Extras.GetString("EXTRA_WORK_SPEC_ID") });
+                var c = new AndroidConditions(context).Read();
+                var push = UnifiedPush.State(context);
+                return new JsonObject
+                {
+                    ["works"] = works,
+                    ["jobs"] = jobs,
+                    ["keeperRunning"] = TransferKeeperWorker.Running,
+                    ["keeperForeground"] = TransferKeeperWorker.InForeground,
+                    ["push"] = new JsonObject
+                    {
+                        ["distributor"] = push.Distributor, ["endpoint"] = push.HasEndpoint, ["registered"] = push.Registered, ["problem"] = push.Problem,
+                        ["distributors"] = new JsonArray([.. UnifiedPush.Distributors(context).Select(d => (JsonNode?)d.Id)]),
+                    },
+                    ["batteryUnrestricted"] = AndroidBackgroundServices.Instance.IsIgnoringBatteryOptimizations,
+                    ["reminderDays"] = BackgroundState.Load(context).ReminderDays,
+                    ["conditions"] = new JsonObject { ["metered"] = c.Metered, ["charging"] = c.Charging, ["batteryLow"] = c.BatteryLow },
+                    ["deviceRunning"] = runtime.DeviceRunning,
+                    ["folders"] = new JsonArray([.. runtime.Folders.Select(f => (JsonNode?)new JsonObject
+                    {
+                        ["id"] = f.Folder.FolderId, ["name"] = f.Folder.Name, ["activity"] = f.Activity.ToString(), ["waiting"] = f.Waiting,
+                        ["lastMessage"] = f.LastResult?.Message, ["lastAt"] = f.LastRunAt?.ToUnixTimeMilliseconds(),
+                    })]),
+                }.ToJsonString();
+            }
+            case "bg-push":
+                UnifiedPush.Register(context, parts[1]);
+                return "registering";
+            case "bg-unpush":
+                UnifiedPush.Unregister(context);
+                return "unregistered";
+            case "bg-due":
+            {
+                // bg-due <folder> [seconds]: the folder's periodic work becomes due then, and the system runs it.
+                var until = DateTime.UtcNow.AddSeconds(60);
+                while (!runtime.FoldersLoaded && DateTime.UtcNow < until) await Task.Delay(250);
+                return BackgroundWork.MakeDue(int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
+                    TimeSpan.FromSeconds(parts.Length > 2 ? int.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture) : 20));
+            }
+            case "bg-wake":
+                BackgroundWork.Wake(context, parts.Length > 1 ? parts[1] : ASync.Contracts.PushWake.Test);
+                return "woken";
+            case "bg-conditions":
+                return await runtime.SetConditionsAsync(int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
+                    new ASync.Contracts.RunConditionsDto(parts[2] == "1", parts[3] == "1", parts[4] == "1"), CancellationToken.None);
+            case "bg-reminder":
+                AndroidBackgroundServices.Instance.ReminderDays = int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
+                return "ok";
+            case "bg-remind-now":
+            {
+                var folder = runtime.Folders.First(f => f.Folder.FolderId.ToString(System.Globalization.CultureInfo.InvariantCulture) == parts[1]).Folder;
+                var days = BackgroundState.Load(context).ReminderDays;
+                var (title, message) = ASync.Client.Core.Background.BackgroundPlanner.ReminderText(folder.Name, folder.Mode, days);
+                Notifications.Reminder(context, folder.FolderId, title, message);
+                return title;
+            }
+            case "bg-battery":
+                AndroidBackgroundServices.Instance.RequestIgnoreBatteryOptimizations();
+                return "asked";
+            default:
+                return $"unknown command \"{parts[0]}\"";
         }
     }
 
@@ -230,8 +373,11 @@ public sealed class Automation : BroadcastReceiver
             ["enrollCode"] = shell.Enroll.Code,
             ["useCode"] = shell.Enroll.UseCode,
             ["pendingCode"] = shell.Enroll.Pending?.UserCode,
+            ["approveHint"] = shell.Enroll.Pending is null ? null : shell.Enroll.ApproveHint,
             ["dialog"] = shell.Dialog is not null,
             ["settings"] = shell.SettingsPage is not null,
+            ["batteryPrompt"] = shell.Background?.ShowBatteryPrompt,
+            ["pushText"] = shell.Background?.PushText,
         };
         var folders = new JsonArray();
         foreach (var s in shell.Status?.Folders ?? [])
@@ -248,6 +394,9 @@ public sealed class Automation : BroadcastReceiver
                 ["lastOk"] = s.LastResult?.Ok,
                 ["lastMessage"] = s.LastResult?.Message,
                 ["lastAt"] = s.LastResult?.At.ToUnixTimeMilliseconds(),
+                ["waiting"] = s.Waiting,
+                ["needsSetup"] = s.NeedsSetup,
+                ["unmeteredOnly"] = s.Conditions?.UnmeteredOnly,
             });
         }
         o["folders"] = folders;

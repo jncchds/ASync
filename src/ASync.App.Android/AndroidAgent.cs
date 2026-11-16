@@ -29,6 +29,25 @@ public static class AndroidAgent
 
     public static string ConfigDirectory(Context context) => Path.Combine(context.FilesDir!.AbsolutePath, "async");
 
+    /// <summary>
+    /// A file modified less than this long ago waits for the next run (Android touches a new file's time again a few
+    /// seconds after it was closed: seen on the emulator; without this the file went up twice).
+    /// </summary>
+    public static readonly TimeSpan SettleTime = TimeSpan.FromSeconds(10);
+
+    private static long _lastOpened;
+
+    /// <summary>The app came to the front: run every folder (at most once a minute), as a desktop agent does at start.</summary>
+    public static void AppOpened()
+    {
+        if (_runtime is not { } runtime) return;
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref _lastOpened);
+        if (last != 0 && now - last < 60_000) return;
+        Interlocked.Exchange(ref _lastOpened, now);
+        runtime.TriggerAll("app opened");
+    }
+
     /// <summary>Starts the agent unless it runs already (idempotent; any component may call it first).</summary>
     public static void EnsureStarted(Context context)
     {
@@ -47,9 +66,16 @@ public static class AndroidAgent
                 Protector = new KeystoreSecretProtector(),
                 DeviceKeys = new KeystoreDeviceKeys(),
                 LocalTrees = new AndroidTreeFactory(app.ContentResolver!),
+                // Background work (M4-2): WorkManager schedules the runs (with the conditions as constraints), the agent
+                // checks the conditions itself for runs it starts, and a just-written file waits to settle.
+                Conditions = new AndroidConditions(app),
+                SettleTime = SettleTime,
+                RunAtStart = false,
+                RunOnInterval = false,
             }, loggers);
             runtime.Start();
             _runtime = runtime;
+            BackgroundWork.Attach(app, runtime);
             Connector = new InProcessAgentConnector(runtime, runtime.Events, () => runtime.IsStarted);
             _running = Task.Run(async () =>
             {

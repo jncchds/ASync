@@ -198,8 +198,11 @@ public class DeviceProvisioningService(
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    public static DeviceDto ToDto(Device d) =>
-        new(d.Id, d.Name, d.Platform, d.AppVersion, d.CreatedAt, d.LastSeenAt, d.RevokedAt);
+    public static DeviceDto ToDto(Device d) => ToDto(d, null);
+
+    /// <summary>With its push registration (<see cref="Push.PushService.ToDto"/>) when <paramref name="push"/> is given.</summary>
+    public static DeviceDto ToDto(Device d, Push.PushService? push) =>
+        new(d.Id, d.Name, d.Platform, d.AppVersion, d.CreatedAt, d.LastSeenAt, d.RevokedAt, push?.ToDto(d));
 
     private Device NewDevice(int userId, string name, DevicePlatform platform, string publicKey, string? appVersion) => new()
     {

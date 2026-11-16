@@ -279,6 +279,9 @@ export default function Folders() {
                             <tr key={d.deviceId}>
                               <td className="title-cell">
                                 <span>{d.deviceName}{d.paused && <> <span className="pill pill-warning">Paused</span></>}
+                                  {d.conditions?.unmeteredOnly && <> <span className="pill" title="Runs by itself only on Wi-Fi (unmetered networks)">Wi-Fi only</span></>}
+                                  {d.conditions?.chargingOnly && <> <span className="pill" title="Runs by itself only while charging">Charging</span></>}
+                                  {d.conditions?.batteryNotLow && <> <span className="pill" title="Does not run by itself on a low battery">Battery not low</span></>}
                                   {(() => {
                                     const alert = deviceAlerts.get(`${f.id}:${d.deviceId}`)
                                     return alert && <> <span className={`pill ${alert.kind === 'Overdue' ? 'pill-warning' : 'pill-danger'}`} title={alert.detail}>⚠ {ALERT_KIND_LABELS[alert.kind]}</span></>

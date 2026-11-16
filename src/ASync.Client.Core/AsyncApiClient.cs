@@ -173,6 +173,12 @@ public sealed class AsyncApiClient : IDisposable
     public Task<DeviceFolderDto> UpdateOwnSettingsAsync(int folderId, UpdateDeviceFolderRequest req, CancellationToken ct = default) =>
         SendAsync<DeviceFolderDto>(HttpMethod.Patch, $"api/sync/folders/{folderId}", req, true, ct);
 
+    /// <summary>Where the server can wake this device (a UnifiedPush endpoint).</summary>
+    public Task<DevicePushDto> RegisterPushAsync(PushTargetRequest req, CancellationToken ct = default) =>
+        SendAsync<DevicePushDto>(HttpMethod.Put, "api/sync/push", req, true, ct);
+
+    public Task UnregisterPushAsync(CancellationToken ct = default) => SendAsync(HttpMethod.Delete, "api/sync/push", null, ct);
+
     public Task ReportAsync(int folderId, SyncReportRequest report, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Post, $"api/sync/folders/{folderId}/report", report, ct);
 

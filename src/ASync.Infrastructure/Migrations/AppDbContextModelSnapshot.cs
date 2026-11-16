@@ -225,6 +225,16 @@ namespace ASync.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("LastPushAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastPushError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool?>("LastPushOk")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -241,6 +251,17 @@ namespace ASync.Infrastructure.Migrations
                     b.Property<string>("PublicKey")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTime?>("PushRegisteredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PushTarget")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("PushType")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<DateTime?>("RevokedAt")
                         .HasColumnType("timestamp with time zone");
@@ -438,6 +459,12 @@ namespace ASync.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("now()");
 
+                    b.Property<bool>("BatteryNotLow")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("ChargingOnly")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("ConsecutiveFailures")
                         .HasColumnType("integer");
 
@@ -473,6 +500,9 @@ namespace ASync.Infrastructure.Migrations
                         .HasColumnType("character varying(1000)");
 
                     b.Property<bool>("Paused")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("UnmeteredOnly")
                         .HasColumnType("boolean");
 
                     b.HasKey("Id");

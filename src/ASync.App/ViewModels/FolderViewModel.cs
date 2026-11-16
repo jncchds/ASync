@@ -20,6 +20,11 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
     [ObservableProperty] public partial bool HasLocalPath { get; private set; }
     [ObservableProperty] public partial bool Paused { get; private set; }
     [ObservableProperty] public partial bool Locked { get; private set; }
+    /// <summary>End-to-end and not set up yet: this device can set it up (passphrase, recovery key).</summary>
+    [ObservableProperty] public partial bool NeedsSetup { get; private set; }
+
+    /// <summary>Locked but set up: the passphrase or recovery key unlocks it here.</summary>
+    public bool CanBeUnlocked => Locked && !NeedsSetup;
     [ObservableProperty] public partial Pill State { get; private set; } = new("", PillKind.Muted);
 
     [ObservableProperty] public partial bool IsBusy { get; private set; }
@@ -34,12 +39,28 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
     [ObservableProperty] public partial string LastRunText { get; private set; } = "";
     [ObservableProperty] public partial string NextRunText { get; private set; } = "";
 
+    /// <summary>This device's run conditions in words ("Runs by itself only on Wi-Fi, while charging"), or null.</summary>
+    [ObservableProperty] public partial string? ConditionsText { get; private set; }
+
+    /// <summary>Why automatic runs wait now (the conditions), or null.</summary>
+    [ObservableProperty] public partial string? WaitingText { get; private set; }
+
+    /// <summary>The run-conditions editor is open.</summary>
+    [ObservableProperty] public partial bool EditingConditions { get; private set; }
+    [ObservableProperty] public partial bool EditUnmeteredOnly { get; set; }
+    [ObservableProperty] public partial bool EditChargingOnly { get; set; }
+    [ObservableProperty] public partial bool EditBatteryNotLow { get; set; }
+
+    /// <summary>What this platform ignores of the conditions.</summary>
+    public string? ConditionsNote => shell.Platform.ConditionsNote;
+    public bool HasConditionsNote => ConditionsNote is not null;
+
     /// <summary>What the server's overdue detection says (Overdue, Failing, a failed check).</summary>
     [ObservableProperty] public partial string? AlertText { get; private set; }
 
     /// <summary>A request of this folder is running (sync now, pause, a new path).</summary>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(SyncNowCommand), nameof(TogglePauseCommand), nameof(ChooseFolderCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SyncNowCommand), nameof(TogglePauseCommand), nameof(ChooseFolderCommand), nameof(SaveConditionsCommand))]
     public partial bool Working { get; private set; }
 
     public string PauseText => Paused ? "Resume" : "Pause";
@@ -58,6 +79,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         HasLocalPath = f.LocalPath is { Length: > 0 };
         Paused = f.Paused;
         Locked = f.Locked;
+        NeedsSetup = f.NeedsSetup;
 
         var busy = f.Activity is FolderActivity.Syncing or FolderActivity.BackingUp or FolderActivity.Maintenance;
         IsBusy = busy;
@@ -82,6 +104,8 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         HasLastResult = f.LastResult is not null;
         LastResultOk = f.LastResult is { Ok: true } or { Skipped: true };
         LastResultText = f.LastResult is { } r ? (r.Ok || r.Skipped ? r.Message : $"Failed: {r.Message}") : "Not run on this device yet";
+        ConditionsText = Describe(f.Conditions);
+        WaitingText = f.Waiting;
         AlertText = f.Alerts is { Count: > 0 } alerts
             ? string.Join("\n", alerts.Select(a => $"{Format.Alert(a.Kind)} (server): {a.Detail}"))
             : null;
@@ -92,15 +116,19 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             { Activity: FolderActivity.BackingUp } => new Pill("Backing up", PillKind.Accent),
             { Activity: FolderActivity.Maintenance } => new Pill("Maintenance", PillKind.Accent),
             { Paused: true } => new Pill("Paused", PillKind.Muted),
+            { NeedsSetup: true } => new Pill("Not set up", PillKind.Warning),
             { Locked: true } => new Pill("Locked", PillKind.Warning),
             { LocalPath.Length: 0 } => new Pill("No local folder", PillKind.Warning),
             { LastResult: { Ok: false, Skipped: false } } => new Pill("Failed", PillKind.Danger),
             { Alerts: [{ Kind: AlertKind.Failing or AlertKind.CheckFailed or AlertKind.PruneFailed }, ..] } => new Pill("Problem", PillKind.Danger),
             { Alerts: [{ Kind: AlertKind.Overdue }, ..] } => new Pill("Overdue", PillKind.Warning),
+            { Waiting: not null } => new Pill("Waiting", PillKind.Muted),
             { LastResult: not null } => new Pill("Up to date", PillKind.Success),
             _ => new Pill("Waiting", PillKind.Muted),
         };
         OnPropertyChanged(nameof(PauseText));
+        OnPropertyChanged(nameof(CanBeUnlocked));
+        SetUpEncryptionCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(NeedsPath));
         OnPropertyChanged(nameof(ChooseFolderText));
         SyncNowCommand.NotifyCanExecuteChanged();
@@ -116,8 +144,10 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         NextRunText = _folder switch
         {
             { Paused: true } => "Paused",
+            { NeedsSetup: true } => "Waits for its encryption to be set up",
             { Locked: true } => "Waits to be unlocked",
             { LocalPath.Length: 0 } => "Waits for a local folder",
+            { Waiting: { } waiting } => waiting,
             { NextRunAt: { } next } => $"Next run {Format.In(next, now)}",
             _ => $"Every {_folder.IntervalMinutes} min",
         };
@@ -166,6 +196,43 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         finally { Working = false; }
     }
 
-    [RelayCommand(CanExecute = nameof(Locked))]
+    [RelayCommand(CanExecute = nameof(CanBeUnlocked))]
     private void Unlock() => shell.Dialog = new UnlockViewModel(shell, Id, Name);
+
+    /// <summary>A new end-to-end folder: this device creates its repository (what `async-cli init-encryption` does).</summary>
+    [RelayCommand(CanExecute = nameof(NeedsSetup))]
+    private void SetUpEncryption() => shell.Dialog = new UnlockViewModel(shell, Id, Name, setup: true);
+
+    public static string? Describe(RunConditionsDto? c)
+    {
+        if (c is null || !c.Any) return null;
+        var parts = new List<string>();
+        if (c.UnmeteredOnly) parts.Add("on Wi-Fi");
+        if (c.ChargingOnly) parts.Add("while charging");
+        if (c.BatteryNotLow) parts.Add("when the battery is not low");
+        return $"Runs by itself only {string.Join(", ", parts)}";
+    }
+
+    [RelayCommand]
+    private void EditConditions()
+    {
+        var c = _folder.Conditions ?? RunConditionsDto.None;
+        (EditUnmeteredOnly, EditChargingOnly, EditBatteryNotLow) = (c.UnmeteredOnly, c.ChargingOnly, c.BatteryNotLow);
+        EditingConditions = true;
+    }
+
+    [RelayCommand]
+    private void CancelConditions() => EditingConditions = false;
+
+    [RelayCommand(CanExecute = nameof(CanChange))]
+    private async Task SaveConditions()
+    {
+        Working = true;
+        try
+        {
+            var conditions = new RunConditionsDto(EditUnmeteredOnly, EditChargingOnly, EditBatteryNotLow);
+            if (await shell.RunAsync((s, ct) => s.SetConditionsAsync(Id, conditions, ct)!)) EditingConditions = false;
+        }
+        finally { Working = false; }
+    }
 }

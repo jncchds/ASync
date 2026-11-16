@@ -39,6 +39,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Enroll = new EnrollViewModel(this);
         ServiceSetup = new ServiceSetupViewModel(this, service);
         Updates = new UpdatesViewModel(this, updates ?? new NoUpdates("This version of ASync does not update itself."));
+        Background = platform.Background is { } background ? new BackgroundViewModel(this, background) : null;
         Page = new ConnectingViewModel("Looking for the ASync agent…", null);
         TrayToolTip = "ASync";
         platform.ApplyTheme(Settings.Theme);
@@ -50,6 +51,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public EnrollViewModel Enroll { get; }
     public ServiceSetupViewModel ServiceSetup { get; }
     public UpdatesViewModel Updates { get; }
+
+    /// <summary>Phones: battery, wake-ups and the reminder (null on desktops).</summary>
+    public BackgroundViewModel? Background { get; }
 
     /// <summary>The agent's service, for the update (stopped before the program is replaced).</summary>
     internal IAgentServiceManager ServiceManager => _service;
@@ -376,6 +380,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     });
 
     public string? WebUiUrl => Status?.Device?.ServerUrl ?? Settings.LastServer;
+
+    /// <summary>Whether to show the web UI buttons (not on phones: see <see cref="IPlatformServices.OffersWebUi"/>).</summary>
+    public bool OffersWebUi => Platform.OffersWebUi;
 
     [RelayCommand]
     private async Task OpenWebUi()

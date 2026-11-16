@@ -51,6 +51,66 @@ public interface IPlatformServices
 
     /// <summary>"computer" or "phone": what the UI calls this device.</summary>
     string DeviceNoun => "computer";
+
+    /// <summary>
+    /// Whether the app offers to open the web UI on this device. Phones do not: everything a phone needs is in the app, and
+    /// the server's own setup (folders, storage, people) is done in the web UI on a computer.
+    /// </summary>
+    bool OffersWebUi => true;
+
+    /// <summary>Which run conditions this platform cannot check (shown under a folder's conditions); null = it checks all.</summary>
+    string? ConditionsNote =>
+        OperatingSystem.IsLinux() ? "On this computer the Wi-Fi rule needs NetworkManager; without it the rule is ignored."
+        : "This computer cannot tell metered networks apart: the Wi-Fi rule is ignored here (it applies on phones).";
+
+    /// <summary>Background work, battery and push (phones); null on desktops, where the agent is a service.</summary>
+    IBackgroundServices? Background => null;
+}
+
+/// <summary>A UnifiedPush distributor installed on the phone (ntfy, say).</summary>
+public sealed record PushDistributor(string Id, string Name);
+
+/// <summary>
+/// Where the phone's UnifiedPush registration is: the distributor chosen (null = none), whether it gave an endpoint,
+/// whether the server took it, and the last problem.
+/// </summary>
+public sealed record PushState(string? Distributor, string? DistributorName, bool HasEndpoint, bool Registered, string? Problem)
+{
+    public static readonly PushState None = new(null, null, false, false, null);
+}
+
+/// <summary>
+/// The phone's background side (Android: WorkManager, the battery-optimisation exemption, UnifiedPush, the local "no
+/// backup" reminder). <see cref="Changed"/> may fire on any thread.
+/// </summary>
+public interface IBackgroundServices
+{
+    /// <summary>Exempt from battery optimisation (Doze and App Standby do not hold its background work back as much).</summary>
+    bool IsIgnoringBatteryOptimizations { get; }
+
+    /// <summary>The system's "Let the app always run in the background?" question.</summary>
+    void RequestIgnoreBatteryOptimizations();
+
+    /// <summary>The system's battery-optimisation list (to undo it, or where the question is not offered).</summary>
+    void OpenBatterySettings();
+
+    /// <summary>What this phone's maker additionally needs, as text (Xiaomi's autostart, Samsung's sleeping apps…), or null.</summary>
+    string? VendorHint { get; }
+
+    IReadOnlyList<PushDistributor> Distributors();
+
+    PushState Push { get; }
+
+    /// <summary>Registers with a distributor; the endpoint it answers with goes to the server.</summary>
+    void RegisterPush(string distributorId);
+
+    /// <summary>Unregisters, and removes the endpoint from the server.</summary>
+    void UnregisterPush();
+
+    /// <summary>Days without a successful run before the phone itself reminds the person (0 = never).</summary>
+    int ReminderDays { get; set; }
+
+    event Action? Changed;
 }
 
 /// <summary>The app's own preferences (not the agent's: those live on the server).</summary>
@@ -68,6 +128,8 @@ public sealed record AppSettings
     /// local folder with Velopack's release files (no UI; for testing and private mirrors). <c>ASYNC_UPDATE_URL</c> wins.
     /// </summary>
     public string? UpdateFeed { get; init; }
+    /// <summary>Phones: the battery-optimisation prompt on the dashboard was dismissed ("Not now").</summary>
+    public bool BatteryPromptDismissed { get; init; }
 }
 
 public interface ISettingsStore

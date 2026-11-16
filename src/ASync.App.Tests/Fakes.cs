@@ -80,6 +80,22 @@ internal sealed class FakeAgent : IAgentConnector, IAgentSession
 
     public Task<string> ForgetAsync(CancellationToken ct) => Answer("forget", "Signed out.");
 
+    public RunConditionsDto? LastConditions { get; private set; }
+
+    public Task<string> SetConditionsAsync(int folderId, RunConditionsDto conditions, CancellationToken ct)
+    {
+        LastConditions = conditions;
+        return Answer($"set-conditions {folderId}", "conditions saved");
+    }
+
+    public Task<string> CancelAsync(int? folderId, CancellationToken ct) => Answer($"cancel {folderId?.ToString() ?? "all"}", "stopped");
+
+    public Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct)
+    {
+        LastSecret = passphrase;
+        return Answer($"init-encryption {folderId}", "ABCD-EFGH-JKMN-PQRS");
+    }
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
@@ -149,6 +165,42 @@ internal sealed class FakePlatform : IPlatformServices
     public Task<string?> ScanQrCodeAsync() => Task.FromResult(NextScan);
     public string DisplayPath(string location) => Phone && location.StartsWith("content://", StringComparison.Ordinal) ? "Internal storage › " + location.Split("%3A")[^1] : location;
     public string DeviceNoun => Phone ? "phone" : "computer";
+    public bool OffersWebUi => !Phone;
+
+    /// <summary>Set for a phone with background services (the battery prompt, wake-ups, the reminder).</summary>
+    public FakeBackground? BackgroundServices { get; set; }
+    public IBackgroundServices? Background => BackgroundServices;
+    public string? ConditionsNote => Phone ? null : "This computer cannot tell metered networks apart.";
+}
+
+/// <summary>A phone's background side the test drives (Android's battery exemption, UnifiedPush, the reminder).</summary>
+internal sealed class FakeBackground : IBackgroundServices
+{
+    public List<string> Calls { get; } = [];
+    public bool IsIgnoringBatteryOptimizations { get; set; }
+    public string? VendorHint { get; set; } = "Xiaomi: also allow Autostart.";
+    public List<PushDistributor> Installed { get; set; } = [new("io.heckel.ntfy", "ntfy")];
+    public PushState Push { get; set; } = PushState.None;
+    public int ReminderDays { get; set; } = 3;
+    public event Action? Changed;
+
+    public void RequestIgnoreBatteryOptimizations() => Calls.Add("battery");
+    public void OpenBatterySettings() => Calls.Add("battery-settings");
+    public IReadOnlyList<PushDistributor> Distributors() => Installed;
+
+    public void RegisterPush(string distributorId)
+    {
+        Calls.Add("register " + distributorId);
+        Push = new PushState(distributorId, "ntfy", false, false, null);
+    }
+
+    public void UnregisterPush()
+    {
+        Calls.Add("unregister");
+        Push = PushState.None;
+    }
+
+    public void RaiseChanged() => Changed?.Invoke();
 }
 
 internal sealed class MemorySettings : ISettingsStore

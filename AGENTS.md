@@ -181,10 +181,12 @@ Implemented (gap item 7, usage, quotas and health), see "Storage usage, quotas a
 The server keeps no index of file contents: snapshots live in the repository on the back-end, and Mirror/TwoWay
 state lives in each device's `sync-state.json`.
 
-Planned (none of this exists yet):
+Implemented (M4-2, background work and push; migration `PushTargetsAndRunConditions`):
 
-- **FolderDevice**: metered-network and battery rules.
-- **Device.PushTarget**: relay token / APNs / FCM / UnifiedPush endpoint.
+- **FolderDevice**: run conditions UnmeteredOnly, ChargingOnly, BatteryNotLow (default false; see "Run conditions").
+- **Device**: PushTarget (the UnifiedPush endpoint, up to 2000 characters; a capability: anyone holding it can wake the
+  app, so people only see its host), PushType (`UnifiedPush`; relay/APNs/FCM tokens later), PushRegisteredAt, and the
+  last wake-up: LastPushAt, LastPushOk, LastPushError.
 
 ## Auth
 
@@ -1390,8 +1392,9 @@ and files are reached through a documents provider. The engine format is unchang
 ## Android app (M4-1)
 
 `src/ASync.App.Android` (net10.0-android, API 26+, application id `ua.pp.chds.async`) is the Avalonia Android head of the
-shared `ASync.App`. M4-1 is the foreground app: enroll, show and sync folders while it runs. Background scheduling
-(WorkManager, a foreground service), UnifiedPush, photos/contacts/calendars are the next tasks. It is not in `ASync.slnx`
+shared `ASync.App`. M4-1 is the foreground app: enroll, show and sync folders while it runs. Background work (WorkManager,
+a foreground service while transfers run, run conditions) and UnifiedPush came with M4-2 ("Android background work");
+photos/contacts/calendars are next. It is not in `ASync.slnx`
 (the `android` workload would be needed for every build): `scripts/package-android.sh` or
 `dotnet build src/ASync.App.Android`.
 
@@ -1426,6 +1429,15 @@ status's problem (on the desktop a service manager restarted the process instead
   The unlocked keys of end-to-end folders go through it as before (`keys/<folder>.key`). The store lives in the app's
   private files (`files/async`); `allowBackup` is off.
 
+**Phones never need their browser** (since M4-2's follow-up): the web UI is for a computer, and everything done on the
+phone is in the app. `IPlatformServices.OffersWebUi` is false on Android: no web UI buttons, texts point to "the web UI on
+your computer", and the device-code flow does not open the phone's browser but shows the code with where to approve it.
+A new end-to-end folder is set up in the app: control op `init-encryption` (`folderId`, `secret`; the answer's
+`RecoveryKey`), the same `RepositoryAccess.InitializeEndToEndAsync` as `async-cli init-encryption`; `FolderStatusDto.NeedsSetup`
+(end-to-end, repository not ready) shows *Set up encryption…* instead of *Unlock…*, and the unlock dialog's setup mode asks
+for the passphrase twice (at least 8 characters) and shows the recovery key once (selectable, not kept). The smoke test sets
+one up on the phone, backs it up, and has `async-cli` unlock it with that passphrase and restore it byte for byte.
+
 **Enrollment** (the shared `EnrollViewModel`): server and code, a pasted `async://pair` link, an *opened* one (the activity's
 intent filter for `async://pair`; `MainActivity` hands it to `EnrollViewModel.ApplyLink`), *Scan the QR code*
 (`IPlatformServices.ScanQrCode`, shown when the platform has a camera: `QrScanActivity` decodes the camera's preview frames
@@ -1446,8 +1458,8 @@ delete where a provider cannot move), deletes. SAF limits and how they are handl
 - no file-change events: such folders sync on their interval and on *Sync now* (a `ContentObserver` could come later);
 - Android changes a new file's modification time a few seconds after it was closed (seen on the emulator: the media
   scanner/FUSE layer). A run in between uploads the file, and the next run sees it "changed" and uploads it again: same
-  content, one more version on the server, nothing lost. Left open: a settle time for files modified moments ago (the
-  smoke test waits for new files to settle);
+  content, one more version on the server, nothing lost. Closed in M4-2 by a settle time: files modified in the last
+  10 seconds wait for the next run ("Android background work");
 - a revoked permission or a deleted folder makes `Exists()` false: the run fails with "Choose the folder again".
 
 **Platform:** `AndroidPlatform` (`IPlatformServices`): the phone's name (Settings → device name, else the model), links in
@@ -1488,11 +1500,145 @@ snapshots read-only through `Repository` (as `async-cli restore` reads them). No
 `ILocalTree` assumes the UI is the only caller or that everything is on local disk. The desktop equivalents (Windows Cloud
 Files API, macOS/iOS File Provider, Linux FUSE) would sit next to the agent service the same way.
 
+## Android background work (M4-2)
+
+Folders sync and back up with the app closed, the server can wake the phone, and runs follow per-folder conditions. Code:
+`src/ASync.App.Android/BackgroundWork.cs` (WorkManager, the workers, notifications), `UnifiedPush.cs` (the connector and
+the battery/vendor side), the shared decisions in `ASync.Client.Core/Background/BackgroundPlanner.cs` and
+`ASync.Client.Core/RunConditions.cs` (BCL only, unit-tested).
+
+**Who schedules:** on Android the agent no longer runs folders on its own interval or at start
+(`AgentOptions.RunOnInterval = false`, `RunAtStart = false`): WorkManager does, so the system's rules (Doze, standby
+buckets, constraints) and the app's process lifetime agree. The agent still runs on triggers while its process lives:
+requests (*Sync now*, the workers), the server's `folder.changed` while connected, a reconnect (which now triggers the
+download folders, since events were missed while the process was frozen), and the app coming to the front
+(`AndroidAgent.AppOpened`, at most once a minute, runs every folder).
+- **Periodic work** (`folder-<id>`, `ExistingPeriodicWorkPolicy.UPDATE`): every unpaused folder with a local folder, at
+  max(interval, 15 min) (WorkManager's minimum), with its conditions as constraints (`UNMETERED`/`CONNECTED`, charging,
+  battery not low). `BackgroundPlanner.Plan`/`Diff` keep it in line with the folder list on every change of it
+  (`AgentRuntime.FoldersChanged`); what was applied is kept in `files/async/android-background.json`, so a process start
+  changes nothing. Signing out cancels all of the app's work (tag `async`). Nothing is applied before the folder list was
+  fetched once (`AgentRuntime.FoldersLoaded`), so a starting agent's empty list never cancels the schedule.
+- **`FolderRunWorker`** (a `Worker`, stable Java name `ua.pp.chds.async.FolderRunWorker`): starts the agent if the
+  process was started for it, then `AgentRuntime.RunAutomaticAsync(folder)` (waits up to 90 s for the device to sign in and
+  load the folder). Files still settling (below) are run once more after the settle time, inside the same job. Stopped by
+  the system (constraint lost, the job's time used up): the run is cancelled cleanly (`SyncAgent.CancelRuns`: the run ends
+  *Deferred*, "Stopped; it continues on the next run", not reported as a failure) and the work answers Retry; busy
+  (another device holds the lease) answers Retry too; a deferred run (conditions) or a failure answers Success (the
+  failure is reported to the server, which alerts; the next period tries again).
+- **Wake-ups** (`wake`, expedited, `APPEND_OR_REPLACE` so a wake during a run gets a run after it): the same worker with
+  folder -1 runs `BackgroundPlanner.FoldersToWake` (a change: TwoWay and Mirror Download folders; overdue or a test: all).
+- **The transfer keeper** (`TransferKeeperWorker`, unique `transfers`, expedited, KEEP): enqueued as soon as any folder
+  runs (`AgentRuntime.FolderChanged` with `AnyActive`), whoever started the run (*Sync now*, a hub event, a worker). It
+  promotes itself with `setForegroundAsync` to WorkManager's `SystemForegroundService`, declared `foregroundServiceType=
+  dataSync` (manifest merge; `FOREGROUND_SERVICE_DATA_SYNC`), with a progress notification on the low-importance channel
+  `async-transfers` (folder, files and bytes, a bar; `FOREGROUND_SERVICE_IMMEDIATE`) and a *Cancel* action
+  (`WorkManager.createCancelPendingIntent`: the keeper stops, and with it every running run, cleanly). It ends three
+  seconds after the last run. This is what keeps the network: M4-1 saw sockets destroyed as soon as the app left the
+  foreground. **Android 12+ limits:** a foreground service cannot be started from the background unless the app is exempt
+  from battery optimisation (or the app is visible: *Sync now*); then `setForegroundAsync` throws and the keeper carries
+  on as an expedited job, which still holds the process and its network while it lasts. **Android 14/15:** the type is
+  declared; dataSync services get 6 hours per 24 hours on Android 15, after which the system stops it
+  (`STOP_REASON_FOREGROUND_SERVICE_TIMEOUT`); WorkManager 2.11 handles that and the keeper stops the runs cleanly. **Long
+  transfers** therefore continue across cut-offs: uploads and downloads resume where they stopped ("Large files"), at the
+  next periodic run or a retry.
+- **The reminder** (`reminder-<id>`, one-off with an initial delay): N days (setting, default 3, 0 = off) after the
+  folder's last successful run, the phone posts "<folder>: nothing synced/backed up for N days" (channel
+  `async-reminders`). Every successful run replaces it (`AgentRuntime.FolderRan`); a new folder gets one from now. It
+  needs neither the server nor push ("Working without push").
+
+**Settle time** (`SyncOptions.SettleTime`, Android 10 s; 0 elsewhere, unchanged): a path whose local file was modified
+less than that long ago is left out of the run entirely (no upload, download, delete or conflict; its sync state stays) and
+counted as `SyncResult.Unsettled`; the agent triggers the folder again after the settle time, and a worker runs it once
+more. That closes M4-1's open item: Android touches a new file's modification time again a few seconds after it was closed,
+which uploaded it twice (tested: `RunConditionsTests.AFileModifiedMomentsAgo_WaitsForTheNextRun_AndIsUploadedOnce`).
+Backups are not delayed (a snapshot of a half-written file is the usual backup behaviour, and costs no extra version).
+
+### Run conditions
+
+`FolderDevice.UnmeteredOnly`, `ChargingOnly`, `BatteryNotLow` (`RunConditionsDto`, all false = always), set by the person
+(the web UI's device-folder form, `AttachDeviceRequest.Conditions`; null keeps them) or by the device (the apps' folder
+*Conditions…* editor → control op `set-conditions` → `PATCH /api/sync/folders/{id}`). A change bumps the folder's
+revision, so the devices reload.
+- **They apply to automatic runs only:** interval, file changes, `folder.changed`, wake-ups, WorkManager. A person's
+  request (*Sync now*, `async-cli sync`) ignores them. In the agent: `SyncAgent.Conditions` (an `IDeviceConditionsProbe`)
+  and `RunConditions.Blocked` before each automatic run; a blocked run is a *Deferred* result ("Waiting for Wi-Fi (this
+  folder syncs only on unmetered networks)"), not reported to the server, shown as the folder's `Waiting` (the apps show
+  it instead of the next run, with a *Waiting* pill); with `RunOnInterval` the agent looks again after
+  `ConditionsRecheck` (5 min). Overdue detection still counts: a Wi-Fi-only phone that never sees Wi-Fi becomes overdue.
+- **What each platform can see:** Android all three (`ConnectivityManager.isActiveNetworkMetered`, the sticky battery
+  intent: plugged, level ≤ 15 % and not charging = low); WorkManager's constraints express the same three. Desktops and
+  the CLI (`DesktopConditions`): Linux power from `/sys/class/power_supply` (mains/USB online, battery capacity; devices'
+  own batteries such as a mouse's ignored; no battery = on mains), metered from NetworkManager's `Metered` property
+  (`busctl`; yes/guess-yes = metered; no NetworkManager = unknown); Windows power from `GetSystemPowerStatus`, metered
+  unknown (it needs WinRT); macOS power from `pmset -g batt`, metered unknown. **Unknown never blocks:** a rule the
+  platform cannot check is ignored there, and the apps say so under the editor (`IPlatformServices.ConditionsNote`).
+
+### UnifiedPush on the phone
+
+The connector side of UnifiedPush's Android broadcast protocol, written against the spec (no library): distributors are
+found with `queryBroadcastReceivers(org.unifiedpush.android.distributor.REGISTER)` (manifest `<queries>`), registration
+sends `REGISTER` to the chosen package with a random token, the app id, a description and the AND_3 `pi` PendingIntent;
+`PushReceiver` (exported) takes `NEW_ENDPOINT`, `REGISTRATION_FAILED`, `UNREGISTERED` and `MESSAGE` (`bytesMessage`, or
+AND_1's `message` string), acknowledges messages (`MESSAGE_ACK` with the id) and enqueues the expedited wake. Broadcasts
+with another token are ignored: another app cannot swap the endpoint or fake a message without the token (a faked wake
+would only start a sync). The endpoint goes to the server with `PUT /api/sync/push` (`AgentRuntime.SetPushTargetAsync`)
+as soon as the device runs; until the server took it the state says so, and it is sent again after a restart. *Turn off*
+sends `UNREGISTER` and `DELETE /api/sync/push`. FCM (Google Play builds) and the relay stay out: no Firebase account.
+
+### Battery optimisation
+
+The dashboard shows a card once (until *Allow* or *Not now*) explaining why; *Allow* sends
+`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (permission `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`: fine for an APK,
+restricted by Google Play's policy, which we do not use), *Battery settings* opens `ACTION_IGNORE_BATTERY_OPTIMIZATION_
+SETTINGS`. `AndroidBackgroundServices.Hint` adds text for makers known to stop background work beyond Android's rules
+(Xiaomi, Huawei/Honor, Samsung, OnePlus/OPPO/realme, vivo, ASUS, Meizu, Nokia, Sony, Motorola/Lenovo; dontkillmyapp.com):
+text only, no vendor intents (they change between versions). The shared UI is `BackgroundViewModel` (Settings →
+*Background sync*: battery, wake-ups, reminder; the dashboard prompt) over `IPlatformServices.Background`, null on
+desktops.
+
+**Automation for the smoke test** (no UI needed, so they work in a process WorkManager started): `bg` (works with their
+ids, states and stop reasons, the keeper, push, battery, the conditions now, folders), `bg-push <package>`, `bg-unpush`,
+`bg-wake <reason>`, `bg-conditions`, `bg-reminder <days>`, `bg-remind-now <folder>`, `bg-battery`; and `editconditions
+<folder>`, `refresh` on the UI.
+
+**Tests:** `ASync.Tests`: `BackgroundPlannerTests` (the plan, its diff, which folders a wake runs, the reminder's
+delay and text), `RunConditionsTests` (the rules, sysfs/NetworkManager/pmset readings, the agent's gate against a fake
+server: automatic runs wait and *Sync now* does not, `RunAtStart`, `CancelRuns` ending a run as deferred; the settle
+time with a fake clock, also against a file of the same name on the other side), `PushTests`, `ApiPushTests`, `AlertTests`
+(see "Push"); `ASync.App.Tests`: `BackgroundTests` (a folder's conditions and waiting shown and edited through the agent,
+the battery prompt, UnifiedPush states, the reminder choice; headless views at phone size, none of it on desktops).
+
+**Verified on the emulator** (`scripts/smoke-android.sh`, see the script's header and "Milestones"). How it is driven,
+and what was learnt doing it:
+- **Scheduled work with the app closed:** Home, then `am kill` (the process is gone; not `force-stop`, which would stop
+  all of the app's jobs until it is opened), retried until the app is idle (`am kill` spares a process holding a
+  foreground service). Before that, the folder's periodic work is made due in 25 seconds (automation `bg-due`: the same
+  work enqueued afresh, CANCEL_AND_REENQUEUE, with that initial delay: a new periodic work's first run is due at once;
+  WorkManager's `setNextScheduleTimeOverride` was not honoured on the emulator), and the system starts the app's process
+  for its job (`Start proc … for service …SystemJobService`, then `FolderRunWorker`).
+  Forcing the job instead (`cmd jobscheduler run -f -n androidx.work.systemjobscheduler <pkg> <id>`: WorkManager's jobs
+  live in that namespace on Android 14+, and their extras naming the work are redacted in dumpsys, so the app reports its
+  own jobs through `bg`) does not work: WorkManager skips periodic work that is not due ("executed before schedule").
+  WorkManager also takes `am kill` for a force-stop ("Application was force-stopped, rescheduling") and gives its jobs new
+  ids when the process next starts; the work itself is kept.
+- **Mobile data:** `svc wifi disable`: the emulator's cellular network is metered, and JobScheduler shows the folder's job
+  with CONNECTIVITY unsatisfied. Back on Wi-Fi the emulator does not always rejoin by itself: `cmd wifi connect-network
+  AndroidWifi open`.
+- **UnifiedPush:** the ntfy app (F-Droid build 1.25.2, `NTFY_APK`) with its default server set in its own settings to
+  an ntfy container (`binwiederhier/ntfy`) at a fixed address on the stack's network (172.31.250.10): the server
+  container posts there directly and the emulator reaches it through the host (its user-mode network connects from the
+  host, which routes to the bridge). 10.0.2.2 cannot be used (a container has no such host), nor the host gateway (the
+  host's firewall dropped containers' traffic to its own published ports).
+- **Grep with pipefail:** `cmd | grep -q` fails although the text is there when grep's early exit kills the writer with
+  SIGPIPE; the script compares captured output (`contains`).
+
 ## Background work and wake-ups (M3–M4)
 
-Planned, except for the desktop agent service ("Agent service and control channel"), the server's overdue
-detection and alerts (below) and `Push__Mode=None` (the only push mode so far), which are implemented. Nothing else
-in this section or in "Push" exists yet.
+Implemented: the desktop agent service ("Agent service and control channel"), the server's overdue detection and alerts
+(below), Android's WorkManager work, foreground service, battery prompt, local reminder and UnifiedPush ("Android
+background work (M4-2)"), and the server's UnifiedPush wake-ups ("Push"). Planned: iOS, FCM, the relay, MediaStore
+content triggers.
 
 - **Desktop:** the agent runs as a systemd unit, a launchd agent, or a logon task / Windows Service (implemented).
   The desktop app talks to it over the named pipe or Unix socket. The CLI container runs the same agent.
@@ -1505,10 +1651,11 @@ in this section or in "Push" exists yet.
   - A visible notification ("backup 2 days overdue") is the fallback.
   - iOS 26's `BGContinuedProcessingTask` covers large backups the user starts.
   - A PhotoKit change observer queues new photos.
-- **Android:** WorkManager with constraints, a foreground service during large transfers, FCM high-priority
-  data messages, and UnifiedPush for de-Googled devices and F-Droid builds.
+- **Android:** WorkManager with constraints, a foreground service during large transfers, and UnifiedPush
+  (implemented, M4-2). FCM high-priority data messages for Google Play builds are planned (no Play/Firebase account yet).
 - **Server scheduler:** knows each device's expected schedule and alerts the person after a grace period
-  (implemented: "Overdue detection and alerts"). From M4 it also wakes overdue devices through the relay.
+  (implemented: "Overdue detection and alerts"). Since M4-2 it also wakes overdue devices that registered a UnifiedPush
+  endpoint (through the relay for APNs/FCM later).
 
 ### Working without push
 
@@ -1530,6 +1677,8 @@ Push is an optimisation, never a requirement. Every platform must back up on its
   - A foreground service for large transfers.
   - A prompt asking for the battery-optimisation exemption, since some vendors otherwise stop periodic work.
   - UnifiedPush where a distributor is installed. It needs neither our relay nor Google.
+  - A local "nothing synced in N days" notification, moved on after each successful run.
+  (All implemented in M4-2 except the MediaStore triggers, which come with photo backup.)
 - **Server:** overdue detection alerts the person (webhook, ntfy or e-mail), not the device. It works from
   what devices already report (`FolderDevice.LastSyncAt`), so it needs no push channel at all.
 
@@ -1628,10 +1777,34 @@ device ──push token──► its ASync server ──POST /v1/wake──► r
 | `Relay` + custom `Push__RelayUrl` | Self-hosters with their own builds and several servers | Their own relay: deploy the Worker (free Cloudflare) or the `async-push-relay` container |
 | `None` (the default, and the only mode until M4) | Anyone who wants no outside service involved | Nothing. The server sends no wake-ups; devices rely on their own scheduling and the person gets overdue alerts (see "Working without push") |
 
-Today `PushSettings` reads `Push__Mode`; `Relay` or `Direct` fall back to `None` with a warning in the log.
+Today (M4-2) `PushSettings` reads `Push__Mode`: **`UnifiedPush` is the default** and the only mode that sends anything;
+`None` sends nothing; `Relay` and `Direct` act as `UnifiedPush` with a warning in the log (APNs/FCM are not built: no
+Apple/Firebase accounts yet), as does an unknown value. The default changed from `None` because UnifiedPush involves no
+service of ours: the server only posts to an address the person's own phone registered, from a distributor they
+installed; a phone without one is never contacted.
 
 **UnifiedPush** (F-Droid and de-Googled Android) never uses a relay: the server posts straight to the
-device's distributor endpoint (for example ntfy).
+device's distributor endpoint (for example ntfy). Implemented in `ASync.Api/Services/Push/`:
+- **Registration:** `PUT /api/sync/push {type: UnifiedPush, endpoint}` / `GET` / `DELETE` (device token,
+  `PushController`); absolute http(s) URLs only, no user info, ≤ 2000 characters. People see `DeviceDto.Push`
+  (`DevicePushDto`: type, the endpoint's host only, registered, the last wake and its error, whether the server sends)
+  and can `POST /api/devices/{id}/push/test` (*Send wake-up* on the Devices page).
+- **When:** `folder.changed` (a device's `changed`, a restore in the web UI) queues a wake for each member that takes
+  changes (TwoWay, Mirror Download), is not paused and is not the origin (`PushQueue.FolderChanged`); it is sent only if
+  that device has **no live hub connection** (`DeviceConnections.IsConnected`: connected devices get the event). The
+  alert scan queues a wake for every device with an open **Overdue** incident. `PushThrottle`: at most one change wake per
+  device per `Push__ChangedSeconds` (60), one overdue wake per `Push__OverdueHours` (6), the test always.
+- **How:** requests only queue (`PushQueue`, bounded, drops the oldest); `PushDispatcher` (hosted) sends one at a time
+  with `PushService.WakeAsync`: a POST of `{"async":"wake","reason":"changed|overdue|test"}` (no user data; `TTL` and
+  `Urgency: high` headers that Web Push servers understand), Content-Length, through the `push` HTTP client: no
+  redirects, `Push__TimeoutSeconds` (10). The outcome is stored on the device; 404/410 (the distributor dropped the
+  registration) removes the target. **SSRF:** the same stance as alert webhooks: the address comes from the person's own
+  device, http(s) only, no redirects, a short timeout; it can still point into the server's network (a known gap, fine
+  for self-hosting with trusted users). No encryption of the body (RFC 8291) yet: it carries nothing to protect.
+- **Tests:** `PushTests` (fake HTTP and clock: who is woken, validation, the POST, throttling, live connections, gone
+  endpoints, `None`, revoked devices), `AlertTests` (overdue devices queued each pass, none once recovered),
+  `ApiPushTests` (registration through the real server, the owner sees only the host, the test wake, other people get
+  404; run conditions set by person and device); the role-separation tests cover the new endpoints by themselves.
 
 **What our hosted relay needs:**
 - An Apple Developer account and an APNs `.p8` key for `ua.pp.chds.async`.
@@ -1761,7 +1934,24 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
      on the emulator a request in flight failed as soon as the app went to the background (the system logged "Destroyed
      live tcp sockets" for its uid), so syncing with the app closed needs the foreground service/WorkManager of the next
      task; a fresh install's first connection can be cut the same way (the smoke test waits a moment).
-     Next: background work (WorkManager, a foreground service), UnifiedPush, then a DocumentsProvider.
+   - **M4-2 Android background work and UnifiedPush (done):** WorkManager periodic work per folder with its run
+     conditions as constraints, expedited wake-ups, the transfer keeper (a dataSync foreground service with progress and
+     Cancel), the battery-optimisation prompt with makers' hints, the local "nothing synced in N days" reminder, the
+     settle time for just-modified files, run conditions on `FolderDevice` (web UI, apps, desktop agents where the OS can
+     tell), the UnifiedPush connector on the phone and the server's wake-ups (`Push__Mode=UnifiedPush`, now the default),
+     see "Android background work (M4-2)", "Run conditions" and "Push". Verified on the Android 15 x86_64 emulator
+     (`scripts/smoke-android.sh`: all 84 checks of the last full run passed, with the phone-only follow-up below): the
+     device code approved on a computer (the phone's browser stays closed), a new end-to-end folder set up in the app and
+     restored by `async-cli` with that passphrase, the notification and foreground service during a 200 MB transfer
+     (which also continued an interrupted upload), the battery prompt and the system's question, the folders' jobs, a
+     file arriving through the folder's periodic job in a process the system started after `am kill`, a Wi-Fi-only folder
+     waiting on mobile data (job CONNECTIVITY unsatisfied, a wake-up deferred, nothing downloaded) and running once Wi-Fi
+     was back, UnifiedPush through the real ntfy app and an ntfy server (endpoint registered, the killed app woken by a
+     change on another device, the server recording the delivery), the reminder. Only compiled or reasoned about: Android
+     12+ refusing the foreground service from the background without the exemption (the exemption was granted early in
+     the run), Android 15's 6-hour dataSync limit, expedited work's foreground notification on Android 11 and older, the
+     charging and battery rules on the emulator (always "charging"), FCM, other distributors than ntfy, the desktops'
+     Windows/macOS power readings. Next: a DocumentsProvider, photos/contacts/calendars, iOS.
 6. **M5 — hardening:** OpenTelemetry, and whatever is left of the gap list below. Later: Google Drive,
    OneDrive and Dropbox adapters.
 

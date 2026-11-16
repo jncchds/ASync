@@ -43,6 +43,17 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public UpdatesViewModel Updates => _shell.Updates;
 
+    public BackgroundViewModel? Background => _shell.Background;
+
+    public bool OffersWebUi => _shell.OffersWebUi;
+
+    /// <summary>Signing out: what is left to do elsewhere.</summary>
+    public string SignOutText =>
+        "Sign out of this device? It stops syncing and forgets its identity here. Your files stay where they are. " +
+        (_shell.OffersWebUi ? "Remove the device in the web UI too" : "Remove the device in the web UI on your computer too") +
+        "; to use it again, enroll it again.";
+    public bool HasBackground => Background is not null;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanSignOut))]
     public partial string? DeviceText { get; private set; }

@@ -36,6 +36,12 @@ public sealed partial class DashboardViewModel(ShellViewModel shell) : Observabl
 
     public bool HasNoFolders => !HasFolders;
 
+    /// <summary>Where folders come from: the web UI, on a computer when this is a phone.</summary>
+    public string NoFoldersHint => Shell.Platform.OffersWebUi
+        ? "Attach folders to this device in the web UI (Folders → a folder → Devices). They appear here at once."
+        : $"Attach folders to this {Shell.Platform.DeviceNoun} in the web UI on your computer (Folders → a folder → Devices → this {Shell.Platform.DeviceNoun}). " +
+          $"They appear here at once; then choose where each one lives on this {Shell.Platform.DeviceNoun}.";
+
     public void Update(AgentStatusDto status)
     {
         DeviceName = status.Device?.DeviceName ?? "";
