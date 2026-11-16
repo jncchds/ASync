@@ -57,7 +57,8 @@ public class ServicesTests
     public void DesktopArguments_TheAppAndTheService()
     {
         var app = DesktopOptions.Parse(["--config", "/tmp/cfg", "--minimized"]);
-        Assert.Equal(("/tmp/cfg", true, false), (app.ConfigDirectory, app.Minimized, app.ServiceRun));
+        // --config is made absolute, which on Windows adds the current drive (D:\tmp\cfg).
+        Assert.Equal((Path.GetFullPath("/tmp/cfg"), true, false), (app.ConfigDirectory, app.Minimized, app.ServiceRun));
 
         // What ServiceInstaller writes into the unit: <program> --config <dir> service run [--verbose] [--log-file f]
         var service = DesktopOptions.Parse(["--config", "/tmp/cfg", "service", "run", "--verbose", "--log-file", "/tmp/a.log"]);

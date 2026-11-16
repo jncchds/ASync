@@ -175,7 +175,8 @@
   seconds.
 - fix(ci): **the macOS package build failed** on macOS's bash 3.2, which treats an empty array as unset under
   `set -u` (`scripts/package.sh`); and a Linux-only systemd unit test now skips on Windows, where the config-path
-  comparison also handles `\` separators.
+  comparison also handles `\` separators. A desktop-argument test no longer expects a Unix path where Windows gives
+  `D:\tmp\cfg`.
 
 ## v0.1.3 — 2026-11-12
 
