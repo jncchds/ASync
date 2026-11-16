@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Collections.Concurrent;
 using ASync.Client.Core.Sync;
 using ASync.Contracts;
+using ASync.Engine.Local;
 using ASync.Engine.Maintenance;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
@@ -110,6 +111,11 @@ public sealed class SyncAgent : IAsyncDisposable
 
     public bool AllowMassDeletion { get; init; }
 
+    /// <summary>
+    /// Opens a folder's local path: directories by default; the Android app adds its document trees (content URIs).
+    /// </summary>
+    public ILocalTreeFactory LocalTrees { get; init; } = FileSystemTreeFactory.Instance;
+
     /// <summary>Called after each stored part of a large upload: path (on the storage), bytes stored, size.</summary>
     public Action<string, long, long>? UploadProgress { get; init; }
 
@@ -141,7 +147,7 @@ public sealed class SyncAgent : IAsyncDisposable
             if (folder.Mode == SyncMode.Backup)
             {
                 var repo = await RepositoryAccess.OpenAsync(_api, _store, folder, backend, ct);
-                var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName).RunAsync(progress, ct);
+                var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName, LocalTrees.Open(folder.LocalPath)).RunAsync(progress, ct);
                 var s = snapshot.Stats;
                 var message = $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: {s.FilesNew} new, {s.FilesChanged} changed, {s.FilesUnmodified} unchanged, " +
                               $"{Size(s.BytesAdded)} added{(forgotten > 0 ? $", {forgotten} old snapshots forgotten" : "")}" +
@@ -159,7 +165,7 @@ public sealed class SyncAgent : IAsyncDisposable
                     var renewing = RenewLeaseAsync(folder.FolderId, lease.LeaseId, renew.Token);
                     try
                     {
-                        result = await new FolderSyncer(backend, folder.LocalPath, _store.StateDirectory(folder.FolderId), new SyncOptions
+                        result = await new FolderSyncer(backend, LocalTrees.Open(folder.LocalPath), _store.StateDirectory(folder.FolderId), new SyncOptions
                         {
                             Mode = folder.Mode, Direction = folder.Direction, Excludes = folder.Excludes, DeviceName = identity.DeviceName,
                             VersionsKeepDays = folder.VersionsKeepDays, TrashKeepDays = folder.TrashKeepDays,
@@ -569,9 +575,11 @@ public sealed class SyncAgent : IAsyncDisposable
             }
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _debounce = new Timer(_ => Trigger("files changed"));
-            if (!folder.Paused && folder.Mode != SyncMode.Backup && folder.Direction != MirrorDirection.Download && Directory.Exists(folder.LocalPath))
+            // Only trees on a file system can be watched (Android's document trees run on their interval and on demand).
+            if (!folder.Paused && folder.Mode != SyncMode.Backup && folder.Direction != MirrorDirection.Download
+                && WatchablePath(agent, folder.LocalPath) is { } watched)
             {
-                _watcher = new FileSystemWatcher(folder.LocalPath) { IncludeSubdirectories = true, EnableRaisingEvents = true };
+                _watcher = new FileSystemWatcher(watched) { IncludeSubdirectories = true, EnableRaisingEvents = true };
                 FileSystemEventHandler changed = (_, e) =>
                 {
                     if (e.FullPath.Contains($"{Path.DirectorySeparatorChar}.async", StringComparison.Ordinal)) return; // our own temp/trash
@@ -583,6 +591,12 @@ public sealed class SyncAgent : IAsyncDisposable
                 _watcher.Renamed += (s, e) => changed(s, e);
             }
             _loop = Task.Run(LoopAsync);
+        }
+
+        private static string? WatchablePath(SyncAgent agent, string location)
+        {
+            try { return agent.LocalTrees.Open(location).FileSystemPath is { } path && Directory.Exists(path) ? path : null; }
+            catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException) { return null; }
         }
 
         public void Trigger(string reason)

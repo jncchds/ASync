@@ -54,7 +54,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         Name = f.Name;
         ModeText = Format.Mode(f.Mode, f.Direction);
         IsEndToEnd = f.Encryption == FolderEncryption.EndToEnd;
-        LocalPath = f.LocalPath is { Length: > 0 } path ? path : "No folder on this computer yet";
+        LocalPath = f.LocalPath is { Length: > 0 } path ? shell.Platform.DisplayPath(path) : $"No folder on this {shell.Platform.DeviceNoun} yet";
         HasLocalPath = f.LocalPath is { Length: > 0 };
         Paused = f.Paused;
         Locked = f.Locked;
@@ -159,7 +159,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
     [RelayCommand(CanExecute = nameof(CanChange))]
     private async Task ChooseFolder()
     {
-        var path = await shell.Platform.PickFolderAsync($"Where \"{Name}\" syncs on this computer", HasLocalPath ? _folder.LocalPath : null);
+        var path = await shell.Platform.PickFolderAsync($"Where \"{Name}\" syncs on this {shell.Platform.DeviceNoun}", HasLocalPath ? _folder.LocalPath : null);
         if (path is null) return;
         Working = true;
         try { await shell.RunAsync((s, ct) => s.SetPathAsync(Id, path, ct)!); }

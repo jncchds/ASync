@@ -6,7 +6,7 @@
   <StackPanel Spacing="12" MaxWidth="560" HorizontalAlignment="Stretch">
     <StackPanel Spacing="4" Margin="2,8,0,4">
       <TextBlock Classes="h1" Text="Add this device" />
-      <TextBlock Classes="muted" Text="Connect this computer to your ASync server. Its folders are set up in the web UI afterwards." />
+      <TextBlock Classes="muted" Text="{Binding Intro}" />
     </StackPanel>
 
     <Border Classes="card">
@@ -32,7 +32,10 @@
             <TextBox Name="Code" Text="{Binding Code}" PlaceholderText="K7QD-M2XP-9RWA" FontSize="16" />
             <TextBlock Classes="muted small" Margin="0,4,0,0" Text="Pasting the async://pair link of the QR code fills in the server too." />
           </StackPanel>
-          <Button Name="Enroll" Content="Add this device" Command="{Binding EnrollCommand}" HorizontalAlignment="Left" />
+          <WrapPanel ItemSpacing="8" LineSpacing="8">
+            <Button Name="Enroll" Content="Add this device" Command="{Binding EnrollCommand}" />
+            <Button Name="Scan" Classes="secondary" Content="Scan the QR code" Command="{Binding ScanCommand}" IsVisible="{Binding CanScan}" />
+          </WrapPanel>
         </StackPanel>
 
         <!-- The device-code flow: start, show the code, wait. -->

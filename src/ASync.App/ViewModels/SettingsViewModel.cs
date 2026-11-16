@@ -65,7 +65,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     public void Update(AgentStatusDto status)
     {
         DeviceText = status.Device is { } d ? $"{d.DeviceName} · {d.Username} on {d.ServerUrl}" : null;
-        AgentText = $"Agent {status.AgentVersion} ({(status.Mode == AgentMode.Service ? "background service" : "in a terminal")}, pid {status.ProcessId})";
+        AgentText = status.Mode switch
+        {
+            AgentMode.InApp => $"Agent {status.AgentVersion} (inside this app)",
+            AgentMode.Service => $"Agent {status.AgentVersion} (background service, pid {status.ProcessId})",
+            _ => $"Agent {status.AgentVersion} (in a terminal, pid {status.ProcessId})",
+        };
     }
 
     partial void OnStartAtLoginChanged(bool value)

@@ -64,6 +64,39 @@ public sealed partial class EnrollViewModel : ObservableObject
 
     public string ExpiresText => Pending is { } p ? $"The code expires at {p.ExpiresAt.ToLocalTime():HH:mm}." : "";
 
+    public string Intro => $"Connect this {_shell.Platform.DeviceNoun} to your ASync server. Its folders are set up in the web UI afterwards.";
+
+    /// <summary>A camera to scan the web UI's QR code with (phones).</summary>
+    public bool CanScan => _shell.Platform.CanScanQrCode;
+
+    /// <summary>
+    /// A pairing link from outside the form: an opened <c>async://pair</c> link (Android's intent filter) or a scanned QR
+    /// code. Fills in the server and the code; false when it is not a pairing link.
+    /// </summary>
+    public bool ApplyLink(string link)
+    {
+        if (!PairingLink.TryParse(link, out var server, out var code)) return false;
+        UseCode = true;
+        Error = null;
+        Server = server;
+        Code = code;
+        return true;
+    }
+
+    /// <summary>Scans the QR code of Devices → Add device and enrolls with it at once.</summary>
+    [RelayCommand]
+    private async Task Scan()
+    {
+        var text = await _shell.Platform.ScanQrCodeAsync();
+        if (text is null) return;
+        if (!ApplyLink(text))
+        {
+            Error = "That QR code is not an ASync pairing code. Scan the one under Devices → Add device in the web UI.";
+            return;
+        }
+        if (EnrollCommand.CanExecute(null)) await EnrollCommand.ExecuteAsync(null);
+    }
+
     /// <summary>A pasted pairing link fills in the server and the code.</summary>
     partial void OnCodeChanged(string value)
     {

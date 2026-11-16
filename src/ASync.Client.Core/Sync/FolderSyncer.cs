@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using ASync.Contracts;
 using ASync.Engine.Backup;
+using ASync.Engine.Local;
 using ASync.Engine.Plain;
 using ASync.Engine.Storage;
 
@@ -58,7 +59,7 @@ public sealed class FolderSyncer
 {
     private const string LocalMeta = ".async";
     private readonly PlainStore _remote;
-    private readonly string _root;
+    private readonly ILocalTree _tree;
     private readonly string _statePath;
     private readonly SyncOptions _options;
     private readonly Glob _excludes;
@@ -66,9 +67,13 @@ public sealed class FolderSyncer
     private int _unsaved;
 
     public FolderSyncer(IStorageBackend remote, string localRoot, string stateDirectory, SyncOptions options)
+        : this(remote, new FileSystemTree(localRoot), stateDirectory, options) { }
+
+    /// <param name="local">The device's side: a directory (<see cref="FileSystemTree"/>) or another <see cref="ILocalTree"/>.</param>
+    public FolderSyncer(IStorageBackend remote, ILocalTree local, string stateDirectory, SyncOptions options)
     {
         _remote = new PlainStore(remote);
-        _root = Path.GetFullPath(localRoot);
+        _tree = local;
         _statePath = Path.Combine(stateDirectory, "sync-state.json");
         _options = options;
         _excludes = new Glob(options.Excludes);
@@ -95,8 +100,10 @@ public sealed class FolderSyncer
 
     public async Task<SyncResult> RunAsync(CancellationToken ct = default)
     {
-        if (!Directory.Exists(_root))
-            throw new SyncRefusedException($"The folder {_root} does not exist (is the disk mounted?). Create it to start syncing into it.");
+        if (!_tree.Exists())
+            throw new SyncRefusedException(_tree.FileSystemPath is null
+                ? $"The folder {_tree.Location} cannot be used (was it deleted, or its permission taken back?). Choose the folder again."
+                : $"The folder {_tree.Location} does not exist (is the disk mounted?). Create it to start syncing into it.");
 
         _state = SyncState.Load(_statePath);
         var result = new SyncResult();
@@ -273,25 +280,24 @@ public sealed class FolderSyncer
 
     private async Task DownloadAsync(string path, RemoteFile r, LocalFile? expected, SyncResult result, CancellationToken ct)
     {
-        var target = LocalPath(path);
+        var target = StoragePath.Normalize(path);
         // Named after the remote version, and kept when the download breaks off: the next attempt (in this run, or the
         // next one, even after a restart) continues from what is already here with a ranged read.
-        var temp = Path.Combine(_root, LocalMeta, "tmp", TransferKey(path, r.Size, r.Modified) + ".part");
-        Directory.CreateDirectory(Path.GetDirectoryName(temp)!);
+        var temp = $"{LocalMeta}/tmp/{TransferKey(path, r.Size, r.Modified)}.part";
         var done = false;
         try
         {
             for (var attempt = 1; ; attempt++)
             {
-                var have = File.Exists(temp) ? new FileInfo(temp).Length : 0;
-                if (have > r.Size) { File.Delete(temp); have = 0; }
+                var have = SizeOf(temp) ?? 0;
+                if (have > r.Size) { _tree.DeleteFile(temp); have = 0; }
                 if (attempt == 1 && have > 0) result.BytesResumed += have;
                 try
                 {
                     if (have < r.Size || r.Size == 0)
                     {
                         await using var input = await _remote.Backend.OpenReadAsync(PlainStore.CheckPath(path), have, ct: ct);
-                        await using var output = new FileStream(temp, FileMode.Append, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true);
+                        await using var output = _tree.OpenAppend(temp);
                         if (Progress is null)
                         {
                             await input.CopyToAsync(output, ct);
@@ -318,25 +324,26 @@ public sealed class FolderSyncer
                     await Task.Delay(_options.RetryDelay * attempt, ct);
                 }
             }
-            if (new FileInfo(temp).Length != r.Size)
+            if (SizeOf(temp) != r.Size)
             {
-                File.Delete(temp);
+                _tree.DeleteFile(temp);
                 throw new IOException("The download did not match the size on the storage; it will be tried again next time.");
             }
-            if (r.Modified > 0) File.SetLastWriteTimeUtc(temp, DateTimeOffset.FromUnixTimeMilliseconds(r.Modified).UtcDateTime);
+            // Trees that cannot set modification times (Android's document trees) keep the time of the download: the
+            // sync state records what the file has afterwards, so it does not look changed next time.
+            if (r.Modified > 0 && _tree.CanSetModified) _tree.TrySetModified(temp, r.Modified);
 
             // Someone edited the local file while we downloaded: leave it, the next run sees a conflict.
             var now = Stat(path);
             if (now != expected) throw new IOException("The local file changed during the sync; it will be handled next time.");
 
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Move(temp, target, overwrite: true);
+            _tree.Move(temp, target, overwrite: true);
             done = true;
         }
         finally
         {
             // A complete download that could not be put in place is of no use later; a partial one is.
-            if (!done && File.Exists(temp) && new FileInfo(temp).Length >= r.Size) File.Delete(temp);
+            if (!done && SizeOf(temp) is long size && size >= r.Size) _tree.DeleteFile(temp);
         }
         var written = Stat(path)!;
         _state.Files[path] = new BaseEntry(written.Size, written.Modified, r.Size, r.Modified);
@@ -348,9 +355,7 @@ public sealed class FolderSyncer
     private async Task ResolveConflictAsync(string path, RemoteFile r, SyncResult result, CancellationToken ct)
     {
         var copy = ConflictName(path);
-        var source = LocalPath(path);
-        var destination = LocalPath(copy);
-        File.Move(source, destination);
+        _tree.Move(StoragePath.Normalize(path), StoragePath.Normalize(copy), overwrite: false);
         var moved = Stat(copy)!;
         await UploadAsync(copy, moved, result, ct);
         await DownloadAsync(path, r, expected: null, result, ct);
@@ -368,7 +373,7 @@ public sealed class FolderSyncer
         {
             var candidate = $"{name} (conflict {device} {stamp}{(n > 1 ? $" {n}" : "")}){ext}";
             var full = dir.Length == 0 ? candidate : $"{dir}/{candidate}";
-            if (!File.Exists(LocalPath(full))) return full;
+            if (_tree.Stat(StoragePath.Normalize(full)) is null) return full;
         }
     }
 
@@ -383,76 +388,79 @@ public sealed class FolderSyncer
 
     private void MoveToLocalTrash(string path)
     {
-        var source = LocalPath(path);
-        if (!File.Exists(source)) return;
-        var stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
-        var target = Path.Combine(_root, LocalMeta, "trash", stamp, path.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        File.Move(source, target, overwrite: true);
+        var source = StoragePath.Normalize(path);
+        if (_tree.Stat(source) is not { IsFile: true }) return;
+        var stamp = DateTime.UtcNow.ToString(TrashStamp, CultureInfo.InvariantCulture);
+        _tree.Move(source, $"{LocalMeta}/trash/{stamp}/{source}", overwrite: true);
     }
+
+    private const string TrashStamp = "yyyyMMdd'T'HHmmss'Z'";
+
+    /// <summary>When a local trash directory was made: its name (the time of the deletion), else its modification time.</summary>
+    private static DateTimeOffset TrashedAt(LocalEntry dir) =>
+        DateTimeOffset.TryParseExact(dir.Name, TrashStamp, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var at)
+            ? at
+            : DateTimeOffset.FromUnixTimeMilliseconds(dir.Modified);
 
     /// <summary>Once a day: the storage's versions and trash, and the local trash, past their retention.</summary>
     private async Task CleanUpIfDueAsync(CancellationToken ct)
     {
         if (_state.LastCleanUp is { } last && DateTimeOffset.UtcNow - last < TimeSpan.FromDays(1)) return;
         await _remote.CleanUpAsync(TimeSpan.FromDays(_options.VersionsKeepDays), TimeSpan.FromDays(_options.TrashKeepDays), ct: ct);
-        var localTrash = Path.Combine(_root, LocalMeta, "trash");
-        if (Directory.Exists(localTrash))
-            foreach (var dir in Directory.EnumerateDirectories(localTrash))
-                if (Directory.GetCreationTimeUtc(dir) < DateTime.UtcNow.AddDays(-_options.TrashKeepDays))
-                    Directory.Delete(dir, recursive: true);
+        const string localTrash = $"{LocalMeta}/trash";
+        if (_tree.Stat(localTrash) is { IsDirectory: true })
+            foreach (var dir in _tree.List(localTrash))
+                if (dir.IsDirectory && TrashedAt(dir) < DateTimeOffset.UtcNow.AddDays(-_options.TrashKeepDays))
+                    _tree.DeleteDirectory($"{localTrash}/{dir.Name}");
         // Partial downloads nobody continued (the file changed or went away on the storage meanwhile).
-        var localTemp = Path.Combine(_root, LocalMeta, "tmp");
-        if (Directory.Exists(localTemp))
-            foreach (var file in Directory.EnumerateFiles(localTemp))
-                if (File.GetLastWriteTimeUtc(file) < DateTime.UtcNow.AddDays(-1))
-                    File.Delete(file);
+        const string localTemp = $"{LocalMeta}/tmp";
+        if (_tree.Stat(localTemp) is { IsDirectory: true })
+            foreach (var file in _tree.List(localTemp))
+                if (file.IsFile && file.Modified < DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds())
+                    _tree.DeleteFile($"{localTemp}/{file.Name}");
         _state.LastCleanUp = DateTimeOffset.UtcNow;
     }
 
     private Dictionary<string, LocalFile> ScanLocal()
     {
         var files = new Dictionary<string, LocalFile>(StringComparer.Ordinal);
-        // Not IgnoreInaccessible: a directory we cannot read would look empty, and the plan would delete its files on the
-        // storage (TwoWay) or download them again over it. Such a run fails instead, with nothing changed.
-        var options = new EnumerationOptions { RecurseSubdirectories = false, IgnoreInaccessible = false, AttributesToSkip = 0 };
-        var pending = new Stack<(DirectoryInfo Dir, string Relative)>([(new DirectoryInfo(_root), "")]);
-        while (pending.TryPop(out var item))
+        // A directory we cannot read must not look empty: the plan would delete its files on the storage (TwoWay) or
+        // download them again over it. Such a run fails instead, with nothing changed.
+        var pending = new Stack<string>([""]);
+        while (pending.TryPop(out var dir))
         {
-            List<FileSystemInfo> entries;
+            IReadOnlyList<LocalEntry> entries;
             try
             {
-                entries = [.. item.Dir.EnumerateFileSystemInfos("*", options)];
+                entries = _tree.List(dir);
             }
             catch (UnauthorizedAccessException)
             {
-                throw new SyncRefusedException(
-                    $"Cannot read {item.Dir.FullName} (permission denied). Nothing was changed: fix its permissions, or exclude it.");
+                var where = dir.Length == 0 ? _tree.Location : _tree is FileSystemTree fs ? fs.Full(dir) : $"{dir} in {_tree.Location}";
+                throw new SyncRefusedException($"Cannot read {where} (permission denied). Nothing was changed: fix its permissions, or exclude it.");
             }
             foreach (var entry in entries)
             {
-                var relative = item.Relative.Length == 0 ? entry.Name : $"{item.Relative}/{entry.Name}";
+                var relative = dir.Length == 0 ? entry.Name : $"{dir}/{entry.Name}";
                 if (relative == LocalMeta || entry.Name.EndsWith(".async-tmp", StringComparison.Ordinal) || _excludes.Matches(relative)) continue;
-                if (entry.LinkTarget is not null) continue; // symlinks are not synced
-                if (entry is DirectoryInfo sub) pending.Push((sub, relative));
-                else if (entry is FileInfo file) files[relative] = new LocalFile(file.Length, Ms(file.LastWriteTimeUtc));
+                switch (entry.Kind)
+                {
+                    case LocalEntryKind.Directory: pending.Push(relative); break;
+                    case LocalEntryKind.File: files[relative] = new LocalFile(entry.Size, entry.Modified); break;
+                    // symlinks are not synced
+                }
             }
         }
         return files;
     }
 
-    private LocalFile? Stat(string path)
-    {
-        var info = new FileInfo(LocalPath(path));
-        return info.Exists ? new LocalFile(info.Length, Ms(info.LastWriteTimeUtc)) : null;
-    }
+    private LocalFile? Stat(string path) =>
+        _tree.Stat(StoragePath.Normalize(path)) is { IsFile: true } e ? new LocalFile(e.Size, e.Modified) : null;
 
-    private FileStream OpenLocal(string path) =>
-        new(LocalPath(path), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 20, useAsync: true);
+    private long? SizeOf(string path) => _tree.Stat(path) is { IsFile: true } e ? e.Size : null;
 
-    private string LocalPath(string path) => Path.Combine(_root, StoragePath.Normalize(path).Replace('/', Path.DirectorySeparatorChar));
-
-    private static long Ms(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+    private Stream OpenLocal(string path) => _tree.OpenRead(StoragePath.Normalize(path));
 
     private void SaveState()
     {

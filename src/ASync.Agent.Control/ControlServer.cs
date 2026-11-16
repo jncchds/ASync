@@ -44,24 +44,27 @@ public sealed class ControlServer : IAsyncDisposable
     private readonly bool _systemService;
     private readonly Action<string>? _log;
     private readonly CancellationTokenSource _stop = new();
-    private readonly ConcurrentDictionary<Channel<ControlEvent>, byte> _subscribers = new();
+    private readonly ControlEventHub _events;
     private readonly ConcurrentDictionary<Task, byte> _connections = new();
     private Socket? _socket;
     private Task? _accepting;
     private int _disposed;
 
     /// <param name="log">Problems with single connections (they never stop the server).</param>
-    public ControlServer(ControlEndpoint endpoint, IControlHandler handler, bool systemService = false, Action<string>? log = null)
+    /// <param name="events">Where the events for <c>subscribe</c> come from: shared with in-process subscribers, or the server's own.</param>
+    public ControlServer(ControlEndpoint endpoint, IControlHandler handler, bool systemService = false, Action<string>? log = null,
+        ControlEventHub? events = null)
     {
         _endpoint = endpoint;
         _handler = handler;
         _systemService = systemService;
         _log = log;
+        _events = events ?? new ControlEventHub();
     }
 
     public ControlEndpoint Endpoint => _endpoint;
 
-    public int SubscriberCount => _subscribers.Count;
+    public int SubscriberCount => _events.SubscriberCount;
 
     /// <summary>Starts listening (throws when the endpoint cannot be used) and accepting in the background.</summary>
     public void Start()
@@ -191,33 +194,23 @@ public sealed class ControlServer : IAsyncDisposable
 
     private async Task StreamEventsAsync(ControlConnection connection, CancellationToken ct)
     {
-        var channel = Channel.CreateBounded<ControlEvent>(new BoundedChannelOptions(256) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
-        _subscribers[channel] = 0;
-        try
+        using var subscription = _events.Subscribe();
+        var reader = subscription.Reader;
+        var first = new ControlEvent { Kind = ControlEventKinds.Status, Status = await _handler.StatusAsync(ct) };
+        await connection.WriteAsync(new ControlEventMessage { Event = first }, ControlJsonContext.Default.ControlEventMessage, ct);
+        // The client sends nothing more; its closing the connection ends the stream.
+        var closed = connection.ReadAsync(ControlJsonContext.Default.ControlRequest, ct);
+        while (true)
         {
-            var first = new ControlEvent { Kind = ControlEventKinds.Status, Status = await _handler.StatusAsync(ct) };
-            await connection.WriteAsync(new ControlEventMessage { Event = first }, ControlJsonContext.Default.ControlEventMessage, ct);
-            // The client sends nothing more; its closing the connection ends the stream.
-            var closed = connection.ReadAsync(ControlJsonContext.Default.ControlRequest, ct);
-            while (true)
-            {
-                var next = channel.Reader.WaitToReadAsync(ct).AsTask();
-                if (await Task.WhenAny(next, closed) == closed || !await next) return;
-                while (channel.Reader.TryRead(out var e))
-                    await connection.WriteAsync(new ControlEventMessage { Event = e }, ControlJsonContext.Default.ControlEventMessage, ct);
-            }
-        }
-        finally
-        {
-            _subscribers.TryRemove(channel, out _);
+            var next = reader.WaitToReadAsync(ct).AsTask();
+            if (await Task.WhenAny(next, closed) == closed || !await next) return;
+            while (reader.TryRead(out var e))
+                await connection.WriteAsync(new ControlEventMessage { Event = e }, ControlJsonContext.Default.ControlEventMessage, ct);
         }
     }
 
     /// <summary>Sends an event to every subscriber (never blocks).</summary>
-    public void Publish(ControlEvent e)
-    {
-        foreach (var channel in _subscribers.Keys) channel.Writer.TryWrite(e);
-    }
+    public void Publish(ControlEvent e) => _events.Publish(e);
 
     /// <summary>Stops listening and ends every connection; later calls do nothing.</summary>
     public async ValueTask DisposeAsync()

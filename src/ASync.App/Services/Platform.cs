@@ -39,6 +39,18 @@ public interface IPlatformServices
     bool SupportsStartAtLogin { get; }
     bool IsStartAtLoginEnabled();
     void SetStartAtLogin(bool enabled);
+
+    /// <summary>Whether <see cref="ScanQrCodeAsync"/> works here (a camera: phones).</summary>
+    bool CanScanQrCode => false;
+
+    /// <summary>Scans a QR code with the camera; its text, or null when cancelled.</summary>
+    Task<string?> ScanQrCodeAsync() => Task.FromResult<string?>(null);
+
+    /// <summary>A folder's local path as people read it (Android shows "Internal storage › Sync" for a content URI).</summary>
+    string DisplayPath(string location) => location;
+
+    /// <summary>"computer" or "phone": what the UI calls this device.</summary>
+    string DeviceNoun => "computer";
 }
 
 /// <summary>The app's own preferences (not the agent's: those live on the server).</summary>

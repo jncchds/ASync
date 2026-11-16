@@ -27,6 +27,9 @@
     <!-- The Avalonia app (src/ASync.App, src/ASync.App.Desktop) -->
     <PackageVersion Include="Avalonia" Version="12.1.6" />
     <PackageVersion Include="Avalonia.Desktop" Version="12.1.6" />
+    <PackageVersion Include="Avalonia.Android" Version="12.1.6" />
+    <!-- The Android app's QR scanner: a pure .NET decoder over the camera's preview frames (no Google Play services) -->
+    <PackageVersion Include="ZXing.Net" Version="0.16.10" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.6" />
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.6" />
     <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.1.6" />

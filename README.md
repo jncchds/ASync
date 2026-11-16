@@ -6,7 +6,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 > **Status: early development.** The server, the web UI (folders, devices, storage, snapshot and file browsing), the
 > headless CLI agent and the desktop app (Linux; built for Windows and macOS, not tried there yet) work: devices sync
 > and back up folders through the server today. Desktop installers with self-update are built for every release (tried
-> on Linux; not code-signed yet); the mobile apps are next. The current version is in [VERSION](VERSION), changes are in
+> on Linux; not code-signed yet). The Android app syncs while it is open (an APK to sideload; background syncing is
+> next); iOS comes later. The current version is in [VERSION](VERSION), changes are in
 > [RELEASE_NOTES.md](RELEASE_NOTES.md), and the design, roadmap and known gaps are in [AGENTS.md](AGENTS.md).
 
 <p>
@@ -165,7 +166,10 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   tried; Setup.exe, the macOS .pkg/.dmg and their updates are built in CI but not tried on a real machine yet. The
   builds are not code-signed (see "Installing the desktop app").
 
-What comes next is listed in [AGENTS.md](AGENTS.md) under "Milestones and current stage" (the desktop app).
+- The Android app syncs only while it is open, and was tried on an Android 15 emulator (not on a phone yet). See
+  "The Android app" for what else it cannot do yet.
+
+What comes next is listed in [AGENTS.md](AGENTS.md) under "Milestones and current stage" (the mobile apps).
 
 ## Run it
 
@@ -397,6 +401,50 @@ the device in the web UI.
 To build it yourself: `dotnet publish src/ASync.App.Desktop -c Release -o ~/async-desktop` (.NET 10 SDK), then run
 `~/async-desktop/async-desktop`; such a copy does not update itself. `scripts/package.sh <rid>` builds the installers
 (see "Development").
+
+## The Android app
+
+<p>
+  <img src="docs/screenshots/android-enroll-light.png" alt="Adding the phone" width="24%">
+  <img src="docs/screenshots/android-dashboard-syncing-light.png" alt="A folder syncing" width="24%">
+  <img src="docs/screenshots/android-picker-light.png" alt="Choosing the phone's folder" width="24%">
+  <img src="docs/screenshots/android-settings-dark.png" alt="Settings, dark" width="24%">
+</p>
+
+The same pages as the desktop app, on Android 8 and later. **What works so far (M4-1): syncing while the app is open.**
+- **Adding the phone:** scan the QR code of *Devices → Add device* (the camera; no Google services needed), tap or paste
+  its `async://pair` link, type the server address and the code, or *Approve in the browser*. The phone's key is made in
+  the Android Keystore (in its secure hardware where it has some) and never leaves it; what the app stores about the
+  device is encrypted with another Keystore key.
+- **Folders:** attach a folder to the phone in the web UI (any local path will do: the phone asks), then *Choose folder…*
+  on the phone picks where it lives, with Android's own folder picker (internal storage, an SD card, a USB drive, or
+  another app's storage). Two-way, Mirror and Backup folders work there; *Sync now*, pause and resume, live progress,
+  unlocking end-to-end folders, and the settings (theme, sign out) as on the desktop. The Back button closes dialogs and
+  settings.
+- **Not yet:** syncing in the background (with the app closed, on a schedule, or woken by a push) comes next; until then
+  a folder syncs while the app is open: on its interval, and on *Sync now*. Photos, contacts and calendars come later.
+  Files changed on the phone are noticed on the next run, not at once. Android's folder picker cannot keep file times:
+  files downloaded to the phone carry the time they were downloaded, and names a storage cannot hold (`:`, `?`… on
+  SD cards) fail that file with a message. A file synced in the seconds right after another app wrote it may be
+  uploaded twice (Android touches its time once more); the copy on the server is the same, with one extra version.
+
+### Installing the Android app
+
+The app is not in Google Play. Download `ASync-<version>-android.apk` from the
+[releases](https://github.com/jncchds/ASync/releases) page on the phone and open it; Android asks once to allow
+installing apps from your browser (or file manager): allow it, then *Install*. Play Protect may say it does not know the
+app: *More details → Install anyway*. One APK covers phones (arm64) and emulators/Chromebooks (x86_64).
+
+- **Updates:** install the newer APK over the old one; your enrollment and folders stay. Android only accepts an update
+  signed like the installed app: the releases are signed with the project's key once it is set up; until then builds
+  are signed with a throw-away debug key, and moving between two differently signed builds needs an uninstall first
+  (then enroll the phone again and remove the old device in the web UI).
+- **Uninstalling** removes the app's keys and settings with it (Android deletes them); remove the device in the web UI
+  too. The synced files stay where they are.
+- **http servers** (no TLS, e.g. on your LAN) work, as on the desktop; prefer https.
+
+To build it: `dotnet workload install android`, an Android SDK (`ANDROID_HOME`) and JDK 17, then
+`scripts/package-android.sh` (APK in `artifacts/packages/android`).
 
 ## Run an agent
 

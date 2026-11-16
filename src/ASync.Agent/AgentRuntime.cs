@@ -24,6 +24,24 @@ public sealed record AgentOptions
     public TimeSpan IdentityPollInterval { get; init; } = TimeSpan.FromSeconds(5);
     /// <summary>How often to ask the server which of this device's folders are overdue or failing.</summary>
     public TimeSpan AlertPollInterval { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Open the local control channel (a Unix socket or named pipe). Off for an agent inside a mobile app, which the app
+    /// reaches in-process (<see cref="AgentRuntime.Events"/> and the runtime as <see cref="IControlHandler"/>).
+    /// </summary>
+    public bool ControlChannel { get; init; } = true;
+
+    /// <summary>With <see cref="WaitForIdentity"/>: how long to wait before running the device again after its run failed.</summary>
+    public TimeSpan RestartDelay { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>How the store protects its secrets; null: <see cref="ASync.Client.Core.Secrets.SecretProtectors.ForThisMachine"/>.</summary>
+    public ASync.Client.Core.Secrets.ISecretProtector? Protector { get; init; }
+
+    /// <summary>Where new device keys are made and how they sign (the Android Keystore in the Android app).</summary>
+    public IDeviceKeyStore DeviceKeys { get; init; } = SoftwareDeviceKeys.Instance;
+
+    /// <summary>What a folder's local path opens (directories; the Android app adds its document trees).</summary>
+    public ASync.Engine.Local.ILocalTreeFactory LocalTrees { get; init; } = ASync.Engine.Local.FileSystemTreeFactory.Instance;
 }
 
 /// <summary>
@@ -41,11 +59,13 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     private readonly ConcurrentDictionary<int, ProgressSnapshot?> _publishedProgress = new();
     private AgentLock? _lock;
     private ControlServer? _server;
+    private readonly ControlEventHub _events = new();
     private volatile SyncAgent? _agent;
     private volatile AsyncApiClient? _api;
     private volatile bool _stopping;
     private int _disposed;
     private string? _revokedMessage;
+    private volatile string? _failure;
     private Guid? _revokedDevice;
     private readonly SemaphoreSlim _identityGate = new(1, 1);
     private volatile CancellationTokenSource? _deviceStop;
@@ -68,13 +88,19 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     {
         _options = options;
         _logger = loggers.CreateLogger("agent");
-        _store = new FileClientStore(options.ConfigDirectory);
+        _store = new FileClientStore(options.ConfigDirectory, options.Protector);
     }
 
     public IClientStore Store => _store;
 
     /// <summary>The control channel's endpoint, once <see cref="Start"/> opened it.</summary>
     public ControlEndpoint? Endpoint => _server?.Endpoint;
+
+    /// <summary>The agent's events, for subscribers in this process (the control channel's subscribers get the same).</summary>
+    public ControlEventHub Events => _events;
+
+    /// <summary>Whether <see cref="Start"/> ran and the runtime is not disposed.</summary>
+    public bool IsStarted => _lock is not null && Volatile.Read(ref _disposed) == 0;
 
     /// <summary>
     /// Takes the lock (throws <see cref="AgentAlreadyRunningException"/>) and opens the control channel. A channel that
@@ -84,6 +110,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     public void Start()
     {
         _lock = AgentLock.TryAcquire(_store.Root) ?? throw new AgentAlreadyRunningException(_store.Root);
+        if (!_options.ControlChannel) return;
         var endpoint = ControlEndpoint.ForConfigDirectory(_store.Root);
         var server = new ControlServer(endpoint, this, _options.SystemService, m => _logger.LogDebug("{Message}", m));
         try
@@ -154,6 +181,17 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
                 {
                     // `forget` stopped this device: wait for the next identity.
                 }
+                catch (Exception e) when (_options.WaitForIdentity && !ct.IsCancellationRequested && e is not OperationCanceledException)
+                {
+                    // A service would be restarted by its manager; an agent inside an app has none. Try again in a while
+                    // (or at once when the identity changes), keeping the reason as the status's problem.
+                    _logger.LogError(e, "The device's run failed; trying again in {Delay}.", _options.RestartDelay);
+                    _failure = e.Message;
+                    Publish(StatusEvent());
+                    try { await _identityChanged.WaitAsync(_options.RestartDelay, ct); }
+                    catch (OperationCanceledException) { }
+                    _failure = null;
+                }
                 finally
                 {
                     _deviceStop = null;
@@ -175,8 +213,8 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     private async Task RunDeviceAsync(DeviceIdentity identity, CancellationToken ct)
     {
         _logger.LogInformation("ASync agent {Version}: {Device} → {Server}", _options.Version, identity.DeviceName, identity.ServerUrl);
-        using var api = new AsyncApiClient(identity.ServerUrl, identity) { AppVersion = _options.Version, TokenCache = _store };
-        var agent = new SyncAgent(api, _store, _logger) { AllowMassDeletion = _options.AllowMassDeletion };
+        using var api = new AsyncApiClient(identity.ServerUrl, identity) { AppVersion = _options.Version, TokenCache = _store, DeviceKeys = _options.DeviceKeys };
+        var agent = new SyncAgent(api, _store, _logger) { AllowMassDeletion = _options.AllowMassDeletion, LocalTrees = _options.LocalTrees };
         agent.StatusChanged += () => Publish(StatusEvent());
         agent.FolderStatusChanged += OnFolderChanged;
         _api = api;
@@ -245,7 +283,8 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
                         Publish(StatusEvent());
                     }
                 }
-                catch (Exception e) when (e is ApiException or HttpRequestException or InvalidOperationException or System.Text.Json.JsonException)
+                catch (Exception e) when (e is ApiException or HttpRequestException or InvalidOperationException or System.Text.Json.JsonException
+                                             or System.Security.Cryptography.CryptographicException)
                 {
                     _logger.LogDebug("Could not read the server's alerts: {Message}", e.Message);
                 }
@@ -260,13 +299,13 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
 
     // ── Events ────────────────────────────────────────────────────────────────
 
-    private void Publish(ControlEvent e) => _server?.Publish(e);
+    private void Publish(ControlEvent e) => _events.Publish(e);
 
     private ControlEvent StatusEvent() => new() { Kind = ControlEventKinds.Status, Status = BuildStatus() };
 
     private void OnFolderChanged(int folderId)
     {
-        if (_server is not { SubscriberCount: > 0 } || _agent?.Folders.FirstOrDefault(f => f.Folder.FolderId == folderId) is not { } state) return;
+        if (_events.SubscriberCount == 0 || _agent?.Folders.FirstOrDefault(f => f.Folder.FolderId == folderId) is not { } state) return;
         var dto = Map(state);
         var previous = _publishedResults.GetValueOrDefault(folderId);
         _publishedResults[folderId] = state.LastResult;
@@ -283,7 +322,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         {
             while (await timer.WaitForNextTickAsync(ct))
             {
-                if (_server is not { SubscriberCount: > 0 } || _agent is not { } agent) continue;
+                if (_events.SubscriberCount == 0 || _agent is not { } agent) continue;
                 foreach (var state in agent.Folders)
                 {
                     if (state.Progress is not { } progress || _publishedProgress.GetValueOrDefault(state.Folder.FolderId) == progress) continue;
@@ -323,7 +362,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             ProcessId = Environment.ProcessId,
             StartedAt = _startedAt,
             Device = identity is null ? null : new DeviceInfoDto(identity.DeviceId, identity.DeviceName, identity.Username, identity.ServerUrl),
-            Problem = _revokedMessage ?? agent?.ConnectionProblem,
+            Problem = _revokedMessage ?? _failure ?? agent?.ConnectionProblem,
             Folders = agent is null ? [] : [.. agent.Folders.Select(Map)],
             Enrollment = _enrollment,
         };
@@ -435,7 +474,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
 
     public async Task<string> SetPathAsync(int folderId, string path, CancellationToken ct)
     {
-        if (!Path.IsPathFullyQualified(path)) throw new ControlException("The path must be absolute.");
+        if (_options.LocalTrees.Validate(path) is { } invalid) throw new ControlException(invalid);
         var (agent, api) = Running();
         var folder = await FolderAsync(api, folderId, ct);
         var updated = await api.UpdateOwnSettingsAsync(folder.FolderId, new UpdateDeviceFolderRequest(LocalPath: path, ExpectedRevision: folder.Revision), ct);
@@ -454,6 +493,20 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     }
 
     // ── Enrollment and sign-out (the desktop app) ─────────────────────────────
+
+    /// <summary>The stored identity, its token, and its key when a keystore holds it.</summary>
+    private void DeleteIdentityAndKey()
+    {
+        string? key = null;
+        try { key = _store.LoadIdentity()?.PrivateKey; }
+        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or System.Security.Cryptography.CryptographicException or FormatException) { }
+        _store.DeleteIdentity();
+        if (key is not null && _options.DeviceKeys.Owns(key))
+        {
+            try { _options.DeviceKeys.Delete(key); }
+            catch (Exception e) { _logger.LogWarning("The device key could not be deleted: {Message}", e.Message); }
+        }
+    }
 
     private void RefuseWhenEnrolled()
     {
@@ -482,9 +535,9 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         {
             RefuseWhenEnrolled();
             CancelEnrollment();
-            using var api = new AsyncApiClient(NormalizeServer(server)) { AppVersion = _options.Version };
+            using var api = new AsyncApiClient(NormalizeServer(server)) { AppVersion = _options.Version, DeviceKeys = _options.DeviceKeys };
             var identity = await api.EnrollAsync(code, name, platform, ct);
-            if (_revokedDevice is not null) _store.DeleteIdentity(); // the revoked one: its token goes too
+            if (_revokedDevice is not null) DeleteIdentityAndKey(); // the revoked one: its token goes too
             _store.SaveIdentity(identity);
             _logger.LogInformation("Enrolled \"{Device}\" for {User} on {Server}.", identity.DeviceName, identity.Username, identity.ServerUrl);
         }
@@ -512,7 +565,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         var stop = new CancellationTokenSource();
         lock (_enrollmentLock) _enrollmentStop = stop;
         var shown = new TaskCompletionSource<DeviceCodeDto>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var api = new AsyncApiClient(url) { AppVersion = _options.Version };
+        var api = new AsyncApiClient(url) { AppVersion = _options.Version, DeviceKeys = _options.DeviceKeys };
         _ = Task.Run(async () =>
         {
             try
@@ -522,7 +575,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
                 try
                 {
                     stop.Token.ThrowIfCancellationRequested();
-                    if (_revokedDevice is not null) _store.DeleteIdentity();
+                    if (_revokedDevice is not null) DeleteIdentityAndKey();
                     _store.SaveIdentity(identity);
                     _enrollment = null;
                 }
@@ -586,7 +639,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
                 await running.CancelAsync();
                 await _deviceDone.Task.WaitAsync(TimeSpan.FromSeconds(60), ct);
             }
-            _store.DeleteIdentity();
+            DeleteIdentityAndKey();
             _revokedMessage = null;
             _revokedDevice = null;
         }
@@ -612,6 +665,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             try { File.Delete(Path.Combine(_store.Root, ControlEndpoint.EndpointFileName)); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
+        _events.Complete(); // in-process subscribers see the agent go, as socket subscribers see the connection close
         _lock?.Dispose();
     }
 }

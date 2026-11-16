@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The notification icon: the app's sync glyph (Theme/Tokens.axaml SyncGlyph), white on transparent as Android wants. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+  <path android:fillColor="#FFFFFFFF"
+      android:pathData="M12 4a8 8 0 0 1 7.4 5h-2.2A6 6 0 0 0 7.3 8.7L9.6 11H3.5V4.9l2.4 2.4A8 8 0 0 1 12 4zM20.5 13v6.1l-2.4-2.4A8 8 0 0 1 4.6 15h2.2a6 6 0 0 0 9.9 1.3L14.4 13h6.1z" />
+</vector>
