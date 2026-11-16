@@ -73,7 +73,7 @@ public static class ServiceInstaller
 
     internal static bool UsesPackagedUnit(ServiceInstallOptions o, string? packagedUnit, string defaultConfigDirectory) =>
         !o.System && packagedUnit is not null && !o.Verbose && o.LogFile is null && o.Program.Count == 1
-        && Path.GetFullPath(o.ConfigDirectory).TrimEnd('/') == Path.GetFullPath(defaultConfigDirectory).TrimEnd('/')
+        && Path.TrimEndingDirectorySeparator(Path.GetFullPath(o.ConfigDirectory)) == Path.TrimEndingDirectorySeparator(Path.GetFullPath(defaultConfigDirectory))
         && packagedUnit.Contains($"\nExecStart={SystemdUnit.Quote(o.Program[0])} service run\n", StringComparison.Ordinal);
 
     /// <summary>Where the packaged unit's agent keeps its config: the default without <c>ASYNC_CONFIG_DIR</c> (a user manager does not set it).</summary>

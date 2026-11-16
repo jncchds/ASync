@@ -30,6 +30,7 @@ public class PackagingTests
     [Fact]
     public void ThePackagedUserUnit_IsUsed_WhenItWouldSayTheSame()
     {
+        if (!OperatingSystem.IsLinux()) return; // systemd units, and these Linux paths, exist only on Linux
         var unit = File.ReadAllText(RepoFile("packaging/linux/async-agent.service")).ReplaceLineEndings("\n");
         const string home = "/home/alice/.config/async";
         ServiceInstallOptions Options(string program = "/opt/async-desktop/async-desktop", string config = home) =>

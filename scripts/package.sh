@@ -123,7 +123,7 @@ if [[ "$only" != cli ]]; then
       [[ -n "${WINDOWS_SIGN_PARAMS:-}" ]] && sign=(--signParams "$WINDOWS_SIGN_PARAMS")
       # The Start-menu shortcut carries the app id, so toasts show under "ASync" (DesktopPlatform.Notify).
       "${vpk[@]}" pack "${common[@]}" -p "$desktop" -i packaging/icons/async.ico --aumid ua.pp.chds.async \
-        --shortcuts StartMenuRoot,Desktop "${sign[@]}"
+        --shortcuts StartMenuRoot,Desktop ${sign[@]+"${sign[@]}"}
       ;;
     osx)
       step "Velopack: ASync.app, .pkg"
@@ -140,7 +140,7 @@ if [[ "$only" != cli ]]; then
         [[ -n "${MACOS_NOTARY_PROFILE:-}" ]] && sign+=(--notaryProfile "$MACOS_NOTARY_PROFILE")
         [[ -n "${MACOS_KEYCHAIN:-}" ]] && sign+=(--keychain "$MACOS_KEYCHAIN")
       fi
-      "${vpk[@]}" pack "${common[@]}" -p "$app" -i packaging/icons/async.icns "${sign[@]}"
+      "${vpk[@]}" pack "${common[@]}" -p "$app" -i packaging/icons/async.icns ${sign[@]+"${sign[@]}"}
 
       step "DMG"
       portable="$(ls "$out"/velopack/*-Portable.zip | head -1)"
