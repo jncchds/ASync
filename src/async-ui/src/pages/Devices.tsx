@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  errorMessage, getDevices, getEnrollments, renameDevice, revokeDevice, revokeEnrollment, testDevicePush,
+  BROWSE_HINTS, BROWSE_LABELS, errorMessage, getDevices, getEnrollments, renameDevice, revokeDevice, revokeEnrollment, testDevicePush,
   type Device, type Enrollment,
 } from '../api'
+import { useSyncEvents, type SyncEvent } from '../hooks/useSyncEvents'
 import AddDevicePanel from '../components/AddDevicePanel'
 import { formatDate, PLATFORM_LABELS, relativeTime } from '../utils/format'
 
@@ -24,6 +25,11 @@ export default function Devices() {
     .catch(err => setError(errorMessage(err, 'Could not load devices.'))), [])
 
   useEffect(() => { load() }, [load])
+
+  // A device coming online, going offline or changing its browsing setting.
+  useSyncEvents(useCallback((e: SyncEvent) => {
+    if (e.name === 'device.status' || e.name === 'reconnected') void load()
+  }, [load]))
 
   const rename = async (device: Device) => {
     const name = prompt('Device name', device.name)?.trim()
@@ -86,7 +92,15 @@ export default function Devices() {
                   <td data-label="Platform"><span className="pill">{PLATFORM_LABELS[d.platform]}</span></td>
                   <td data-label="Version" className="muted nowrap"><span>{d.appVersion ?? '—'}</span></td>
                   <td data-label="Last seen" className="nowrap" title={d.lastSeenAt ? formatDate(d.lastSeenAt) : undefined}>
-                    <span>{d.lastSeenAt ? relativeTime(d.lastSeenAt) : 'Never'}</span>
+                    <span>
+                      {d.lastSeenAt ? relativeTime(d.lastSeenAt) : 'Never'}
+                      {/* Online now, and whether its folders can be browsed from here (the folder form's Browse…). */}
+                      {d.browse && d.browse !== 'Offline' && d.browse !== 'Revoked' && (
+                        <span className="status-msg" title={BROWSE_HINTS[d.browse]}>
+                          <span className={`pill${d.browse === 'Available' ? ' pill-success' : d.browse === 'Wakeable' ? '' : ' pill-warning'}`}>{BROWSE_LABELS[d.browse]}</span>
+                        </span>
+                      )}
+                    </span>
                   </td>
                   <td data-label="Wake-ups" className="wrap">
                     {d.push ? (

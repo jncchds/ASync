@@ -129,7 +129,69 @@ export interface Device {
   revokedAt: string | null
   /** Where the server can wake it (UnifiedPush); null = it relies on its own schedule. */
   push: DevicePush | null
+  /** Whether the web UI can browse its folders now, and if not, why (null: an older server). */
+  browse?: BrowseAvailability | null
 }
+
+// ── Browsing a device's folders (the folder form's picker) ──────────────────
+
+export type BrowseAvailability = 'Available' | 'Offline' | 'Wakeable' | 'TurnedOff' | 'NoAllFilesAccess' | 'Unsupported' | 'Revoked'
+
+export const BROWSE_LABELS: Record<BrowseAvailability, string> = {
+  Available: 'Online · browsable',
+  Offline: 'Offline',
+  Wakeable: 'Asleep · wakes to browse',
+  TurnedOff: 'Online · browsing off',
+  NoAllFilesAccess: 'Online · needs All files access',
+  Unsupported: 'Online · update to browse',
+  Revoked: 'Removed',
+}
+
+export const BROWSE_HINTS: Record<BrowseAvailability, string> = {
+  Available: 'Its folders can be browsed when you attach it to a folder.',
+  Offline: 'Browsing needs the device online, with its app or agent running.',
+  Wakeable: 'Offline for now: Browse… wakes it through UnifiedPush and waits up to 30 seconds for it.',
+  TurnedOff: 'Allow browsing folders from the web in the device\'s settings (async-cli browsing --on).',
+  NoAllFilesAccess: 'Choose the folder in the app, or turn on All files access on the phone.',
+  Unsupported: 'Its app or agent is too old to be browsed: update it.',
+  Revoked: 'Removed from your account.',
+}
+
+export interface BrowseEntry {
+  name: string
+  kind: 'Directory' | 'File' | 'Symlink'
+  /** Directories: the full path on the device. */
+  path: string | null
+  size: number | null
+  linkTarget: string | null
+  unreadable: boolean
+  hidden: boolean
+}
+
+export interface BrowsePlace {
+  label: string
+  path: string
+  kind: 'Home' | 'Desktop' | 'Documents' | 'Downloads' | 'Pictures' | 'Music' | 'Videos' | 'Drive' | 'Volume' | 'Storage' | 'Root'
+}
+
+export interface BrowseListing {
+  path: string
+  parent: string | null
+  crumbs: { label: string; path: string }[]
+  entries: BrowseEntry[]
+  /** Entries left out after the limit. */
+  more: number
+  places: BrowsePlace[]
+  separator: string
+}
+
+/** Lists a directory of an online device (its home without a path); the device answers within 10 seconds. */
+export const browseDevice = (id: string, path?: string, files = true) =>
+  api.get<BrowseListing>(`/devices/${id}/browse`, { params: { path: path || undefined, files } }).then(r => r.data)
+
+/** Creates a folder on the device and lists it. */
+export const browseDeviceMkdir = (id: string, path: string, name: string) =>
+  api.post<BrowseListing>(`/devices/${id}/browse/mkdir`, { path, name }).then(r => r.data)
 
 /** A device's UnifiedPush registration: only the endpoint's host (the full address can wake the device). */
 export interface DevicePush {

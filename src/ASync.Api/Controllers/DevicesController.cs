@@ -6,6 +6,7 @@ using ASync.Contracts;
 using ASync.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace ASync.Api.Controllers;
 
@@ -19,9 +20,12 @@ public class DevicesController : ControllerBase
     private readonly DeviceProvisioningService _provisioning;
     private readonly PublicUrl _publicUrl;
     private readonly PushService _push;
+    private readonly DeviceBrowseService _browse;
 
-    public DevicesController(IDeviceRepository devices, DeviceProvisioningService provisioning, PublicUrl publicUrl, PushService push)
+    public DevicesController(IDeviceRepository devices, DeviceProvisioningService provisioning, PublicUrl publicUrl, PushService push,
+        DeviceBrowseService browse)
     {
+        _browse = browse;
         _push = push;
         _devices = devices;
         _provisioning = provisioning;
@@ -30,7 +34,36 @@ public class DevicesController : ControllerBase
 
     [HttpGet]
     public async Task<ActionResult<List<DeviceDto>>> GetAll() =>
-        (await _devices.GetForUserAsync(User.UserId())).Select(d => DeviceProvisioningService.ToDto(d, _push)).ToList();
+        (await _devices.GetForUserAsync(User.UserId())).Select(Dto).ToList();
+
+    private DeviceDto Dto(ASync.Core.Models.Device d) => DeviceProvisioningService.ToDto(d, _push) with { Browse = _browse.Availability(d) };
+
+    // ── Browsing a device's folders (the folder form's picker) ────────────────
+
+    /// <summary>
+    /// Lists a directory of the owner's online device (its home without <paramref name="path"/>): the device answers over
+    /// its live connection within 10 seconds. 409 when it is offline, revoked, has browsing turned off or (a phone) no All
+    /// files access; 504 when it does not answer. Nothing is stored.
+    /// </summary>
+    [HttpGet("{id:guid}/browse")]
+    [EnableRateLimiting(RateLimits.Browse)]
+    public async Task<ActionResult<BrowseListing>> Browse(Guid id, [FromQuery] string? path, [FromQuery] bool files = true) =>
+        Answer(await _browse.BrowseAsync(User.UserId(), id, new BrowseRequest(path, files), HttpContext.RequestAborted));
+
+    /// <summary>Creates a folder on the device (in <c>path</c>) and lists it.</summary>
+    [HttpPost("{id:guid}/browse/mkdir")]
+    [EnableRateLimiting(RateLimits.Browse)]
+    public async Task<ActionResult<BrowseListing>> BrowseMkdir(Guid id, [FromBody] BrowseMkdirRequest req)
+    {
+        // Ownership first: someone else's device is not found, whatever the request says.
+        if (await _devices.GetAsync(id) is not { } device || device.UserId != User.UserId()) return NotFound();
+        if (string.IsNullOrWhiteSpace(req.Path)) return BadRequest(new { message = "Open a folder first." });
+        if (string.IsNullOrWhiteSpace(req.Name)) return BadRequest(new { message = "Type a name for the new folder." });
+        return Answer(await _browse.BrowseAsync(User.UserId(), id, new BrowseRequest(req.Path, NewFolder: req.Name), HttpContext.RequestAborted));
+    }
+
+    private ActionResult<BrowseListing> Answer(BrowseOutcome outcome) =>
+        outcome.Listing is { } listing ? listing : StatusCode(outcome.Status, new { message = outcome.Message });
 
     [HttpPatch("{id:guid}")]
     public async Task<ActionResult<DeviceDto>> Rename(Guid id, [FromBody] RenameDeviceRequest req)
@@ -43,7 +76,7 @@ public class DevicesController : ControllerBase
             return BadRequest(new { message = "A device name of 1–100 characters is required." });
         device.Name = name;
         await _devices.UpdateAsync(device);
-        return DeviceProvisioningService.ToDto(device, _push);
+        return Dto(device);
     }
 
     /// <summary>Sends a test wake-up to the device's push endpoint now (the device syncs when it gets it).</summary>
@@ -54,7 +87,7 @@ public class DevicesController : ControllerBase
         if (device is null || device.UserId != User.UserId()) return NotFound();
         var outcome = await _push.WakeAsync(id, PushWake.Test, force: true, HttpContext.RequestAborted);
         if (!outcome.Sent || !outcome.Ok) return BadRequest(new { message = outcome.Message });
-        return DeviceProvisioningService.ToDto((await _devices.GetAsync(id))!, _push);
+        return Dto((await _devices.GetAsync(id))!);
     }
 
     /// <summary>

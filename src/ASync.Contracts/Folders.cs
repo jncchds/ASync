@@ -163,6 +163,8 @@ public static class SyncEvents
     public const string PurgeChanged = "purge.changed";
     /// <summary>No args. A usage scan of the person's folders finished: fetch <c>GET /api/usage</c> (and folders) again.</summary>
     public const string UsageChanged = "usage.changed";
+    /// <summary>Args: deviceId. A device came online, went offline or changed its browsing state: fetch <c>GET /api/devices</c> again.</summary>
+    public const string DeviceStatus = "device.status";
 }
 
 // ── Purging a deleted folder's stored data ───────────────────────────────────

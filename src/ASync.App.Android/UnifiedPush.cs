@@ -205,7 +205,7 @@ internal static class UnifiedPush
         try
         {
             using var doc = JsonDocument.Parse(body);
-            if (doc.RootElement.TryGetProperty("reason", out var r) && r.GetString() is PushWake.Changed or PushWake.Overdue or PushWake.Test)
+            if (doc.RootElement.TryGetProperty("reason", out var r) && r.GetString() is PushWake.Changed or PushWake.Overdue or PushWake.Test or PushWake.Browse)
                 return r.GetString()!;
         }
         catch (JsonException) { }

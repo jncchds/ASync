@@ -22,6 +22,7 @@ var folderOption = new Option<int>("--folder", "-f") { Description = "Folder id 
 var optionalFolderOption = new Option<int?>("--folder", "-f") { Description = "Only this folder." };
 var massDeleteOption = new Option<bool>("--allow-mass-delete") { Description = "Allow a sync to delete more than half of a folder's files." };
 var progressOption = new Option<bool>("--progress") { Description = "Print a line for every part of a large upload the server has stored." };
+var noBrowseOption = new Option<bool>("--no-browse") { Description = "Never let the web UI browse this device's folders (also: ASYNC_ALLOW_BROWSE=0)." };
 var passphraseFileOption = new Option<string?>("--passphrase-file") { Description = "Read the passphrase from this file (else ASYNC_PASSPHRASE, else ask)." };
 
 var root = new RootCommand("ASync agent: syncs and backs up this machine's folders through an ASync server.");
@@ -194,12 +195,43 @@ Define("run", "Keep syncing: on schedule, on file changes and when other devices
         await using var runtime = new AgentRuntime(new AgentOptions
         {
             ConfigDirectory = ctx.Store.Root, Mode = AgentMode.Foreground, Version = CliContext.Version, AllowMassDeletion = p.GetValue(massDeleteOption),
+            BrowsingForcedOff = p.GetValue(noBrowseOption),
         }, ctx.Loggers);
         runtime.Start();
         await runtime.RunAsync(ct);
         ctx.Loggers.CreateLogger("agent").LogInformation("Stopped.");
         return 0;
-    }, massDeleteOption);
+    }, massDeleteOption, noBrowseOption);
+
+// ── browsing from the web UI ──────────────────────────────────────────────────
+var browseOnOption = new Option<bool>("--on") { Description = "Allow the web UI to browse this device's folders (the default)." };
+var browseOffOption = new Option<bool>("--off") { Description = "Do not let the web UI browse this device's folders." };
+Define("browsing", "Show, allow (--on) or forbid (--off) browsing this device's folders from the web UI.", async (ctx, p, ct) =>
+{
+    bool? enabled = p.GetValue(browseOnOption) ? true : p.GetValue(browseOffOption) ? false : null;
+    if (p.GetValue(browseOnOption) && p.GetValue(browseOffOption)) throw new CliException("Choose --on or --off, not both.");
+    if (await AgentAsync(ctx, ct) is { } agent)
+        await using (agent)
+        {
+            if (enabled is bool value) Console.WriteLine(await agent.SetBrowsingAsync(value, ct));
+            else
+            {
+                var b = (await agent.StatusAsync(ct)).Browsing;
+                Console.WriteLine(b is null ? "This agent is too old to offer browsing."
+                    : $"Browsing from the web UI: {(b.Allowed ? "allowed" : "off")}{(b.Locked ? " (forced off by --no-browse or ASYNC_ALLOW_BROWSE)" : "")}.");
+            }
+            return 0;
+        }
+    // No agent runs: the setting is read when one starts.
+    var settings = AgentSettings.Load(ctx.Store.Root);
+    if (enabled is bool on)
+    {
+        (settings with { AllowBrowsing = on }).Save(ctx.Store.Root);
+        Console.WriteLine(on ? "The web UI may browse this device's folders while the agent runs." : "The web UI can no longer browse this device's folders.");
+    }
+    else Console.WriteLine($"Browsing from the web UI: {(settings.AllowBrowsing && !AgentSettings.BrowsingOffByEnvironment() ? "allowed" : "off")} (no agent is running).");
+    return 0;
+}, browseOnOption, browseOffOption);
 
 // ── device-side folder settings ───────────────────────────────────────────────
 var pathOption = new Option<string>("--path", "-p") { Description = "Where the folder lives on this device.", Required = true };

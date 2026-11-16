@@ -185,6 +185,11 @@ builder.Services.AddRateLimiter(o =>
     o.AddPolicy(RateLimits.DeviceSignIn, http => RateLimitPartition.GetFixedWindowLimiter(
         http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = RateLimits.DeviceSignInPermitsPerMinute, Window = TimeSpan.FromMinutes(1) }));
+    o.AddPolicy(RateLimits.Browse, http => RateLimitPartition.GetFixedWindowLimiter(
+        http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = RateLimits.BrowsePermitsPerMinute, Window = TimeSpan.FromMinutes(1) }));
+    o.OnRejected = (context, _) => new ValueTask(context.HttpContext.Response.WriteAsJsonAsync(
+        new { message = "Too many requests: wait a minute and try again." }, cancellationToken: _));
 });
 
 // Behind a reverse proxy (TLS terminated there): trust X-Forwarded-For/Proto so client IPs and https links are right.
@@ -198,11 +203,14 @@ if (builder.Configuration.GetValue<bool>("TrustForwardedHeaders"))
     });
 }
 
-// ── SignalR (/hubs/sync: notifications only) ──────────────────────────────────
-builder.Services.AddSignalR()
+// ── SignalR (/hubs/sync: notifications; devices also answer browse requests) ──
+builder.Services.AddSignalR(o => o.MaximumReceiveMessageSize = ASync.Contracts.BrowseLimits.MaxReplyBytes) // a device's directory listing
     .AddJsonProtocol(o => o.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddSingleton<ISyncNotifier, SyncNotifier>();
 builder.Services.AddSingleton<DeviceConnections>();
+builder.Services.AddSingleton<IDeviceBrowseChannel, HubDeviceBrowseChannel>();
+builder.Services.AddScoped<IDeviceWaker, PushDeviceWaker>();
+builder.Services.AddScoped<DeviceBrowseService>();
 
 // ── API ───────────────────────────────────────────────────────────────────────
 // Enums travel as strings, in controllers and (from M2) SignalR alike.

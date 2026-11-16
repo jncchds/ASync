@@ -77,8 +77,65 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public bool HasError => Error is not null;
 
+    // ── Browsing this device's folders from the web UI ────────────────────────
+
+    /// <summary>The agent offers browsing (an older agent reports nothing, and the setting is hidden).</summary>
+    [ObservableProperty] public partial bool SupportsBrowsing { get; private set; }
+
+    [ObservableProperty] public partial bool AllowBrowsing { get; set; }
+
+    /// <summary>Forced off where the agent was started (<c>--no-browse</c>, <c>ASYNC_ALLOW_BROWSE=0</c>).</summary>
+    [ObservableProperty] public partial bool BrowsingLocked { get; private set; }
+
+    [ObservableProperty] public partial string BrowsingNote { get; private set; } = "";
+
+    private bool _updatingBrowsing;
+
+    private void UpdateBrowsing(BrowsingStatusDto? browsing)
+    {
+        _updatingBrowsing = true;
+        try
+        {
+            SupportsBrowsing = browsing is not null && _enrolled;
+            AllowBrowsing = browsing?.Allowed == true;
+            BrowsingLocked = browsing?.Locked == true;
+            var where = _shell.OffersWebUi ? "the web UI" : "the web UI on your computer";
+            BrowsingNote = browsing switch
+            {
+                null => "",
+                { Locked: true } => "Turned off where the agent was started (--no-browse or ASYNC_ALLOW_BROWSE=0).",
+                { Allowed: true, Unavailable: { } why } => why,
+                { Allowed: true } => $"When you attach a folder in {where}, you can pick its place on this {_shell.Platform.DeviceNoun} instead of typing the path. Nothing is listed unless you ask, and only while this {_shell.Platform.DeviceNoun} is online.",
+                _ => $"Folder paths for this {_shell.Platform.DeviceNoun} are typed in {where}.",
+            };
+        }
+        finally { _updatingBrowsing = false; }
+    }
+
+    private bool _enrolled;
+
+    partial void OnAllowBrowsingChanged(bool value)
+    {
+        if (!_loaded || _updatingBrowsing) return;
+        _ = SetBrowsingAsync(value);
+    }
+
+    private async Task SetBrowsingAsync(bool value)
+    {
+        if (!await _shell.RunAsync(async (s, ct) => await s.SetBrowsingAsync(value, ct)))
+        {
+            Error = _shell.Message;
+            _updatingBrowsing = true;
+            AllowBrowsing = !value;
+            _updatingBrowsing = false;
+        }
+        else Error = null;
+    }
+
     public void Update(AgentStatusDto status)
     {
+        _enrolled = status.Device is not null;
+        UpdateBrowsing(status.Browsing);
         DeviceText = status.Device is { } d ? $"{d.DeviceName} · {d.Username} on {d.ServerUrl}" : null;
         AgentText = status.Mode switch
         {

@@ -6,7 +6,7 @@ namespace ASync.Contracts;
 
 public record DeviceDto(
     Guid Id, string Name, DevicePlatform Platform, string? AppVersion,
-    DateTime CreatedAt, DateTime? LastSeenAt, DateTime? RevokedAt, DevicePushDto? Push = null);
+    DateTime CreatedAt, DateTime? LastSeenAt, DateTime? RevokedAt, DevicePushDto? Push = null, BrowseAvailability? Browse = null);
 
 // ── Push (wake-ups, M4-2) ─────────────────────────────────────────────────────
 
@@ -32,6 +32,8 @@ public static class PushWake
     public const string Changed = "changed";
     public const string Overdue = "overdue";
     public const string Test = "test";
+    /// <summary>Someone is browsing the device's folders in the web UI: connect to the hub now and stay a few minutes (task 17).</summary>
+    public const string Browse = "browse";
 }
 
 public record RenameDeviceRequest(string Name);

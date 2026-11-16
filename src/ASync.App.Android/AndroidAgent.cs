@@ -72,6 +72,8 @@ public static class AndroidAgent
                 SettleTime = SettleTime,
                 RunAtStart = false,
                 RunOnInterval = false,
+                // The web UI may browse the shared storage's real paths, with All files access only (task 17).
+                Browse = new PhoneBrowseScope(AndroidStorage.Instance),
             }, loggers);
             runtime.Start();
             _runtime = runtime;

@@ -206,6 +206,15 @@ internal static class BackgroundWork
     /// <summary>A wake-up from the server: an expedited job runs the folders it concerns (<see cref="BackgroundPlanner.FoldersToWake"/>).</summary>
     public static void Wake(Context context, string reason)
     {
+        if (reason == PushWake.Browse)
+        {
+            // Someone is choosing a folder of this phone in the web UI: be online for that, don't run folders.
+            var browse = new OneTimeWorkRequest.Builder(typeof(BrowseWakeWorker)).AddTag(Tag).AddTag(BrowseWakeWorker.Name);
+            browse.SetExpedited(OutOfQuotaPolicy.RunAsNonExpeditedWorkRequest!);
+            WorkManager.GetInstance(context).EnqueueUniqueWork(BrowseWakeWorker.Name, ExistingWorkPolicy.Keep!, (OneTimeWorkRequest)browse.Build());
+            Log.Info("ASync", "Background: woken by the server for browsing.");
+            return;
+        }
         var request = new OneTimeWorkRequest.Builder(typeof(FolderRunWorker))
             .SetInputData(new Data.Builder().PutInt(FolderRunWorker.FolderKey, -1).PutString(FolderRunWorker.ReasonKey, reason).Build())
             .SetConstraints(new Constraints.Builder().SetRequiredNetworkType(NetworkType.Connected!).Build())
@@ -273,6 +282,53 @@ internal static class Reminders
 /// cleanly (interrupted transfers continue next time) and retried.
 /// </summary>
 [Register("ua.pp.chds.async.FolderRunWorker")]
+/// <summary>
+/// A "browse" wake-up (task 17): the person is choosing a folder of this phone in the web UI. Starts the agent, opens a
+/// fresh live connection (the server waits up to 30 s for it), and keeps the process online while the picker is used: until
+/// <see cref="Idle"/> passes without a listing request, at most <see cref="Longest"/>. Runs no folders.
+/// </summary>
+public sealed class BrowseWakeWorker(Context context, WorkerParameters parameters) : Worker(context, parameters)
+{
+    public const string Name = "browse-wake";
+    public static readonly TimeSpan Idle = TimeSpan.FromSeconds(90);
+    public static readonly TimeSpan Longest = TimeSpan.FromMinutes(5);
+    private readonly CancellationTokenSource _stop = new();
+
+    public override Result DoWork()
+    {
+        AndroidAgent.EnsureStarted(ApplicationContext!);
+        var runtime = AndroidAgent.Runtime;
+        var started = DateTimeOffset.UtcNow;
+        try
+        {
+            if (!runtime.WakeForBrowsingAsync(TimeSpan.FromSeconds(20), _stop.Token).GetAwaiter().GetResult())
+            {
+                Log.Info("ASync", "Woken for browsing, but no device is running here.");
+                return Result.InvokeSuccess()!;
+            }
+            while (!_stop.IsCancellationRequested)
+            {
+                var now = DateTimeOffset.UtcNow;
+                var last = runtime.LastBrowseAt is { } at && at > started ? at : started;
+                if (now - last > Idle || now - started > Longest) break;
+                _stop.Token.WaitHandle.WaitOne(TimeSpan.FromSeconds(2));
+            }
+            Log.Info("ASync", $"Browsing wake-up over after {(DateTimeOffset.UtcNow - started).TotalSeconds:0} s.");
+        }
+        catch (System.OperationCanceledException) { }
+        return Result.InvokeSuccess()!;
+    }
+
+    public override void OnStopped()
+    {
+        _stop.Cancel();
+        base.OnStopped();
+    }
+
+    /// <summary>Expedited work on Android 11 and older runs as a foreground service and needs a notification.</summary>
+    public override ForegroundInfo ForegroundInfo => Notifications.TransferInfo(ApplicationContext!, Notifications.Transfer(ApplicationContext!, null, null));
+}
+
 public sealed class FolderRunWorker(Context context, WorkerParameters parameters) : Worker(context, parameters)
 {
     public const string FolderKey = "folder";

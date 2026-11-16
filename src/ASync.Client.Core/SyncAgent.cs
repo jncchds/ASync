@@ -5,6 +5,8 @@ using ASync.Contracts;
 using ASync.Engine.Local;
 using ASync.Engine.Maintenance;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace ASync.Client.Core;
@@ -185,6 +187,46 @@ public sealed class SyncAgent : IAsyncDisposable
 
     /// <summary>Called after each stored part of a large upload: path (on the storage), bytes stored, size.</summary>
     public Action<string, long, long>? UploadProgress { get; init; }
+
+    /// <summary>
+    /// Answers the web UI's requests to list this device's directories (through the server, over the hub), and tells the
+    /// server whether it may. Null: the device does not offer browsing (a one-off <c>async-cli sync</c>).
+    /// </summary>
+    public Browse.DeviceBrowser? Browser { get; init; }
+
+    /// <summary>The web UI asked this device to list a directory (any thread; handlers must be quick).</summary>
+    public event Action? BrowseRequested;
+
+    private DateTimeOffset _hubStartedAt;
+
+    /// <summary>
+    /// Makes sure the live connection is fresh, now: the server woke this device for browsing (a "browse" push), so the
+    /// person is waiting. A phone the system froze still believes its old connection is open and would notice only after the
+    /// client's 30-second server timeout, then wait its reconnect delay; so a connection that was not opened in the last few
+    /// seconds is closed and opened again at once. A cold start (the process began with this wake) is left alone.
+    /// </summary>
+    public async Task RefreshLiveConnectionAsync(CancellationToken ct = default)
+    {
+        if (_hub is not { } hub) return;
+        if (hub.State == HubConnectionState.Connecting) return;
+        if (hub.State == HubConnectionState.Connected && DateTimeOffset.UtcNow - _hubStartedAt < TimeSpan.FromSeconds(10)) return;
+        _logger.LogInformation("Woken for browsing: opening a fresh live connection.");
+        try { if (hub.State != HubConnectionState.Disconnected) await hub.StopAsync(ct); }
+        catch (Exception e) when (e is not OperationCanceledException) { _logger.LogDebug("Closing the old connection: {Message}", e.Message); }
+        if (!await TryStartHubAsync(ct, logFailure: true)) _ = KeepConnectingAsync(ct);
+    }
+
+    /// <summary>Tells the server the browsing state now (after the setting or the phone's All files access changed).</summary>
+    public async Task ReportBrowseStateAsync(CancellationToken ct = default)
+    {
+        if (Browser is not { } browser || _hub is not { State: HubConnectionState.Connected } hub) return;
+        try { await hub.InvokeAsync("ReportBrowse", browser.State, ct); }
+        catch (Exception e) when (e is HubException or InvalidOperationException or IOException or TaskCanceledException)
+        {
+            // An older server has no such method: the web UI then has no browsing to offer anyway.
+            _logger.LogDebug("Could not report the browsing state: {Message}", e.Message);
+        }
+    }
 
     /// <summary>Raised after every folder run (for UIs and logs).</summary>
     public event Action<FolderRunResult>? FolderRan;
@@ -416,8 +458,21 @@ public sealed class SyncAgent : IAsyncDisposable
                 catch (DeviceRevokedException e) { Observe(e); throw; }
             })
             .WithAutomaticReconnect(new ForeverRetry())
+            .AddJsonProtocol(o => o.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()))
             .Build();
         _hub.On<SyncEvent>("event", e => _ = OnEventAsync(e, ct));
+        if (Browser is { } browser)
+            // A SignalR client result: the server's InvokeAsync waits (with its timeout) for what this returns. Off the
+            // hub's receive loop, since listing a slow disk must not hold up events.
+            _hub.On<BrowseRequest, BrowseReply>("browse", request => Task.Run(() =>
+            {
+                try { BrowseRequested?.Invoke(); }
+                catch (Exception e) { _logger.LogDebug("A browse listener failed: {Message}", e.Message); }
+                var reply = browser.Browse(request);
+                _logger.LogInformation("Browse from the web UI: {Path} → {Result}", request.Path is { Length: > 0 } p ? p : "(start)",
+                    reply.Listing is { } l ? $"{l.Entries.Count + l.More} entries" : reply.Refusal.ToString());
+                return reply;
+            }));
         _hub.Reconnecting += e =>
         {
             _hubReconnecting = true;
@@ -428,6 +483,7 @@ public sealed class SyncAgent : IAsyncDisposable
         {
             _hubReconnecting = false;
             SetConnection(AgentConnection.Connected);
+            await ReportBrowseStateAsync(ct);
             await ReloadAsync(ct); // events may have been missed while offline
             RaiseRemoteChanged(0);
             TriggerDownloads("reconnected"); // including folder.changed (a phone frozen in the background, say)
@@ -446,7 +502,9 @@ public sealed class SyncAgent : IAsyncDisposable
         try
         {
             await _hub!.StartAsync(ct);
+            _hubStartedAt = DateTimeOffset.UtcNow;
             SetConnection(AgentConnection.Connected);
+            await ReportBrowseStateAsync(ct);
             return true;
         }
         catch (Exception e) when (e is HttpRequestException or ApiException or System.Net.WebSockets.WebSocketException or IOException)

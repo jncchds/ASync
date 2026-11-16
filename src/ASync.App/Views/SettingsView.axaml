@@ -39,6 +39,11 @@
           <Button Classes="danger" Name="SignOut" Content="Sign out of this device…" Command="{Binding SignOutCommand}"
                   IsVisible="{Binding CanSignOut}" IsEnabled="{Binding !ConfirmingSignOut}" />
         </WrapPanel>
+        <StackPanel Spacing="4" Name="BrowsingPanel" IsVisible="{Binding SupportsBrowsing}">
+          <CheckBox Name="AllowBrowsing" Content="Allow browsing folders from the web" IsChecked="{Binding AllowBrowsing}"
+                    IsEnabled="{Binding !BrowsingLocked}" />
+          <TextBlock Classes="muted small" Name="BrowsingNote" Text="{Binding BrowsingNote}" TextWrapping="Wrap" />
+        </StackPanel>
         <Border Classes="notice danger" IsVisible="{Binding ConfirmingSignOut}">
           <StackPanel Spacing="8">
             <TextBlock Text="{Binding SignOutText}" TextWrapping="Wrap" />

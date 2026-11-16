@@ -95,7 +95,8 @@ public sealed partial class BackgroundViewModel : ObservableObject
 
     public const string PushExplanation =
         "With a UnifiedPush distributor such as ntfy installed, the server can wake this phone when another device changes a " +
-        "folder, or when it has not synced for too long. Nothing else goes through it: the message only says \"wake up\". " +
+        "folder, when it has not synced for too long, or when you browse its folders from the web. Nothing else goes through it: " +
+        "the message only says \"wake up\". " +
         "Without one, folders still sync on their schedule.";
 
     private bool CanRegister() => SelectedDistributor is not null;

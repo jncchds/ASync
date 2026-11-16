@@ -366,6 +366,44 @@ pre.command {
 .tree-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .crumbs { font-size: 0.9rem; overflow-wrap: anywhere; min-width: 0; }
 
+/* ── Device folder picker (FolderDeviceForm's Browse…) ── */
+.path-field { min-width: 0; }
+.input-with-button { display: flex; gap: 0.4rem; align-items: stretch; min-width: 0; }
+.input-with-button input { flex: 1 1 auto; min-width: 0; }
+.input-with-button button { flex: 0 0 auto; }
+.picker {
+  display: flex; flex-direction: column; gap: 0.6rem; min-width: 0;
+  border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem; background: var(--surface-2);
+}
+.picker-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.picker-head h3 { font-size: 0.95rem; overflow-wrap: anywhere; min-width: 0; }
+.picker-places { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.picker-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; min-width: 0; }
+.picker-toolbar .crumbs { flex: 1 1 200px; }
+.picker-path {
+  display: block; font-size: 0.78rem; color: var(--text-muted); background: var(--input-bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.3rem 0.5rem; overflow-wrap: anywhere;
+}
+.picker-list {
+  list-style: none; max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); min-width: 0;
+}
+.picker-list.busy { opacity: 0.6; }
+.picker-list li { border-bottom: 1px solid var(--border); min-width: 0; }
+.picker-list li:last-child { border-bottom: none; }
+.picker-dir {
+  width: 100%; display: flex; gap: 0.4rem; align-items: center; justify-content: flex-start; text-align: left; padding: 0.4rem 0.6rem;
+  background: transparent; color: var(--text); border: none; border-radius: 0; font-weight: 500;
+}
+.picker-dir:hover:not(:disabled) { background: var(--accent-faint); color: var(--text); }
+.picker-other { display: flex; gap: 0.4rem; align-items: baseline; padding: 0.35rem 0.6rem; color: var(--text-muted); font-size: 0.85rem; }
+.picker-other .small-text { margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.picker-name { overflow-wrap: anywhere; min-width: 0; }
+.picker-empty { padding: 0.5rem 0.6rem; font-size: 0.85rem; }
+.picker-options { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
+.picker .inline-form { max-width: none; flex-wrap: wrap; }
+.picker .inline-form input { flex: 1 1 160px; }
+
 /* ── Files of Mirror/TwoWay folders ── */
 .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); margin-bottom: 0.9rem; flex-wrap: wrap; }
 .tab {
@@ -395,4 +433,7 @@ button.secondary.active { border-color: var(--accent); color: var(--accent); }
   .app-sidebar.expanded ~ .app-main { margin-left: 48px; }
   .sidebar-backdrop { display: block; position: absolute; inset: 0; z-index: 50; background: var(--shadow); }
   .inline-form { max-width: none; }
+  /* The picker's starting points: one row that scrolls sideways, not five rows of buttons. */
+  .picker-places { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 0.2rem; }
+  .picker-places button { flex: 0 0 auto; }
 }
