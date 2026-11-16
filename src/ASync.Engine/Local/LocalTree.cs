@@ -38,6 +38,15 @@ public interface ILocalTree
     bool Exists();
 
     /// <summary>
+    /// Why the tree cannot be used now, for people, when the reason is not just a missing root (Android's "All files
+    /// access" turned off, say); null otherwise. Callers show it when <see cref="Exists"/> is false.
+    /// </summary>
+    string? UnavailableReason => null;
+
+    /// <summary>Whether the agent watches <see cref="FileSystemPath"/> for changes (Android's shared storage: no).</summary>
+    bool Watchable => FileSystemPath is not null;
+
+    /// <summary>
     /// The entries of a directory. Throws <see cref="UnauthorizedAccessException"/> when it cannot be read (it must
     /// never look empty instead: a sync would delete its files elsewhere) and <see cref="DirectoryNotFoundException"/>
     /// when it does not exist.
@@ -73,6 +82,12 @@ public interface ILocalTreeFactory
 
     /// <summary>Null when <paramref name="location"/> can be a folder's local path here; otherwise why not, for people.</summary>
     string? Validate(string location);
+
+    /// <summary>
+    /// Whether two local paths name the same directory although they are written differently (Android: a document tree's
+    /// content URI and the real path of the same folder). A folder moved between such paths keeps its sync state.
+    /// </summary>
+    bool SamePlace(string a, string b) => string.Equals(a, b, StringComparison.Ordinal);
 }
 
 /// <summary>Directories on disk only: the desktop and the CLI.</summary>
@@ -167,4 +182,102 @@ public sealed class FileSystemTree : ILocalTree
     }
 
     public static long Ms(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+}
+
+/// <summary>
+/// A tree that can be taken away while it is in use: every call first asks <c>blocked</c>, and while it answers a reason
+/// the tree does not exist (<see cref="ILocalTree.Exists"/> false, <see cref="UnavailableReason"/> that reason) and every
+/// other call throws <see cref="UnauthorizedAccessException"/>, so a sync stops instead of seeing an empty folder. Android
+/// wraps real paths in it: "All files access" can be turned off in the system settings at any time, and a listing made
+/// without it shows only some files (media), which a sync would take for deletions. <c>hidden</c> are paths (relative to
+/// the root) the tree never lists or writes: Android/data and Android/obb, which no app may read since Android 13.
+/// </summary>
+public sealed class GuardedTree(ILocalTree inner, Func<string?> blocked, IReadOnlyCollection<string>? hidden = null, string? name = null, bool watchable = true)
+    : ILocalTree
+{
+    private readonly HashSet<string> _hidden = new(hidden ?? [], StringComparer.OrdinalIgnoreCase);
+
+    public ILocalTree Inner => inner;
+    public string Location => inner.Location;
+    public string Name => name ?? inner.Name;
+    public string? FileSystemPath => inner.FileSystemPath;
+    public bool Watchable => watchable && inner.Watchable;
+    public bool CanSetModified => inner.CanSetModified;
+    public string? UnavailableReason => blocked() ?? inner.UnavailableReason;
+
+    public bool Exists() => blocked() is null && inner.Exists();
+
+    private void Check()
+    {
+        if (blocked() is { } reason) throw new UnauthorizedAccessException(reason);
+    }
+
+    /// <summary>The path or one of its parents is hidden.</summary>
+    public bool IsHidden(string path)
+    {
+        if (_hidden.Count == 0 || path.Length == 0) return false;
+        if (_hidden.Contains(path)) return true;
+        for (var slash = path.IndexOf('/'); slash >= 0; slash = path.IndexOf('/', slash + 1))
+            if (_hidden.Contains(path[..slash])) return true;
+        return false;
+    }
+
+    private void CheckWritable(string path)
+    {
+        Check();
+        if (IsHidden(path)) throw new IOException($"{path} is out of reach for apps on this phone (Android keeps Android/data and Android/obb to their apps).");
+    }
+
+    public IReadOnlyList<LocalEntry> List(string directory)
+    {
+        Check();
+        if (IsHidden(directory)) throw new DirectoryNotFoundException($"{directory} is out of reach for apps on this phone.");
+        var entries = inner.List(directory);
+        if (_hidden.Count == 0) return entries;
+        return [.. entries.Where(e => !IsHidden(directory.Length == 0 ? e.Name : $"{directory}/{e.Name}"))];
+    }
+
+    public LocalEntry? Stat(string path)
+    {
+        Check();
+        return IsHidden(path) ? null : inner.Stat(path);
+    }
+
+    public Stream OpenRead(string path)
+    {
+        Check();
+        if (IsHidden(path)) throw new FileNotFoundException($"{path} is out of reach for apps on this phone.");
+        return inner.OpenRead(path);
+    }
+
+    public Stream OpenAppend(string path)
+    {
+        CheckWritable(path);
+        return inner.OpenAppend(path);
+    }
+
+    public void Move(string from, string to, bool overwrite)
+    {
+        CheckWritable(from);
+        CheckWritable(to);
+        inner.Move(from, to, overwrite);
+    }
+
+    public void DeleteFile(string path)
+    {
+        CheckWritable(path);
+        inner.DeleteFile(path);
+    }
+
+    public void DeleteDirectory(string path)
+    {
+        CheckWritable(path);
+        inner.DeleteDirectory(path);
+    }
+
+    public bool TrySetModified(string path, long modified)
+    {
+        CheckWritable(path);
+        return inner.TrySetModified(path, modified);
+    }
 }

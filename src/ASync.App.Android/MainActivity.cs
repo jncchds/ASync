@@ -41,6 +41,9 @@ public sealed class AndroidShellApp : App
 
     public static ShellViewModel? Shell => _shell;
 
+    /// <summary>The shell's view while the activity shows it (the automation scrolls it for screenshots).</summary>
+    public static Control? View { get; private set; }
+
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is ISingleViewApplicationLifetime single)
@@ -54,6 +57,7 @@ public sealed class AndroidShellApp : App
                 _shell.Start();
             }
             var view = new ShellView { DataContext = _shell };
+            View = view;
             view.AttachedToVisualTree += (_, _) =>
             {
                 if (TopLevel.GetTopLevel(view) is { } top)
@@ -107,6 +111,14 @@ public sealed class MainActivity : AvaloniaMainActivity
         AndroidAgent.AppOpened();
         // Back from the system's battery question or a distributor: show what changed.
         if (AndroidShellApp.Shell?.Background is { } background) Dispatcher.UIThread.Post(background.Refresh);
+        // Back from the All files access page: the folder dialog, Settings and the folder cards look again.
+        AndroidStorage.Instance.NotifyChanged();
+    }
+
+    public override void OnRequestPermissionsResult(int requestCode, string[] permissions, Permission[] grantResults)
+    {
+        base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 2) AndroidStorage.Instance.NotifyChanged(); // the storage permission on Android 8–10
     }
 
     /// <summary>A pairing link to fill in when the activity shows (from <see cref="LinkActivity"/>).</summary>

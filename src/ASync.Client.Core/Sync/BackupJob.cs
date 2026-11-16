@@ -65,9 +65,9 @@ public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid devi
     {
         var tree = local ?? new FileSystemTree(folder.LocalPath);
         if (!tree.Exists())
-            throw new SyncRefusedException(tree.FileSystemPath is null
+            throw new SyncRefusedException(tree.UnavailableReason ?? (tree.FileSystemPath is null
                 ? $"The folder {tree.Location} cannot be used (was it deleted, or its permission taken back?). Choose the folder again."
-                : $"The folder {folder.LocalPath} does not exist (is the disk mounted?).");
+                : $"The folder {folder.LocalPath} does not exist (is the disk mounted?)."));
 
         var parent = (await repository.ListSnapshotsAsync(ct)).LastOrDefault(s => s.Source == Source);
         var snapshot = await new BackupRunner(repository).RunAsync(tree, new BackupOptions

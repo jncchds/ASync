@@ -2,6 +2,16 @@
 
 ## v0.1.5 — 2026-11-16
 
+- feat(android): **Folders anywhere on the phone, including the top of the storage.** Android's own folder picker refuses
+  the root of the internal storage, of an SD card and Download "to protect your privacy"; like FolderSync, Solid Explorer
+  and Syncthing-fork, ASync can now ask for *All files access* instead. *Choose folder…* explains why in one screen and
+  opens Android's switch for ASync (or keeps the system picker if you say no); with it, ASync's own picker shows the
+  internal storage, each SD card and USB drive by name, and every folder on them, roots and Download included (not
+  Android/data and Android/obb, which no app may read since Android 13). The server and the web UI show such a folder as
+  its real path (`/storage/emulated/0/DCIM`). A folder chosen with the system picker before is offered its real path
+  once the access is on, keeping its sync state: nothing is uploaded again. *Settings → Folders on this phone* shows
+  whether it is on. Turned off later, those folders stop with "All files access was turned off" and nothing is deleted
+  anywhere. Tried on an Android 15 emulator.
 - feat(android): **ASync in the Files app.** Your folders and backups show in Android's Files app and in every app's
   file picker ("attach a file", "open", "save to") as *ASync — <your server>*, without syncing them to the phone first:
   files are fetched when you open them, kept in a 512 MB cache, and anything over 128 MB streams (videos can be skipped

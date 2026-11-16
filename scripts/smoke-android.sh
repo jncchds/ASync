@@ -525,7 +525,7 @@ wait_for 90 phone_note "replaced in the Files app" && pass "and the phone's copy
 conflicts=$(adb shell ls /sdcard/ASyncSmoke/docs 2>/dev/null | tr -d '\r' | grep -c conflict || true)
 [[ "$conflicts" == 0 ]] && pass "no conflict copies from the provider's own writes" || fail "conflict copies" "$(adb shell ls /sdcard/ASyncSmoke/docs)"
 renamed=$(docs_ctl "rename $new provider-renamed.txt")
-[[ "$renamed" == "f/$docs/provider-renamed.txt" ]] && server_has "$docs" provider-renamed.txt >/dev/null && pass "renamed to $renamed" || fail "rename" "$renamed"
+[[ "$renamed" == "f/$docs/provider-renamed.txt" ]] && server_has "$docs" provider-renamed.txt >/dev/null && pass "renamed to $renamed" || fail "rename" "$renamed $(adb logcat -d -s ASync | grep Documents | tail -5)"
 dir=$(docs_ctl "mkdir f/$docs Scans")
 docs_ctl "list f/$docs" | jq -e '.entries | any(._display_name == "Scans" and .mime_type == "vnd.android.document/directory")' >/dev/null \
   && pass "a new directory ($dir) is listed (kept on the phone until a file goes in)" || fail "mkdir" "$dir"
@@ -744,6 +744,149 @@ r=$(ctl "bg-remind-now $docs")
 wait_bg '.works | any(.tags == "reminder" and .state == "ENQUEUED")' 20 && pass "reminders are scheduled (moved on after each successful run)" || fail "reminder scheduled" "$(bgstate | jq -c .works)"
 
 fi # SKIP_BACKGROUND
+
+section "All files access: folders anywhere on the phone"
+running() { [[ -n "$(adb shell pidof "$pkg" | tr -d '\r')" ]]; }
+front_app() { adb shell am start -W -n "$pkg/$pkg.MainActivity" >/dev/null; wait_state '.page == "DashboardViewModel"' 60; }
+# The switch on Android's page sets the uid's mode, which wins over the package's: set (and read) both, as Settings does.
+appop() { adb shell appops get --uid "$pkg" MANAGE_EXTERNAL_STORAGE | tr -d '\r' | sed -n 1p; }
+set_appop() { adb shell appops set --uid "$pkg" MANAGE_EXTERNAL_STORAGE "$1"; adb shell appops set "$pkg" MANAGE_EXTERNAL_STORAGE "$1"; }
+# A test volume: the emulator's virtual SD card (a public volume of its own, mounted at /storage/<id>).
+sd=""
+if [[ -z "$(adb shell sm list-volumes public | tr -d '\r' | awk '$2 == "mounted"')" ]]; then
+  adb shell sm set-virtual-disk true >/dev/null 2>&1 || true
+  disk_found() { [[ "$(adb shell sm list-disks | tr -d '\r')" == disk:* ]]; }
+  wait_for 30 disk_found && adb shell sm partition "$(adb shell sm list-disks | tr -d '\r' | head -1)" public >/dev/null 2>&1 || true
+fi
+sd_mounted() { [[ -n "$(adb shell sm list-volumes public | tr -d '\r' | awk '$2 == "mounted" {print $3}')" ]]; }
+wait_for 60 sd_mounted && sd="/storage/$(adb shell sm list-volumes public | tr -d '\r' | awk '$2 == "mounted" {print $3; exit}')"
+[[ -n "$sd" ]] && pass "a test volume: the virtual SD card at $sd" || echo "    (no virtual SD card: the folder goes to Download)"
+target="${sd:-/storage/emulated/0/Download}"
+# The background sections leave the app in the background (or its process killed): bring it up, signed in.
+# Back to "not granted" first: changing the permission makes Android stop the app's process (also an earlier run's grant,
+# which the uid can keep across a reinstall).
+set_appop default
+sleep 2
+front_app
+wait_state '.state == "Connected"' 90 || fail "app connected" "$(state)"
+adb shell "rm -rf '$target/.async' '$target/root-from-phone.txt' '$target/root-from-cli.txt'; echo 'at the root' > '$target/root-from-phone.txt'"
+settle "$target/root-from-phone.txt"
+rootf=$(api POST /api/folders "{\"name\":\"Phone root\",\"mode\":\"TwoWay\",\"encryption\":\"Transport\",\"kind\":\"Files\",\"storageBackendId\":$backend,\"rootPath\":\"root\",\"intervalMinutes\":60}" | jq -r .id)
+api PUT "/api/folders/$rootf/devices" "{\"deviceId\":\"$device\",\"localPath\":\"choose on the phone\"}" >/dev/null
+wait_state '.folders | any(.name == "Phone root")' 60 || fail "root folder appears" "$(state)"
+ctl "storage refresh" >/dev/null
+[[ "$(ctl "choose-local $rootf")" == explaining ]] && pass "without All files access, Choose folder… explains why first" || fail "explanation" "$(ctl picker)"
+shot allfiles-explain
+ctl picker-allow >/dev/null
+settings_page() { adb shell dumpsys activity activities | grep -m1 ResumedActivity | grep -q "com.android.settings"; }
+wait_for 20 settings_page && pass "Allow all files access opens the system's page for ASync" \
+  || fail "system page" "$(adb shell dumpsys activity activities | grep -m1 ResumedActivity)"
+sleep 2; dismiss_anr
+shot_system allfiles-system
+tap_text 'allow access to manage all files' 15 && sleep 2 || true
+if contains allow appop; then pass "the person turns it on there ($(appop))"
+else echo "    (the switch was not tapped: granted with appops)"; fi
+set_appop allow
+adb shell input keyevent KEYCODE_BACK
+running || front_app
+wait_for 10 top_is "$pkg/.MainActivity" || front_app
+ctl "storage refresh" >/dev/null
+wait_state '.allFiles == true and .folderDialog == "picking"' 20 \
+  && pass "back in the app with the permission: the in-app picker replaces the explanation" || fail "picker after grant" "$(state) $(ctl picker)"
+picker=$(ctl picker)
+jq -e '.path == "/storage/emulated/0" and .breadcrumb == "Internal storage" and (.entries | index("Download")) and (.entries | index("Android")) and (.canGoUp | not)' <<<"$picker" >/dev/null \
+  && pass "it opens at the root of the internal storage, Download offered ($(jq -c .entries <<<"$picker"))" || fail "picker root" "$picker"
+inside=$(ctl "picker-open Android")
+jq -e '(.entries | index("data") | not) and (.entries | index("obb") | not)' <<<"$inside" >/dev/null \
+  && pass "Android/data and Android/obb are not offered ($(jq -c .entries <<<"$inside"))" || fail "android data offered" "$inside"
+ctl picker-up >/dev/null
+shot allfiles-picker
+storage=$(ctl storage)
+if [[ -n "$sd" ]]; then
+  jq -e --arg p "$sd" '.volumes | length == 2 and .[0].label == "Internal storage" and .[1].path == $p' <<<"$storage" >/dev/null \
+    && pass "the volumes: $(jq -r '[.volumes[] | "\(.label) (\(.path))"] | join(", ")' <<<"$storage")" || fail "volumes" "$storage"
+  picked=$(ctl "picker-volume 1")
+  [[ "$(jq -r .path <<<"$picked")" == "$sd" ]] && pass "the SD card's root can be chosen: $(jq -r .breadcrumb <<<"$picked")" || fail "sd root" "$picked"
+else
+  ctl "picker-open Download" >/dev/null
+fi
+answer=$(ctl picker-use)
+wait_state ".folders[] | select(.name == \"Phone root\") | .path == \"$target\"" 30 && pass "Phone root syncs at $target ($answer)" || fail "root path" "$answer $(state)"
+api GET "/api/folders/$rootf" | jq -e --arg p "$target" '.devices[] | select(.localPath == $p)' >/dev/null \
+  && pass "the server has the real path as the local path (the web UI shows $target)" || fail "server real path" "$(api GET "/api/folders/$rootf")"
+selftest=$(ctl "selftest $rootf" || ctl "selftest $rootf")
+[[ "$selftest" =~ ^([0-9]+)/([0-9]+)\ passed\ \(GuardedTree\)$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]] \
+  && pass "local tree contract on the real path: $selftest" || fail "real path tree contract" "$selftest"
+
+# Both ways with async-cli.
+mkdir -p "$work/cli-root"
+api PUT "/api/folders/$rootf/devices" "{\"deviceId\":\"$cli_device\",\"localPath\":\"$work/cli-root\"}" >/dev/null
+r=$(sync_phone "$rootf")
+jq -e '.ok' <<<"$r" >/dev/null && pass "the phone syncs the volume's root: $(jq -r .message <<<"$r")" || fail "root sync" "$r"
+server_has "$rootf" root-from-phone.txt >/dev/null && pass "up: root-from-phone.txt is on the server" || fail "root upload"
+android_clean() {
+  [[ "$(api GET "/api/folders/$rootf/files" | jq -r '[.entries[].name] | index("Android")')" == null ]] && return 0
+  api GET "/api/folders/$rootf/files?path=Android" | jq -e '[.entries[].name] | (index("data") == null and index("obb") == null)' >/dev/null
+}
+android_clean && pass "nothing of Android/data or Android/obb went up" || fail "android data synced" "$(api GET "/api/folders/$rootf/files?path=Android")"
+cli_root_sync() { local out; for _ in 1 2 3 4 5 6; do out=$(cli sync --folder "$rootf" 2>&1) || true; [[ "$out" != *"Another device is syncing"* ]] && return 0; sleep 5; done; echo "$out" >&2; }
+cli_root_sync
+[[ "$(cat "$work/cli-root/root-from-phone.txt" 2>/dev/null)" == "at the root" ]] && pass "and on the other device" || fail "cli got root file"
+echo "from the computer, to the root" > "$work/cli-root/root-from-cli.txt"
+cli_root_sync
+r=$(sync_phone "$rootf")
+[[ "$(on_phone "$target/root-from-cli.txt")" == "from the computer, to the root" ]] && pass "down: root-from-cli.txt arrived at $target ($(jq -r .message <<<"$r"))" || fail "root download" "$r"
+r=$(sync_phone "$rootf" | jq -r .message)
+[[ "$r" == "0 up, 0 down, 0 deleted"* ]] && pass "a second run changes nothing" || fail "root idempotent" "$r"
+
+# The SAF folder is offered its real path and keeps its state when switched.
+ctl "storage refresh" >/dev/null
+real_docs=/storage/emulated/0/ASyncSmoke/docs
+wait_state ".folders[] | select(.name == \"Phone docs\") | .realPathOffer == \"$real_docs\"" 20 \
+  && pass "Phone docs (a document tree) is offered its real path $real_docs" || fail "switch offer" "$(folder_json "Phone docs")"
+before=$(api GET "/api/folders/$docs/files" | jq -c '[.entries[] | {name, size}] | sort_by(.name)')
+switched=$(ctl "switch-real $docs")
+wait_state ".folders[] | select(.name == \"Phone docs\") | .path == \"$real_docs\"" 30 && pass "switched: $switched" || fail "switch" "$switched $(state)"
+r=$(sync_phone "$docs" 300)
+msg=$(jq -r .message <<<"$r")
+[[ "$msg" == "0 up, 0 down, 0 deleted"* && "$msg" != *conflict* ]] && pass "its sync state was kept: $msg (no upload again, no conflicts)" || fail "state kept" "$r"
+[[ "$(api GET "/api/folders/$docs/files" | jq -c '[.entries[] | {name, size}] | sort_by(.name)')" == "$before" ]] \
+  && pass "the server's files are as before" || fail "server files changed" "$(api GET "/api/folders/$docs/files")"
+adb shell "ls /sdcard/ASyncSmoke/docs" | tr -d '\r' | grep -q conflict && fail "a conflict copy appeared" || pass "no conflict copies on the phone"
+
+ctl settings >/dev/null
+sleep 1
+ctl "show StorageCard" >/dev/null
+shot allfiles-settings
+has '.settings' && pass "Settings shows All files access as allowed" || fail "settings" "$(state)"
+ctl back >/dev/null
+
+# Taken away: Android stops the app's process (as when the switch is turned off in Settings); started again, the folders
+# at real paths stop safely (nothing deleted anywhere), background runs too.
+pid_before=$(adb shell pidof "$pkg" | tr -d '\r')
+set_appop deny
+sleep 3
+[[ "$(adb shell pidof "$pkg" | tr -d '\r')" != "$pid_before" ]] && pass "turned off: Android stops the app's process" || echo "    (the process survived the change)"
+running || front_app
+wait_state '.allFiles == false and (.folders | any(.name == "Phone root"))' 60 || fail "app after revoke" "$(state)"
+r=$(sync_phone "$rootf")
+[[ "$(jq -r .ok <<<"$r")" == false && "$(jq -r .message <<<"$r")" == *"All files access was turned off"* ]] \
+  && pass "turned off: the folder stops with \"$(jq -r .message <<<"$r" | cut -c1-70)…\"" || fail "revoked run" "$r"
+server_has "$rootf" root-from-phone.txt >/dev/null && server_has "$rootf" root-from-cli.txt >/dev/null \
+  && pass "nothing was deleted on the server" || fail "deleted remotely" "$(api GET "/api/folders/$rootf/files")"
+[[ "$(on_phone "$target/root-from-phone.txt")" == "at the root" ]] && pass "nor on the phone" || fail "deleted locally"
+# In the background: Home, the process killed, then a wake-up starts it for WorkManager.
+adb shell input keyevent KEYCODE_HOME; sleep 3; adb shell am kill "$pkg"; sleep 2
+ctl "bg-wake test" >/dev/null
+failed_bg() { ctl bg | jq -e --argjson id "$rootf" '.folders[] | select(.id == $id) | (.lastMessage // "") | test("All files access was turned off")' >/dev/null; }
+wait_for 60 failed_bg && pass "a background run (a wake-up) stops the same way" || fail "background revoked" "$(ctl bg | jq -c .folders)"
+running && pass "the app does not crash" || fail "app died"
+front_app
+set_appop allow
+ctl "storage refresh" >/dev/null
+r=$(sync_phone "$rootf")
+jq -e '.ok' <<<"$r" >/dev/null && pass "turned on again: the folder syncs ($(jq -r .message <<<"$r"))" || fail "after re-grant" "$r"
+api DELETE "/api/folders/$rootf/devices/$device" >/dev/null || true # the restart check counts the phone's folders
 
 section "restart"
 adb shell am force-stop "$pkg"

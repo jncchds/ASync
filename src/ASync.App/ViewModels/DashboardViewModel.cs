@@ -77,6 +77,12 @@ public sealed partial class DashboardViewModel(ShellViewModel shell) : Observabl
         HasFolders = Folders.Count > 0;
     }
 
+    /// <summary>All files access may have changed: the folders' offers to switch to their real paths.</summary>
+    public void RefreshStorage()
+    {
+        foreach (var f in Folders) f.RefreshStorage();
+    }
+
     public void UpdateFolder(FolderStatusDto folder) => Folders.FirstOrDefault(f => f.Id == folder.FolderId)?.Update(folder);
 
     /// <summary>Refreshes "5 min ago" and "in 10 min".</summary>

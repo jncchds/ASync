@@ -59,11 +59,16 @@ public sealed class AndroidPlatform(Func<MainActivity?> activity) : IPlatformSer
     /// <summary>The folder in the Files app (best effort: not every file manager opens a tree).</summary>
     public Task OpenFolderAsync(string path)
     {
-        if (!SafTree.IsTreeUri(path)) return Task.CompletedTask;
         try
         {
-            var tree = AUri.Parse(path)!;
-            var document = DocumentsContract.BuildDocumentUriUsingTree(tree, DocumentsContract.GetTreeDocumentId(tree));
+            AUri? document;
+            if (SafTree.IsTreeUri(path))
+            {
+                var tree = AUri.Parse(path)!;
+                document = DocumentsContract.BuildDocumentUriUsingTree(tree, DocumentsContract.GetTreeDocumentId(tree));
+            }
+            else document = AndroidStorage.DocumentOf(path); // a real path: the same place in the external-storage provider
+            if (document is null) return Task.CompletedTask;
             var intent = new Intent(Intent.ActionView);
             intent.SetDataAndType(document, DocumentsContract.Document.MimeTypeDir);
             intent.AddFlags(ActivityFlags.NewTask | ActivityFlags.GrantReadUriPermission);
@@ -149,6 +154,8 @@ public sealed class AndroidPlatform(Func<MainActivity?> activity) : IPlatformSer
     public string? ConditionsNote => null;
 
     public IBackgroundServices? Background => AndroidBackgroundServices.Instance;
+
+    public IStorageAccess? Storage => AndroidStorage.Instance;
 
     public bool SupportsStartAtLogin => false;
     public bool IsStartAtLoginEnabled() => false;

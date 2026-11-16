@@ -40,6 +40,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         ServiceSetup = new ServiceSetupViewModel(this, service);
         Updates = new UpdatesViewModel(this, updates ?? new NoUpdates("This version of ASync does not update itself."));
         Background = platform.Background is { } background ? new BackgroundViewModel(this, background) : null;
+        Storage = platform.Storage is { } storage ? new StorageViewModel(this, storage) : null;
         Page = new ConnectingViewModel("Looking for the ASync agent…", null);
         TrayToolTip = "ASync";
         platform.ApplyTheme(Settings.Theme);
@@ -54,6 +55,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>Phones: battery, wake-ups and the reminder (null on desktops).</summary>
     public BackgroundViewModel? Background { get; }
+
+    /// <summary>Phones: All files access (null on desktops).</summary>
+    public StorageViewModel? Storage { get; }
 
     /// <summary>The agent's service, for the update (stopped before the program is replaced).</summary>
     internal IAgentServiceManager ServiceManager => _service;
@@ -92,6 +96,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>A dialog over everything (unlocking an end-to-end folder).</summary>
     [ObservableProperty] public partial UnlockViewModel? Dialog { get; set; }
+
+    /// <summary>Choosing a folder's place on a phone: the All files access explanation or the in-app picker.</summary>
+    [ObservableProperty] public partial LocalFolderViewModel? FolderDialog { get; set; }
 
     /// <summary>A short message at the top: what an action did, or why it failed.</summary>
     [ObservableProperty]
@@ -408,6 +415,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public bool GoBack()
     {
+        if (FolderDialog is { } folderDialog)
+        {
+            folderDialog.Cancel();
+            FolderDialog = null;
+            return true;
+        }
         if (Dialog is { } dialog)
         {
             dialog.CancelCommand.Execute(null);

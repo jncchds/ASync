@@ -111,6 +111,15 @@
                 <TextBlock Classes="small" TextWrapping="Wrap" Text="End-to-end encrypted and not set up yet: choose its passphrase here (you get its recovery key once). Other devices then unlock it with the same passphrase." />
               </Border>
 
+              <Border Classes="notice" Name="RealPathOffer" IsVisible="{Binding CanSwitchToRealPath}">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="small" TextWrapping="Wrap"
+                             Text="With All files access this folder can use its real path: faster, and files that changed are noticed. Its sync state is kept: nothing is uploaded again." />
+                  <Button Classes="small" Name="SwitchToRealPath" Content="{Binding SwitchText}" Command="{Binding SwitchToRealPathCommand}"
+                          HorizontalAlignment="Left" />
+                </StackPanel>
+              </Border>
+
               <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,2,0,0">
                 <Button Classes="small" Content="Unlock…" Command="{Binding UnlockCommand}" IsVisible="{Binding CanBeUnlocked}" />
                 <Button Classes="small" Name="SetUpEncryption" Content="Set up encryption…" Command="{Binding SetUpEncryptionCommand}" IsVisible="{Binding NeedsSetup}" />

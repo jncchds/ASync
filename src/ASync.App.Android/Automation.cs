@@ -6,6 +6,7 @@ using Android.Runtime;
 using ASync.App.ViewModels;
 using ASync.Tests.Local;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 
 namespace ASync.App.Android;
 
@@ -22,6 +23,9 @@ namespace ASync.App.Android;
 /// <c>theme light|dark|system</c>, <c>settings</c>, <c>back</c>, <c>selftest &lt;folder&gt;</c> (the local tree
 /// contract on a fresh directory in that folder's tree).
 /// <c>docs …</c>: the documents provider through ContentResolver (DocumentsAutomation).
+/// All files access: <c>choose-local &lt;folder&gt;</c> (the explanation or the in-app picker), <c>picker</c>,
+/// <c>picker-go|picker-open|picker-up|picker-volume|picker-use|picker-allow|picker-system|picker-cancel</c>,
+/// <c>switch-real &lt;folder&gt;</c>, <c>storage [refresh]</c>.
 /// </summary>
 [BroadcastReceiver(Name = "ua.pp.chds.async.Automation", Exported = true, Permission = "android.permission.DUMP")]
 [IntentFilter(["ua.pp.chds.async.AUTOMATION"])]
@@ -38,7 +42,7 @@ public sealed class Automation : BroadcastReceiver
             {
                 string answer;
                 try { answer = await BackgroundCommandAsync(context!.ApplicationContext ?? context, command); }
-                catch (Exception e) { answer = $"error: {e.GetType().Name}: {e.Message}"; }
+                catch (Exception e) { answer = $"error: {e.GetType().Name}: {(e is Java.Lang.Throwable t ? t.LocalizedMessage ?? e.Message : e.Message)}"; }
                 pending.ResultCode = Result.Ok;
                 pending.ResultData = answer;
                 pending.Finish();
@@ -49,7 +53,7 @@ public sealed class Automation : BroadcastReceiver
         {
             string answer;
             try { answer = await RunAsync(command); }
-            catch (Exception e) { answer = $"error: {e.GetType().Name}: {e.Message}"; }
+            catch (Exception e) { answer = $"error: {e.GetType().Name}: {(e is Java.Lang.Throwable t ? t.LocalizedMessage ?? e.Message : e.Message)}"; }
             pending.ResultCode = Result.Ok;
             pending.ResultData = answer;
             pending.Finish();
@@ -99,8 +103,69 @@ public sealed class Automation : BroadcastReceiver
                 // "choose <folder> [content://…/document/… to open the picker at]": the real system picker; the test taps it.
                 var a = arg.Split(' ', 2);
                 AndroidPlatform.PickerStartOverride = a.Length > 1 ? a[1] : null;
-                _ = Folder(a[0]).ChooseFolderCommand.ExecuteAsync(null); // returns when the picker closes
+                _ = Folder(a[0]).ChooseSystemFolderCommand.ExecuteAsync(null); // returns when the picker closes
                 return "picker open";
+            }
+            case "choose-local":
+            {
+                // Choose folder… as the card's button does: the All files access explanation, or the in-app picker with it.
+                await Folder(arg).ChooseFolderCommand.ExecuteAsync(null);
+                return shell.FolderDialog is { } d ? d.IsExplaining ? "explaining" : "picking" : "no dialog";
+            }
+            case "picker":
+                return PickerState(shell);
+            case "picker-go":
+                Picker(shell).Navigate(arg);
+                return PickerState(shell);
+            case "picker-open":
+                Picker(shell).OpenCommand.Execute(arg);
+                return PickerState(shell);
+            case "picker-up":
+                Picker(shell).UpCommand.Execute(null);
+                return PickerState(shell);
+            case "picker-volume":
+            {
+                var d = Picker(shell);
+                d.SelectVolumeCommand.Execute(d.Volumes[int.Parse(arg, System.Globalization.CultureInfo.InvariantCulture)]);
+                return PickerState(shell);
+            }
+            case "picker-use":
+            {
+                var d = Picker(shell);
+                await d.UseThisFolderCommand.ExecuteAsync(null);
+                return shell.FolderDialog is null ? shell.Message ?? "ok" : $"error: {d.Error ?? shell.Message}";
+            }
+            case "picker-allow":
+                Picker(shell).AllowAccessCommand.Execute(null);
+                return "system page opened";
+            case "picker-system":
+                _ = Picker(shell).UseSystemPickerCommand.ExecuteAsync(null);
+                return "picker open";
+            case "picker-cancel":
+                shell.FolderDialog?.Cancel();
+                return "ok";
+            case "switch-real":
+            {
+                var folder = Folder(arg);
+                folder.RefreshStorage();
+                if (!folder.CanSwitchToRealPath) return "no offer";
+                await folder.SwitchToRealPathCommand.ExecuteAsync(null);
+                return shell.Message ?? "ok";
+            }
+            case "storage":
+            {
+                // storage [refresh]: All files access and the volumes; "refresh" as if the app came back to the front
+                // (a permission changed from the shell does not resume the activity).
+                if (arg == "refresh") AndroidStorage.Instance.NotifyChanged();
+                return new JsonObject
+                {
+                    ["allFiles"] = AndroidStorage.Instance.HasAllFilesAccess,
+                    ["settingsAllowed"] = shell.Storage?.HasAllFilesAccess,
+                    ["volumes"] = new JsonArray([.. AndroidStorage.Instance.Volumes().Select(v => (JsonNode?)new JsonObject
+                        { ["label"] = v.Label, ["path"] = v.Path, ["primary"] = v.Primary, ["removable"] = v.Removable })]),
+                    ["raw"] = new JsonArray([.. AndroidStorage.RawVolumes().Select(v => (JsonNode?)new JsonObject
+                        { ["uuid"] = v.Uuid, ["description"] = v.Description, ["directory"] = v.Directory, ["state"] = v.State })]),
+                }.ToJsonString();
             }
             case "cancel":
                 await shell.Enroll.CancelPendingCommand.ExecuteAsync(null);
@@ -191,6 +256,16 @@ public sealed class Automation : BroadcastReceiver
             case "settings":
                 shell.OpenSettingsCommand.Execute(null);
                 return "ok";
+            case "show":
+            {
+                // show <control name>: scrolls the control into view (a card of the settings, for a screenshot).
+                var control = (AndroidShellApp.View ?? throw new InvalidOperationException("No view.")).GetVisualDescendants()
+                    .OfType<Avalonia.Controls.Control>().FirstOrDefault(c => c.Name == arg && c.IsEffectivelyVisible);
+                if (control is null) return "not shown";
+                if (control.FindAncestorOfType<Avalonia.Controls.ScrollViewer>() is not { Content: Avalonia.Visual content } scroller) return "not in a scroller";
+                if (Avalonia.VisualExtensions.TranslatePoint(control, new Avalonia.Point(0, 0), content) is { } at) scroller.Offset = new Avalonia.Vector(0, Math.Max(0, at.Y - 12));
+                return "ok";
+            }
             case "back":
                 return shell.GoBack() ? "handled" : "nothing to close";
             case "selftest":
@@ -362,6 +437,25 @@ public sealed class Automation : BroadcastReceiver
         return o.ToJsonString();
     }
 
+    private static LocalFolderViewModel Picker(ShellViewModel shell) =>
+        shell.FolderDialog ?? throw new InvalidOperationException("No folder dialog.");
+
+    private static string PickerState(ShellViewModel shell)
+    {
+        if (shell.FolderDialog is not { } d) return "{}";
+        return new JsonObject
+        {
+            ["explaining"] = d.IsExplaining,
+            ["stillOff"] = d.StillOff,
+            ["path"] = d.CurrentPath,
+            ["breadcrumb"] = d.Breadcrumb,
+            ["canGoUp"] = d.CanGoUp,
+            ["error"] = d.Error,
+            ["entries"] = new JsonArray([.. d.Entries.Select(e => (JsonNode?)e)]),
+            ["volumes"] = new JsonArray([.. d.Volumes.Select(v => (JsonNode?)v.Label)]),
+        }.ToJsonString();
+    }
+
     private static string State(ShellViewModel shell)
     {
         var o = new JsonObject
@@ -377,6 +471,8 @@ public sealed class Automation : BroadcastReceiver
             ["pendingCode"] = shell.Enroll.Pending?.UserCode,
             ["approveHint"] = shell.Enroll.Pending is null ? null : shell.Enroll.ApproveHint,
             ["dialog"] = shell.Dialog is not null,
+            ["folderDialog"] = shell.FolderDialog is null ? null : shell.FolderDialog.IsExplaining ? "explaining" : "picking",
+            ["allFiles"] = shell.Storage?.HasAllFilesAccess,
             ["settings"] = shell.SettingsPage is not null,
             ["batteryPrompt"] = shell.Background?.ShowBatteryPrompt,
             ["pushText"] = shell.Background?.PushText,
@@ -399,6 +495,7 @@ public sealed class Automation : BroadcastReceiver
                 ["waiting"] = s.Waiting,
                 ["needsSetup"] = s.NeedsSetup,
                 ["unmeteredOnly"] = s.Conditions?.UnmeteredOnly,
+                ["realPathOffer"] = shell.Dashboard.Folders.FirstOrDefault(f => f.Id == s.FolderId)?.RealPathOffer,
             });
         }
         o["folders"] = folders;
