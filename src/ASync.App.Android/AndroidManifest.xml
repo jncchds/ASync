@@ -20,6 +20,15 @@
     </intent>
   </queries>
   <application>
+    <!-- ASync's folders in the Files app and document pickers (AsyncDocumentsProvider). Exported only as Android requires
+         for a documents provider: callers need MANAGE_DOCUMENTS, which only the system's DocumentsUI holds; other apps get
+         single-document grants (grantUriPermissions) when the person picks a file there. -->
+    <provider android:name="ua.pp.chds.async.AsyncDocumentsProvider" android:authorities="ua.pp.chds.async.documents"
+              android:exported="true" android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
+      <intent-filter>
+        <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+      </intent-filter>
+    </provider>
     <!-- WorkManager's own foreground service, declared with the type Android 14+ requires. -->
     <service android:name="androidx.work.impl.foreground.SystemForegroundService" android:foregroundServiceType="dataSync"
              android:exported="false" tools:node="merge" />

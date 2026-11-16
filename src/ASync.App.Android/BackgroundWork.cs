@@ -377,7 +377,7 @@ public sealed class TransferKeeperWorker(Context context, WorkerParameters param
             while (!IsStopped && idle < 3)
             {
                 Thread.Sleep(1000);
-                idle = runtime.AnyActive ? 0 : idle + 1;
+                idle = runtime.AnyActive || AndroidDocuments.TransfersActive ? 0 : idle + 1;
                 if (_inForeground && idle == 0 && context.GetSystemService(Context.NotificationService) is NotificationManager manager)
                     manager.Notify(Notifications.TransferId, Notifications.Transfer(context, runtime, Id));
             }
@@ -393,7 +393,7 @@ public sealed class TransferKeeperWorker(Context context, WorkerParameters param
     public override void OnStopped()
     {
         // Cancel in the notification, or the system ending the service (Android 15's daily limit): stop the runs cleanly.
-        var stopped = AndroidAgent.Runtime.CancelRuns();
+        var stopped = AndroidAgent.Runtime.CancelRuns() + AndroidDocuments.CancelTransfers();
         Log.Info("ASync", $"Transfers stopped (reason {StopReason}); {stopped} run(s) stopped, they continue when next due.");
         _inForeground = false;
         base.OnStopped();
@@ -443,6 +443,8 @@ internal static class Notifications
     public static Notification Transfer(Context context, AgentRuntime? runtime, Java.Util.UUID? keeper)
     {
         var running = runtime?.Folders.Where(f => f.Activity != WorkerActivity.Idle).ToList() ?? [];
+        if (running.Count == 0 && AndroidDocuments.Transfers.FirstOrDefault() is { } document)
+            return DocumentTransfer(context, document, keeper);
         var title = running.Count switch
         {
             0 => "ASync is syncing",
@@ -474,12 +476,36 @@ internal static class Notifications
         return builder.Build()!;
     }
 
+    /// <summary>The same notification for a file the Files app (or another app through it) opens or saves.</summary>
+    private static Notification DocumentTransfer(Context context, ASync.Client.Core.Documents.DocumentTransfers.Transfer t, Java.Util.UUID? keeper)
+    {
+        var percent = t.Total > 0 ? (int)Math.Min(100, t.Bytes * 100 / t.Total) : -1;
+#pragma warning disable CA1416
+        var builder = new Notification.Builder(context, TransfersChannel)
+            .SetSmallIcon(Resource.Drawable.ic_stat_sync)
+            .SetContentTitle($"{(t.Upload ? "Saving" : "Fetching")} {t.Name}")
+            .SetContentText(t.Total > 0 ? $"{Size(t.Bytes)} of {Size(t.Total)}" : Size(t.Bytes))
+            .SetOngoing(true)
+            .SetOnlyAlertOnce(true)
+            .SetContentIntent(OpenApp(context))
+            .SetProgress(100, Math.Max(0, percent), percent < 0);
+        if (OperatingSystem.IsAndroidVersionAtLeast(31)) builder.SetForegroundServiceBehavior((int)NotificationForegroundService.Immediate);
+        if (keeper is not null)
+            builder.AddAction(new Notification.Action.Builder(global::Android.Graphics.Drawables.Icon.CreateWithResource(context, global::Android.Resource.Drawable.IcMenuCloseClearCancel), "Cancel",
+                WorkManager.GetInstance(context).CreateCancelPendingIntent(keeper)).Build());
+#pragma warning restore CA1416
+        return builder.Build()!;
+    }
+
     public static ForegroundInfo TransferInfo(Context context, Notification notification) =>
         OperatingSystem.IsAndroidVersionAtLeast(29)
             ? new ForegroundInfo(TransferId, notification, (int)global::Android.Content.PM.ForegroundService.TypeDataSync)
             : new ForegroundInfo(TransferId, notification);
 
-    public static void Reminder(Context context, int folderId, string title, string message)
+    public static void Reminder(Context context, int folderId, string title, string message) => Message(context, 8000 + folderId, title, message);
+
+    /// <summary>A notification that stays until tapped (on the reminders channel): a reminder, a file the Files app could not save.</summary>
+    public static void Message(Context context, int id, string title, string message)
     {
         if (context.GetSystemService(Context.NotificationService) is not NotificationManager manager) return;
         EnsureChannels(context);
@@ -493,7 +519,7 @@ internal static class Notifications
             .SetAutoCancel(true)
             .Build();
 #pragma warning restore CA1416
-        manager.Notify(8000 + folderId, notification);
+        manager.Notify(id, notification);
     }
 
     private static string Size(long bytes) => bytes switch
