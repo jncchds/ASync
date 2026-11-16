@@ -327,7 +327,7 @@ dd { min-width: 0; overflow-wrap: anywhere; }
 /* ── Add device ── */
 .add-device { margin-bottom: 1.25rem; }
 .pairing { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-start; }
-.qr { background: var(--qr-bg); padding: 0.5rem; border-radius: 8px; line-height: 0; }
+.qr { background: var(--qr-bg); color: var(--qr-fg); padding: 0.5rem; border-radius: 8px; line-height: 0; }
 .pairing-details { flex: 1 1 260px; min-width: 0; }
 .big-code { font-size: 1.3rem; letter-spacing: 0.08em; font-weight: 600; color: var(--accent); }
 pre.command.recovery-key { font-size: 1rem; font-weight: 600; letter-spacing: 0.04em; color: var(--accent); user-select: all; }

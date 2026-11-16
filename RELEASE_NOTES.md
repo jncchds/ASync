@@ -38,6 +38,8 @@
   Found by the end-to-end test.
 - fix(android): a file written in the last 10 seconds waits for the next run, so Android touching its time once more no
   longer uploads it twice (one version instead of two).
+- fix(ui): **The add-device QR code is dark on white in the dark theme too.** It was drawn in the page's pale text
+  colour on its white card, which phones could hardly read.
 
 ## v0.1.4 — 2026-11-16
 
