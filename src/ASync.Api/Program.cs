@@ -211,6 +211,7 @@ builder.Services.AddSingleton<DeviceConnections>();
 builder.Services.AddSingleton<IDeviceBrowseChannel, HubDeviceBrowseChannel>();
 builder.Services.AddScoped<IDeviceWaker, PushDeviceWaker>();
 builder.Services.AddScoped<DeviceBrowseService>();
+builder.Services.AddScoped<DeviceMediaService>();
 
 // ── API ───────────────────────────────────────────────────────────────────────
 // Enums travel as strings, in controllers and (from M2) SignalR alike.

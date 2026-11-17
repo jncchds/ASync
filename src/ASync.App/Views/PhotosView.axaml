@@ -1,0 +1,82 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ASync.App.ViewModels"
+             x:Class="ASync.App.Views.PhotosView"
+             x:DataType="vm:PhotosViewModel">
+  <Border Classes="card" Name="PhotosCard" BoxShadow="0 8 32 0 #40000000" Padding="14">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Spacing="12">
+        <TextBlock Classes="h2" Text="{Binding Title}" TextWrapping="Wrap" />
+
+        <!-- Without the permission: why ASync asks, and the system's question. -->
+        <StackPanel Name="Permission" Spacing="10" IsVisible="{Binding NeedsPermission}">
+          <TextBlock FontWeight="SemiBold" Text="Allow ASync to read your photos and videos?" TextWrapping="Wrap" />
+          <TextBlock Name="Explanation" Text="{Binding Explanation}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted small" Text="{Binding PartialText}" TextWrapping="Wrap"
+                     IsVisible="{Binding PartialText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          <Button Name="AllowPhotos" Content="Allow access to photos and videos" Command="{Binding AllowCommand}"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <Button Classes="secondary" Content="Open the app's settings" Command="{Binding OpenSettingsCommand}"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        </StackPanel>
+
+        <!-- With it: what is backed up. -->
+        <StackPanel Name="Choose" Spacing="10" IsVisible="{Binding CanChoose}">
+          <TextBlock Classes="muted small" Name="AccessText" Text="{Binding AccessText}" TextWrapping="Wrap" />
+          <Border Classes="notice" Name="PartialNotice" IsVisible="{Binding IsPartial}">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="small" Text="{Binding PartialText}" TextWrapping="Wrap" />
+              <Button Classes="small" Content="Allow all photos…" Command="{Binding OpenSettingsCommand}" HorizontalAlignment="Left" />
+            </StackPanel>
+          </Border>
+          <Border Classes="notice" IsVisible="{Binding NoLocation}">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="small" TextWrapping="Wrap"
+                         Text="Android removes the location from photos unless ASync may read it: allow &quot;media location&quot; to keep it in the backup." />
+              <Button Classes="small secondary" Content="Allow the location" Command="{Binding AllowCommand}" HorizontalAlignment="Left" />
+            </StackPanel>
+          </Border>
+
+          <RadioButton Name="BackUpAll" GroupName="what" Content="All photos and videos" IsChecked="{Binding BackUpAll}" />
+          <RadioButton Name="ChooseAlbums" GroupName="what" Content="Chosen albums" IsChecked="{Binding ChooseAlbums}" />
+
+          <StackPanel Spacing="6" IsVisible="{Binding ChooseAlbums}">
+            <TextBlock Classes="muted small" Text="{Binding LibraryText}" TextWrapping="Wrap"
+                       IsVisible="{Binding LibraryText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <TextBlock Classes="muted small" Text="Reading the albums…" IsVisible="{Binding Loading}" />
+            <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="8" MaxHeight="320">
+              <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl Name="AlbumList" ItemsSource="{Binding Albums}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:AlbumChoice">
+                      <CheckBox IsChecked="{Binding IsChecked}" Margin="8,4">
+                        <StackPanel>
+                          <TextBlock Text="{Binding Name}" TextWrapping="Wrap" />
+                          <TextBlock Classes="muted small" Text="{Binding Counts}" />
+                        </StackPanel>
+                      </CheckBox>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Border>
+          </StackPanel>
+
+          <CheckBox Name="IncludeVideos" Content="Videos too" IsChecked="{Binding IncludeVideos}" />
+          <CheckBox Name="IncludeScreenshots" Content="Screenshots too" IsChecked="{Binding IncludeScreenshots}" />
+          <TextBlock Classes="muted small" TextWrapping="Wrap"
+                     Text="Originals are kept as they are, with a small file of their details beside each; a photo in several albums is stored once. New photos are backed up soon after you take them." />
+        </StackPanel>
+
+        <Border Classes="notice" IsVisible="{Binding HasError}">
+          <TextBlock Classes="small error" Text="{Binding Error}" TextWrapping="Wrap" />
+        </Border>
+
+        <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <Button Name="SavePhotos" Content="Save" Command="{Binding SaveCommand}" IsVisible="{Binding CanChoose}" />
+          <Button Classes="secondary" Name="ClosePhotos" Content="Cancel" Command="{Binding CloseCommand}" />
+        </WrapPanel>
+      </StackPanel>
+    </ScrollViewer>
+  </Border>
+</UserControl>

@@ -117,12 +117,12 @@ public sealed class ApiWorld : IAsyncLifetime
     }
 
     /// <summary>Enrolls a device for the person with an enrollment code and signs it in (challenge + signature).</summary>
-    public async Task<(Guid Id, string Token)> EnrollAsync(string personToken, string name, bool reusable = false)
+    public async Task<(Guid Id, string Token)> EnrollAsync(string personToken, string name, bool reusable = false, DevicePlatform platform = DevicePlatform.Linux)
     {
         var code = await PostAsync<EnrollmentCreatedDto>("api/devices/enrollments", new CreateEnrollmentRequest(Reusable: reusable), personToken);
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var enrolled = await PostAsync<EnrolledDto>("api/device-auth/enroll",
-            new EnrollRequest(code.Code, name, DevicePlatform.Linux, Convert.ToBase64String(key.ExportSubjectPublicKeyInfo())), null);
+            new EnrollRequest(code.Code, name, platform, Convert.ToBase64String(key.ExportSubjectPublicKeyInfo())), null);
         var challenge = await PostAsync<DeviceChallengeDto>("api/device-auth/challenge", new DeviceChallengeRequest(enrolled.DeviceId), null);
         var signature = key.SignData(DeviceAuthMessage.Build(enrolled.DeviceId, challenge.Nonce), HashAlgorithmName.SHA256);
         var token = await PostAsync<DeviceTokenDto>("api/device-auth/token",

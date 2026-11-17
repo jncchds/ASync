@@ -72,7 +72,8 @@ public sealed partial class AddFolderViewModel : ObservableObject
     // ── Which form ────────────────────────────────────────────────────────────
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCreating), nameof(Title), nameof(ShowDirection), nameof(ShowJoinForm), nameof(ShowNewForm), nameof(LocalTitle), nameof(ShowLocal), nameof(SubmitText))]
+    [NotifyPropertyChangedFor(nameof(IsCreating), nameof(Title), nameof(ShowDirection), nameof(ShowJoinForm), nameof(ShowNewForm), nameof(LocalTitle), nameof(ShowLocal), nameof(SubmitText),
+        nameof(ForPhotos), nameof(ForFiles))]
     [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
     public partial bool IsJoining { get; set; }
 
@@ -173,7 +174,9 @@ public sealed partial class AddFolderViewModel : ObservableObject
         SelectedStorage = Storages.FirstOrDefault(s => s.Id == selectedStorage) ?? Storages.FirstOrDefault();
         var selectedFolder = SelectedFolder?.Id;
         JoinableFolders.Clear();
-        foreach (var f in options.Folders.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase)) JoinableFolders.Add(new JoinableFolder(f));
+        // Photos folders only for a device with a photo library (the server refuses the others).
+        foreach (var f in options.Folders.Where(f => f.Kind != FolderKind.Photos || OffersPhotos).OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase))
+            JoinableFolders.Add(new JoinableFolder(f));
         SelectedFolder = JoinableFolders.FirstOrDefault(f => f.Id == selectedFolder);
         HasNoStorage = options.MayAddFolders && Storages.Count == 0;
         HasNothingToJoin = options.MayAddFolders && JoinableFolders.Count == 0;
@@ -229,11 +232,54 @@ public sealed partial class AddFolderViewModel : ObservableObject
         if (value != SyncMode.Backup) EndToEnd = false;
     }
 
-    public bool IsBackup { get => Mode == SyncMode.Backup; set { if (value) Mode = SyncMode.Backup; } }
-    public bool IsMirror { get => Mode == SyncMode.Mirror; set { if (value) Mode = SyncMode.Mirror; } }
-    public bool IsTwoWay { get => Mode == SyncMode.TwoWay; set { if (value) Mode = SyncMode.TwoWay; } }
+    /// <summary>The device has a photo library (phones): New folder offers "Photos" too (task 19).</summary>
+    public bool OffersPhotos => _shell.Platform.Photos is not null;
 
-    public string ModeHint => Mode switch
+    /// <summary>A new Photos folder: a Backup of the phone's photo library instead of a directory.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBackup), nameof(IsMirror), nameof(IsTwoWay), nameof(IsPhotosMode), nameof(ModeHint), nameof(ForPhotos), nameof(ForFiles), nameof(LocalTitle),
+        nameof(ShowDirection))]
+    [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
+    public partial bool IsPhotosKind { get; set; }
+
+    partial void OnIsPhotosKindChanged(bool value)
+    {
+        if (!value) return;
+        Mode = SyncMode.Backup;
+        if (Name.Trim().Length == 0) Name = "Photos";
+    }
+
+    /// <summary>The form is about a Photos folder (a new one, or the one to join): a media selection instead of a local folder.</summary>
+    public bool ForPhotos => IsJoining ? SelectedFolder?.Folder.Kind == FolderKind.Photos : IsPhotosKind;
+    public bool ForFiles => !ForPhotos;
+
+    /// <summary>What the Photos folder backs up here; everything until chosen.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MediaText))]
+    public partial MediaSelectionDto Media { get; set; } = MediaSelectionDto.Everything;
+
+    public string MediaText => Media.Describe();
+
+    [RelayCommand]
+    private async Task ChoosePhotos()
+    {
+        var dialog = new PhotosViewModel(_shell, FolderLabel.Trim('"'), Media, selection =>
+        {
+            Media = selection;
+            return Task.FromResult(true);
+        });
+        _shell.PhotosDialog = dialog;
+        await dialog.LoadAlbumsAsync();
+    }
+
+    public bool IsBackup { get => Mode == SyncMode.Backup && !IsPhotosKind; set { if (value) { IsPhotosKind = false; Mode = SyncMode.Backup; } } }
+    public bool IsPhotosMode { get => IsPhotosKind; set { if (value) IsPhotosKind = true; } }
+    public bool IsMirror { get => Mode == SyncMode.Mirror; set { if (value) { IsPhotosKind = false; Mode = SyncMode.Mirror; } } }
+    public bool IsTwoWay { get => Mode == SyncMode.TwoWay; set { if (value) { IsPhotosKind = false; Mode = SyncMode.TwoWay; } } }
+
+    public string ModeHint => IsPhotosKind
+        ? $"Snapshots of this {DeviceNoun}'s photos and videos (all of them, or chosen albums), originals as they are; several phones can share the folder."
+        : Mode switch
     {
         SyncMode.Backup => $"Snapshots of this {DeviceNoun}'s folder, kept by the folder's retention; nothing comes back unless you restore.",
         SyncMode.Mirror => "One side is a copy of the other: choose which.",
@@ -248,10 +294,10 @@ public sealed partial class AddFolderViewModel : ObservableObject
     public bool IsDownload { get => Direction == MirrorDirection.Download; set { if (value) Direction = MirrorDirection.Download; } }
 
     /// <summary>Mirror folders need a direction (a new one, or the folder to join).</summary>
-    public bool ShowDirection => IsJoining ? SelectedFolder?.Folder.Mode == SyncMode.Mirror : Mode == SyncMode.Mirror;
+    public bool ShowDirection => IsJoining ? SelectedFolder?.Folder.Mode == SyncMode.Mirror : Mode == SyncMode.Mirror && !IsPhotosKind;
 
     /// <summary>End-to-end encryption is for Backup folders for now (the server's rule).</summary>
-    public bool CanEncrypt => Mode == SyncMode.Backup;
+    public bool CanEncrypt => Mode == SyncMode.Backup;  // Photos folders too: they are Backup folders
 
     [ObservableProperty] public partial bool EndToEnd { get; set; }
 
@@ -264,7 +310,7 @@ public sealed partial class AddFolderViewModel : ObservableObject
     // ── Joining ───────────────────────────────────────────────────────────────
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowDirection), nameof(LocalTitle))]
+    [NotifyPropertyChangedFor(nameof(ShowDirection), nameof(LocalTitle), nameof(ForPhotos), nameof(ForFiles))]
     [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
     public partial JoinableFolder? SelectedFolder { get; set; }
 
@@ -281,7 +327,7 @@ public sealed partial class AddFolderViewModel : ObservableObject
 
     private string FolderLabel => IsJoining ? SelectedFolder?.Name ?? "the folder" : Name.Trim() is { Length: > 0 } n ? n : "the new folder";
 
-    public string LocalTitle => $"Where {Quote(FolderLabel)} lives on this {DeviceNoun}";
+    public string LocalTitle => ForPhotos ? $"What {Quote(FolderLabel)} backs up on this {DeviceNoun}" : $"Where {Quote(FolderLabel)} lives on this {DeviceNoun}";
 
     private static string Quote(string name) => name.StartsWith("the ", StringComparison.Ordinal) ? name : $"\"{name}\"";
 
@@ -316,7 +362,7 @@ public sealed partial class AddFolderViewModel : ObservableObject
 
     // ── Submitting ────────────────────────────────────────────────────────────
 
-    private bool CanSubmit() => !IsBusy && Loaded && !IsRefused && HasLocalPath && RecoveryKey is null
+    private bool CanSubmit() => !IsBusy && Loaded && !IsRefused && (HasLocalPath || ForPhotos) && RecoveryKey is null
                                 && (IsJoining ? SelectedFolder is not null : Name.Trim().Length > 0 && RootPath.Trim().Length > 0 && SelectedStorage is not null);
 
     public string SubmitText => IsJoining ? "Add this " + DeviceNoun : "Create folder";
@@ -352,9 +398,11 @@ public sealed partial class AddFolderViewModel : ObservableObject
     {
         var name = Name.Trim();
         var encryption = Mode == SyncMode.Backup && EndToEnd ? FolderEncryption.EndToEnd : FolderEncryption.Transport;
+        var photos = IsPhotosKind;
         var request = new DeviceCreateFolderRequest(
-            new SaveFolderRequest(name, Mode, encryption, FolderKind.Files, SelectedStorage!.Id, RootPath.Trim(), SelectedInterval.Minutes),
-            LocalPath.Trim(), Mode == SyncMode.Mirror ? Direction : null);
+            new SaveFolderRequest(name, photos ? SyncMode.Backup : Mode, encryption, photos ? FolderKind.Photos : FolderKind.Files, SelectedStorage!.Id,
+                RootPath.Trim(), SelectedInterval.Minutes),
+            photos ? "" : LocalPath.Trim(), !photos && Mode == SyncMode.Mirror ? Direction : null, photos ? Media : null);
         var added = await session.CreateFolderAsync(request, CancellationToken.None);
         if (added.RecoveryKey is { } key)
         {
@@ -372,7 +420,9 @@ public sealed partial class AddFolderViewModel : ObservableObject
     private async Task JoinAsync(IAgentSession session)
     {
         var folder = SelectedFolder!.Folder;
-        var added = await session.JoinFolderAsync(folder.FolderId, LocalPath.Trim(), folder.Mode == SyncMode.Mirror ? Direction : null, CancellationToken.None);
+        var added = folder.Kind == FolderKind.Photos
+            ? await session.JoinPhotosAsync(folder.FolderId, Media, CancellationToken.None)
+            : await session.JoinFolderAsync(folder.FolderId, LocalPath.Trim(), folder.Mode == SyncMode.Mirror ? Direction : null, CancellationToken.None);
         Close();
         _shell.ShowMessage(added.Message);
         if (folder.Encryption == FolderEncryption.EndToEnd)

@@ -103,6 +103,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Choosing a folder's place on a phone: the All files access explanation or the in-app picker.</summary>
     [ObservableProperty] public partial LocalFolderViewModel? FolderDialog { get; set; }
 
+    /// <summary>A Photos folder's screen (task 19): the permission's explanation, then what to back up.</summary>
+    [ObservableProperty] public partial PhotosViewModel? PhotosDialog { get; set; }
+
     /// <summary>A short message at the top: what an action did, or why it failed.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasMessage))]
@@ -434,6 +437,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public bool GoBack()
     {
+        if (PhotosDialog is { } photos)
+        {
+            photos.Close();
+            PhotosDialog = null;
+            return true;
+        }
         if (FolderDialog is { } folderDialog)
         {
             folderDialog.Cancel();

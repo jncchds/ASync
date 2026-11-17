@@ -58,6 +58,15 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
   const chooseMode = (m: SyncMode) => {
     setMode(m)
     if (m !== 'Backup') { setEncryption('Transport'); setKind('Files') }
+    else if (kind === 'Photos') setKind('Files')
+  }
+
+  /** "Photos & videos": a Backup folder of a phone's photo library. */
+  const choosePhotos = () => {
+    setMode('Backup')
+    setKind('Photos')
+    if (!name.trim()) setName('Photos')
+    if (!rootPath.trim()) setRootPath('photos')
   }
 
   const save = async (e: React.FormEvent) => {
@@ -94,11 +103,16 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
       {!fixed && (
         <div className="type-picker">
           {MODES.map(m => (
-            <button type="button" key={m.mode} className={`type-option${m.mode === mode ? ' selected' : ''}`} onClick={() => chooseMode(m.mode)}>
+            <button type="button" key={m.mode} className={`type-option${m.mode === mode && kind !== 'Photos' ? ' selected' : ''}`}
+              onClick={() => chooseMode(m.mode)}>
               <strong>{m.label}</strong>
               <span className="muted">{m.blurb}</span>
             </button>
           ))}
+          <button type="button" className={`type-option${kind === 'Photos' ? ' selected' : ''}`} onClick={choosePhotos}>
+            <strong>Photos &amp; videos</strong>
+            <span className="muted">A phone's photo library, all of it or chosen albums, as snapshots</span>
+          </button>
         </div>
       )}
 
@@ -142,6 +156,13 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
         )}
       </div>
       {fixed && <p className="hint">Mode, encryption, contents, storage and directory cannot change. Create a new folder instead.</p>}
+      {!fixed && kind === 'Photos' && (
+        <p className="hint">
+          Phones back up their photo library into this folder: after creating it, add each phone and choose all photos and videos
+          or some albums. Several phones can share it; each keeps its own snapshots. Originals are stored as they are, beside a
+          small file of their details, in year and month directories.
+        </p>
+      )}
       {!fixed && mode === 'Backup' && encryption === 'EndToEnd' && (
         <p className="hint">
           After creating it, set it up on one device with <code>async-cli init-encryption</code>. Keep the passphrase and the

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Collections.Concurrent;
+using ASync.Client.Core.Media;
 using ASync.Client.Core.Sync;
 using ASync.Contracts;
 using ASync.Engine.Local;
@@ -18,7 +19,7 @@ namespace ASync.Client.Core;
 /// they changed moments ago (<see cref="Sync.SyncOptions.SettleTime"/>).
 /// </summary>
 public sealed record FolderRunResult(int FolderId, string Name, bool Ok, string Message, bool Skipped = false, int Conflicts = 0,
-    bool Deferred = false, int Unsettled = 0);
+    bool Deferred = false, int Unsettled = 0, MediaCountsDto? Media = null);
 
 /// <summary>The agent's link to the server, for status displays.</summary>
 public enum AgentConnection { Connecting, Connected, Reconnecting, Offline, Revoked }
@@ -194,6 +195,48 @@ public sealed class SyncAgent : IAsyncDisposable
     /// </summary>
     public Browse.DeviceBrowser? Browser { get; init; }
 
+    /// <summary>
+    /// The device's photo library (task 19): what its Photos folders back up, and the albums the web UI asks for. Null: none (computers,
+    /// the CLI agent): their Photos folders fail with a message, and they report <see cref="MediaAccess.Unsupported"/>.
+    /// </summary>
+    public IMediaLibrary? Media { get; init; }
+
+    /// <summary>Which library the sidecars name ("android-mediastore").</summary>
+    public string MediaSource { get; init; } = "";
+
+    /// <summary>The browsing state with what the device can read of its photo library.</summary>
+    private DeviceBrowseState BrowseState(Browse.DeviceBrowser browser)
+    {
+        MediaAccess access;
+        try { access = Media?.Access ?? MediaAccess.Unsupported; }
+        catch (Exception e) when (e is not OperationCanceledException) { access = MediaAccess.None; }
+        return browser.State with { Media = access };
+    }
+
+    /// <summary>The albums for the web UI (the hub's "albums" client result): under the browsing setting, with what the permissions allow.</summary>
+    public MediaAlbumsReply ListAlbums(MediaAlbumsRequest request)
+    {
+        if (Browser is not { } browser || !browser.State.Allowed)
+            return new MediaAlbumsReply(Refusal: DeviceBrowseRefusal.TurnedOff, Message: "Browsing from the web is turned off on this device.");
+        if (Media is not { } media) return new MediaAlbumsReply(Access: MediaAccess.Unsupported, Refusal: DeviceBrowseRefusal.Failed, Message: "This device has no photo library.");
+        try
+        {
+            var access = media.Access;
+            if (access is MediaAccess.None or MediaAccess.Unsupported)
+                return new MediaAlbumsReply(Access: access, Refusal: DeviceBrowseRefusal.Unreadable,
+                    Message: "ASync may not read the photos on this phone yet: allow access to photos and videos in the app.");
+            var albums = media.Albums();
+            return new MediaAlbumsReply(
+                [.. albums.OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).Take(Math.Clamp(request.MaxAlbums, 1, MediaLimits.MaxAlbums))
+                    .Select(a => new MediaAlbumDto(a.Id, a.Name, a.Photos, a.Videos, a.Path))],
+                access, albums.Sum(a => a.Photos), albums.Sum(a => a.Videos));
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return new MediaAlbumsReply(Refusal: DeviceBrowseRefusal.Failed, Message: $"Could not list the albums: {e.Message}");
+        }
+    }
+
     /// <summary>The web UI asked this device to list a directory (any thread; handlers must be quick).</summary>
     public event Action? BrowseRequested;
 
@@ -213,14 +256,22 @@ public sealed class SyncAgent : IAsyncDisposable
         _logger.LogInformation("Woken for browsing: opening a fresh live connection.");
         try { if (hub.State != HubConnectionState.Disconnected) await hub.StopAsync(ct); }
         catch (Exception e) when (e is not OperationCanceledException) { _logger.LogDebug("Closing the old connection: {Message}", e.Message); }
-        if (!await TryStartHubAsync(ct, logFailure: true)) _ = KeepConnectingAsync(ct);
+        if (!await TryStartHubAsync(ct, logFailure: true))
+        {
+            _ = KeepConnectingAsync(ct);
+            return;
+        }
+        // Events sent while the old connection was already dead (a frozen process) are lost, as after any reconnect: a folder
+        // created or attached meanwhile would otherwise appear only after the next reconnect (seen in the Android smoke test).
+        try { await ReloadAsync(ct); }
+        catch (Exception e) when (e is ApiException or HttpRequestException or IOException) { _logger.LogDebug("Reload after the fresh connection: {Message}", e.Message); }
     }
 
     /// <summary>Tells the server the browsing state now (after the setting or the phone's All files access changed).</summary>
     public async Task ReportBrowseStateAsync(CancellationToken ct = default)
     {
         if (Browser is not { } browser || _hub is not { State: HubConnectionState.Connected } hub) return;
-        try { await hub.InvokeAsync("ReportBrowse", browser.State, ct); }
+        try { await hub.InvokeAsync("ReportBrowse", BrowseState(browser), ct); }
         catch (Exception e) when (e is HubException or InvalidOperationException or IOException or TaskCanceledException)
         {
             // An older server has no such method: the web UI then has no browsing to offer anyway.
@@ -255,14 +306,25 @@ public sealed class SyncAgent : IAsyncDisposable
         {
             if (folder.Mode == SyncMode.Backup)
             {
+                var photos = folder.Kind == FolderKind.Photos
+                    ? new MediaTree(Media ?? throw new SyncRefusedException("This device has no photo library ASync can back up: Photos folders are for phones."),
+                        folder.Media, MediaSource)
+                    : null;
                 var repo = await RepositoryAccess.OpenAsync(_api, _store, folder, backend, ct);
-                var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName, LocalTrees.Open(folder.LocalPath)).RunAsync(progress, ct);
+                var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName,
+                    (ILocalTree?)photos ?? LocalTrees.Open(folder.LocalPath)).RunAsync(progress, ct);
                 var s = snapshot.Stats;
-                var message = $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: {s.FilesNew} new, {s.FilesChanged} changed, {s.FilesUnmodified} unchanged, " +
+                var counts = photos?.Counts();
+                var message = $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: " +
+                              (counts is { } c
+                                  ? $"{Plural(c.Photos, "photo")}, {Plural(c.Videos, "video")} ({Size(c.Bytes)}){(c.Access == MediaAccess.Partial ? " of those this phone lets ASync see" : "")}, "
+                                  : "") +
+                              $"{s.FilesNew} new, {s.FilesChanged} changed, {s.FilesUnmodified} unchanged, " +
                               $"{Size(s.BytesAdded)} added{(forgotten > 0 ? $", {forgotten} old snapshots forgotten" : "")}" +
                               (s.Errors.Count > 0 ? $", {s.Errors.Count} unreadable: {s.Errors[0]}" : "");
-                outcome = new FolderRunResult(folder.FolderId, folder.Name, s.Errors.Count == 0, message);
-                report = new SyncReportRequest(s.Errors.Count == 0, message, Uploaded: s.FilesNew + s.FilesChanged, Bytes: s.BytesAdded);
+                outcome = new FolderRunResult(folder.FolderId, folder.Name, s.Errors.Count == 0, message, Media: counts);
+                report = new SyncReportRequest(s.Errors.Count == 0, message, Uploaded: s.FilesNew + s.FilesChanged, Bytes: s.BytesAdded, Media: counts);
+                if (photos is not null) await ReportAlbumsAsync(ct);
             }
             else
             {
@@ -326,6 +388,17 @@ public sealed class SyncAgent : IAsyncDisposable
         catch (Exception e) when (e is ApiException or HttpRequestException) { _logger.LogDebug("Could not report the result: {Message}", e.Message); }
         FolderRan?.Invoke(outcome);
         return outcome;
+    }
+
+    private static string Plural(int n, string noun) => $"{n} {noun}{(n == 1 ? "" : "s")}";
+
+    /// <summary>After a Photos backup: the albums for the web UI while this phone is offline (only with browsing allowed; failures are only logged).</summary>
+    private async Task ReportAlbumsAsync(CancellationToken ct)
+    {
+        var reply = ListAlbums(new MediaAlbumsRequest());
+        if (reply.Albums is not { } albums) return;
+        try { await _api.ReportAlbumsAsync(new ReportAlbumsRequest(albums, reply.Access, reply.Photos, reply.Videos), ct); }
+        catch (Exception e) when (e is ApiException or HttpRequestException) { _logger.LogDebug("Could not report the albums: {Message}", e.Message); }
     }
 
     // ── Maintenance (Backup folders) ──────────────────────────────────────────
@@ -471,6 +544,15 @@ public sealed class SyncAgent : IAsyncDisposable
                 var reply = browser.Browse(request);
                 _logger.LogInformation("Browse from the web UI: {Path} → {Result}", request.Path is { Length: > 0 } p ? p : "(start)",
                     reply.Listing is { } l ? $"{l.Entries.Count + l.More} entries" : reply.Refusal.ToString());
+                return reply;
+            }));
+        if (Browser is not null)
+            _hub.On<MediaAlbumsRequest, MediaAlbumsReply>("albums", request => Task.Run(() =>
+            {
+                try { BrowseRequested?.Invoke(); }
+                catch (Exception e) { _logger.LogDebug("A browse listener failed: {Message}", e.Message); }
+                var reply = ListAlbums(request);
+                _logger.LogInformation("Albums for the web UI: {Result}", reply.Albums is { } a ? $"{a.Count} albums" : reply.Refusal.ToString());
                 return reply;
             }));
         _hub.Reconnecting += e =>

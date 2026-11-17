@@ -106,6 +106,13 @@ public sealed class InProcessAgentConnector(IControlHandler agent, ControlEventH
         public Task<FolderAddedDto> JoinFolderAsync(int folderId, string path, MirrorDirection? direction, CancellationToken ct) =>
             Call(() => agent.JoinFolderAsync(folderId, Need(path, "join-folder", "path"), direction, ct), ct);
         public Task<string> LeaveFolderAsync(int folderId, CancellationToken ct) => Call(() => agent.LeaveFolderAsync(folderId, ct), ct);
+        public Task<MediaLibraryDto> MediaLibraryAsync(CancellationToken ct) => Call(() => agent.MediaLibraryAsync(ct), ct);
+        public Task<string> SetMediaAsync(int folderId, MediaSelectionDto media, CancellationToken ct) =>
+            Call(() => agent.SetMediaAsync(folderId, media ?? throw new ControlException("\"set-media\" needs media."), ct), ct);
+        public Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct) =>
+            Call(() => agent.JoinPhotosAsync(folderId, media ?? throw new ControlException("\"join-folder\" needs media."), ct), ct);
+        public Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) => Call(() => agent.RestoreMediaAsync(folderId, snapshot, ct), ct);
+        public Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct) => Call(() => agent.MediaSnapshotsAsync(folderId, ct), ct);
 
         public ValueTask DisposeAsync()
         {

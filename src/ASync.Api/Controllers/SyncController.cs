@@ -73,7 +73,7 @@ public class SyncController : ControllerBase
         var device = await _devices.GetAsync(DeviceId);
         if (FolderService.DeviceMayAddFolders(device) is { } refused) return StatusCode(StatusCodes.Status403Forbidden, new { message = refused });
         if (req.Folder is null) return BadRequest(new { message = "Describe the folder to create." });
-        var result = await _service.CreateAsync(device!.UserId, req.Folder, ct, new FolderService.FirstDevice(device, req.LocalPath ?? "", req.Direction));
+        var result = await _service.CreateAsync(device!.UserId, req.Folder, ct, new FolderService.FirstDevice(device, req.LocalPath ?? "", req.Direction, req.Media));
         if (!result.Success) return BadRequest(new { message = result.Error });
         var (folder, recoveryKey) = result.Value!;
         if (recoveryKey is not null) Response.Headers.CacheControl = "no-store";

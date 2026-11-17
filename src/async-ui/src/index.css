@@ -291,6 +291,9 @@ td.actions-cell .row-actions { flex-wrap: nowrap; }
 /* Many buttons (Users): two rows rather than a table wider than the page. */
 td.actions-cell.wrapping { width: 15rem; white-space: normal; }
 td.actions-cell.wrapping .row-actions { flex-wrap: wrap; }
+/* Buttons above each other: a wide table (Devices) keeps its last column narrow enough to fit 1280 px. */
+td.actions-cell.stacked .row-actions { flex-direction: column; align-items: stretch; }
+@media (max-width: 700px) { table.stack td.actions-cell.stacked .row-actions { flex-direction: row; align-items: center; } }
 
 /* Narrow screens: each row of a .stack table becomes a small card with labelled values. */
 @media (max-width: 700px) {
@@ -365,6 +368,23 @@ pre.command {
 .snapshot-tree { min-width: 0; display: flex; flex-direction: column; gap: 0.6rem; }
 .tree-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .crumbs { font-size: 0.9rem; overflow-wrap: anywhere; min-width: 0; }
+
+/* ── Photos folders: the device's media selection and album picker (task 19) ── */
+.media-fields .choice-row { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin-bottom: 0.5rem; }
+.album-picker {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 0.6rem;
+  display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; min-width: 0;
+}
+.album-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.album-list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.album-list li { border-bottom: 1px solid var(--border); min-width: 0; }
+.album-list li:last-child { border-bottom: none; }
+.album-list label.checkbox { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; margin: 0; cursor: pointer; }
+.album-list label.checkbox:hover { background: var(--accent-faint); }
+.album-name { overflow-wrap: break-word; min-width: 6em; flex: 1 1 8em; }
+.album-list .small-text { flex: 0 1 auto; text-align: right; }
+.album-counts > span { white-space: nowrap; }
+.media-filters { margin-top: 0.25rem; }
 
 /* ── Device folder picker (FolderDeviceForm's Browse…) ── */
 .path-field { min-width: 0; }

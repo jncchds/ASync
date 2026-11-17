@@ -198,6 +198,10 @@ public sealed class AsyncApiClient : IDisposable
     public Task ReportAsync(int folderId, SyncReportRequest report, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Post, $"api/sync/folders/{folderId}/report", report, ct);
 
+    /// <summary>Tells the server this device's photo albums (names and counts), for the web UI while the device is offline.</summary>
+    public Task ReportAlbumsAsync(ReportAlbumsRequest report, CancellationToken ct = default) =>
+        SendAsync(HttpMethod.Put, "api/sync/media/albums", report, ct);
+
     public Task NotifyChangedAsync(int folderId, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Post, $"api/sync/folders/{folderId}/changed", null, ct);
 

@@ -68,6 +68,9 @@ public interface IPlatformServices
 
     /// <summary>Real paths on a phone's shared storage ("All files access"); null on desktops.</summary>
     IStorageAccess? Storage => null;
+
+    /// <summary>The permission to read the photo library (phones: Photos folders, task 19); null where there is none.</summary>
+    IPhotoAccess? Photos => null;
 }
 
 /// <summary>A UnifiedPush distributor installed on the phone (ntfy, say).</summary>

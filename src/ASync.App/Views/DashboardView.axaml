@@ -77,6 +77,31 @@
               </WrapPanel>
 
               <TextBlock Classes="muted small mono" Text="{Binding LocalPath}" TextWrapping="Wrap" />
+              <TextBlock Classes="muted small" Name="MediaCounts" Text="{Binding MediaCountsText}" TextWrapping="Wrap"
+                         IsVisible="{Binding MediaCountsText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+              <Border Classes="notice" Name="PhotoAccess" IsVisible="{Binding PhotoAccessText, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <TextBlock Classes="small" Text="{Binding PhotoAccessText}" TextWrapping="Wrap" />
+              </Border>
+              <Border Classes="notice" Name="RestoreChoice" IsVisible="{Binding ChoosingRestore}">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="small" FontWeight="SemiBold" Text="Restore which snapshot into the library?" TextWrapping="Wrap" />
+                  <ComboBox Name="RestoreSnapshots" ItemsSource="{Binding RestoreChoices}" SelectedItem="{Binding SelectedRestore}" HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate DataType="vm:RestoreChoice"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <TextBlock Classes="muted small" TextWrapping="Wrap"
+                             Text="Photos still on the phone are skipped. An older snapshot brings back what was deleted since." />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button Classes="small" Name="ConfirmRestore" Content="Restore" Command="{Binding ConfirmRestoreCommand}" />
+                    <Button Classes="small secondary" Content="Cancel" Command="{Binding CancelRestoreCommand}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+              <StackPanel Spacing="4" Name="Restore" IsVisible="{Binding RestoreText, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <ProgressBar Value="{Binding RestorePercent}" Maximum="100" IsVisible="{Binding RestoreRunning}" />
+                <TextBlock Classes="muted small" Text="{Binding RestoreText}" TextWrapping="Wrap" />
+              </StackPanel>
 
               <StackPanel Spacing="4" IsVisible="{Binding IsBusy}">
                 <ProgressBar Value="{Binding ProgressPercent}" IsIndeterminate="{Binding IsProgressIndeterminate}" Maximum="100" />
@@ -131,10 +156,13 @@
                 <Button Classes="small" Content="Unlock…" Command="{Binding UnlockCommand}" IsVisible="{Binding CanBeUnlocked}" />
                 <Button Classes="small" Name="SetUpEncryption" Content="Set up encryption…" Command="{Binding SetUpEncryptionCommand}" IsVisible="{Binding NeedsSetup}" />
                 <Button Classes="small" Content="Choose folder…" Command="{Binding ChooseFolderCommand}" IsVisible="{Binding NeedsPath}" />
-                <Button Classes="small" Content="Sync now" Command="{Binding SyncNowCommand}" IsVisible="{Binding HasLocalPath}" />
+                <Button Classes="small" Content="{Binding RunNowText}" Command="{Binding SyncNowCommand}" IsVisible="{Binding CanRunHere}" />
                 <Button Classes="small secondary" Content="{Binding PauseText}" Command="{Binding TogglePauseCommand}" />
-                <Button Classes="small secondary" Content="Open folder" Command="{Binding OpenFolderCommand}" IsVisible="{Binding HasLocalPath}" />
-                <Button Classes="small secondary" Content="Change folder…" Command="{Binding ChooseFolderCommand}" IsVisible="{Binding HasLocalPath}" />
+                <Button Classes="small secondary" Content="Open folder" Command="{Binding OpenFolderCommand}" IsVisible="{Binding ShowFolderButtons}" />
+                <Button Classes="small secondary" Content="Change folder…" Command="{Binding ChooseFolderCommand}" IsVisible="{Binding ShowFolderButtons}" />
+                <Button Classes="small secondary" Name="ChoosePhotos" Content="Photos…" Command="{Binding ChoosePhotosCommand}" IsVisible="{Binding IsPhotos}" />
+                <Button Classes="small secondary" Name="RestorePhotos" Content="Restore into the library…" Command="{Binding RestorePhotosCommand}"
+                        IsVisible="{Binding IsPhotos}" />
                 <Button Classes="small secondary" Name="EditConditions" Content="Conditions…" Command="{Binding EditConditionsCommand}"
                         IsVisible="{Binding !EditingConditions}" />
               </WrapPanel>

@@ -55,6 +55,23 @@ public interface IControlHandler
     /// <summary>Detaches this device from a folder.</summary>
     Task<string> LeaveFolderAsync(int folderId, CancellationToken ct) => throw new ControlException(NoFolders);
 
+    /// <summary>The device's photo library (task 19).</summary>
+    Task<MediaLibraryDto> MediaLibraryAsync(CancellationToken ct) => throw new ControlException(NoPhotos);
+
+    /// <summary>Which photos and videos a Photos folder backs up here.</summary>
+    Task<string> SetMediaAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => throw new ControlException(NoPhotos);
+
+    /// <summary>Attaches this device to one of the owner's Photos folders.</summary>
+    Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => throw new ControlException(NoPhotos);
+
+    /// <summary>The snapshots of a Photos folder a restore can use, newest first.</summary>
+    Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct) => throw new ControlException(NoPhotos);
+
+    /// <summary>Starts restoring a Photos snapshot into the library.</summary>
+    Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) => throw new ControlException(NoPhotos);
+
+    const string NoPhotos = "This agent cannot back up photos: update it.";
+
     const string NoFolders = "This agent cannot add folders: update it.";
 }
 
@@ -226,8 +243,17 @@ public sealed class ControlServer : IAsyncDisposable
                 ControlProtocol.Ops.FolderOptions => new ControlResponse { Id = r.Id, Ok = true, FolderOptions = await _handler.FolderOptionsAsync(ct) },
                 ControlProtocol.Ops.CreateFolder => Added(r.Id,
                     await _handler.CreateFolderAsync(r.NewFolder ?? throw new ControlException("\"create-folder\" needs newFolder."), ct)),
+                ControlProtocol.Ops.JoinFolder when r.Media is { } media => Added(r.Id, await _handler.JoinPhotosAsync(Folder(), media, ct)),
                 ControlProtocol.Ops.JoinFolder => Added(r.Id,
                     await _handler.JoinFolderAsync(Folder(), Need(r.Path, "path"), r.Direction, ct)),
+                ControlProtocol.Ops.MediaLibrary => new ControlResponse { Id = r.Id, Ok = true, MediaLibrary = await _handler.MediaLibraryAsync(ct) },
+                ControlProtocol.Ops.SetMedia => new ControlResponse
+                {
+                    Id = r.Id, Ok = true,
+                    Message = await _handler.SetMediaAsync(Folder(), r.Media ?? throw new ControlException("\"set-media\" needs media."), ct),
+                },
+                ControlProtocol.Ops.MediaSnapshots => new ControlResponse { Id = r.Id, Ok = true, MediaSnapshots = await _handler.MediaSnapshotsAsync(Folder(), ct) },
+                ControlProtocol.Ops.RestoreMedia => new ControlResponse { Id = r.Id, Ok = true, Message = await _handler.RestoreMediaAsync(Folder(), r.Snapshot, ct) },
                 ControlProtocol.Ops.LeaveFolder => new ControlResponse { Id = r.Id, Ok = true, Message = await _handler.LeaveFolderAsync(Folder(), ct) },
                 _ => new ControlResponse { Id = r.Id, Error = $"Unknown operation \"{r.Op}\" (this agent speaks control protocol {ControlProtocol.Version})." },
             };

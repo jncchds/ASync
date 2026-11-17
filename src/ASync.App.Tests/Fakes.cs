@@ -130,7 +130,61 @@ internal sealed class FakeAgent : IAgentConnector, IAgentSession
 
     public Task<string> LeaveFolderAsync(int folderId, CancellationToken ct) => Answer($"leave-folder {folderId}", "left");
 
+    // ── Photos (task 19) ──────────────────────────────────────────────────────
+
+    /// <summary>What <c>media-library</c> answers.</summary>
+    public MediaLibraryDto MediaLibrary { get; set; } = new(MediaAccess.Full,
+        [new MediaAlbumDto("cam", "Camera", 120, 4), new MediaAlbumDto("shots", "Screenshots", 30, 0), new MediaAlbumDto("trip", "Trip 2026", 55, 2)], 205, 6);
+
+    public MediaSelectionDto? LastMedia { get; private set; }
+
+    public Task<MediaLibraryDto> MediaLibraryAsync(CancellationToken ct) => Answer("media-library", MediaLibrary);
+
+    public Task<string> SetMediaAsync(int folderId, MediaSelectionDto media, CancellationToken ct)
+    {
+        LastMedia = media;
+        return Answer($"set-media {folderId} {media.Describe()}", $"now backs up {media.Describe()}");
+    }
+
+    public Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct)
+    {
+        LastMedia = media;
+        return Answer($"join-photos {folderId} {media.Describe()}", new FolderAddedDto(folderId, "joined the photos"));
+    }
+
+    public List<MediaSnapshotDto> MediaSnapshots { get; set; } =
+    [
+        new("0190aaaa000070008000000000000003", "00000003", DateTimeOffset.UtcNow.AddHours(-1), "pixel", true, 8),
+        new("0190aaaa000070008000000000000002", "00000002", DateTimeOffset.UtcNow.AddDays(-1), "tablet", false, 6),
+    ];
+
+    public Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct) => Answer($"media-snapshots {folderId}", MediaSnapshots);
+
+    public Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) =>
+        Answer($"restore-media {folderId} {snapshot ?? "newest"}", "Restoring…");
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+/// <summary>A phone's photo permission: <see cref="Request"/> grants <see cref="Grants"/> and says so.</summary>
+internal sealed class FakePhotos : IPhotoAccess
+{
+    public CallLog<string> Calls { get; } = new();
+    public MediaAccess Access { get; set; } = MediaAccess.None;
+    public bool HasLocation { get; set; }
+    public bool OffersPartial { get; set; } = true;
+    public MediaAccess Grants { get; set; } = MediaAccess.Full;
+    public event Action? Changed;
+
+    public void Request()
+    {
+        Calls.Add("request");
+        Access = Grants;
+        HasLocation = Grants == MediaAccess.Full;
+        Changed?.Invoke();
+    }
+
+    public void OpenSettings() => Calls.Add("settings");
 }
 
 internal sealed class FakeService : IAgentServiceManager
@@ -209,6 +263,10 @@ internal sealed class FakePlatform : IPlatformServices
     /// <summary>Set for a phone with All files access (real paths in a temporary directory standing for the volumes).</summary>
     public FakeStorage? StorageAccess { get; set; }
     public IStorageAccess? Storage => StorageAccess;
+
+    /// <summary>Set for a phone with a photo library (task 19).</summary>
+    public FakePhotos? PhotoAccess { get; set; }
+    public IPhotoAccess? Photos => PhotoAccess;
 }
 
 /// <summary>A phone's shared storage: volumes are directories of a test's temporary directory.</summary>
@@ -265,6 +323,13 @@ internal sealed class MemorySettings : ISettingsStore
 
 internal static class Statuses
 {
+    public static FolderStatusDto Photos(int id = 3, string name = "Photos", MediaSelectionDto? media = null, MediaCountsDto? counts = null) => new()
+    {
+        FolderId = id, Name = name, Mode = SyncMode.Backup, Encryption = FolderEncryption.Transport, Kind = FolderKind.Photos, LocalPath = "",
+        Media = media ?? MediaSelectionDto.Everything, MediaCounts = counts, IntervalMinutes = 60, Activity = FolderActivity.Idle,
+        NextRunAt = DateTimeOffset.UtcNow.AddMinutes(30),
+    };
+
     public static FolderStatusDto Folder(int id = 1, string name = "Docs", string path = "/home/alice/Docs") => new()
     {
         FolderId = id, Name = name, Mode = SyncMode.TwoWay, Encryption = FolderEncryption.Transport, LocalPath = path, IntervalMinutes = 15,

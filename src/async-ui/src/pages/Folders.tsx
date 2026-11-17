@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  detachFolderDevice, errorMessage, getAlertIncidents, getDevices, getFolders, getStorageBackends, getUsage,
+  describeMedia, detachFolderDevice, errorMessage, EVERYTHING, getAlertIncidents, getDevices, getFolders, getStorageBackends, getUsage,
   type AlertIncident, type Device, type PurgeJob, type Folder, type FolderDevice, type FolderUsage, type MaintenanceStatus, type StorageBackend,
   type Usage,
 } from '../api'
@@ -15,7 +15,7 @@ import DeleteFolderPanel from '../components/DeleteFolderPanel'
 import PurgeList from '../components/PurgeList'
 import { useSyncEvents, type SyncEvent } from '../hooks/useSyncEvents'
 import { useAuth } from '../hooks/useAuth'
-import { kindLabel, modeLabel } from '../utils/folders'
+import { countText, kindLabel, modeLabel } from '../utils/folders'
 import { ALERT_KIND_LABELS, openByDevice } from '../utils/alerts'
 import { formatBytes, formatDate, formatMinutes, relativeTime } from '../utils/format'
 
@@ -274,7 +274,7 @@ export default function Folders() {
                   ) : (
                     <div className="table-wrap inset">
                       <table className="stack">
-                        <thead><tr><th>Device</th><th>Folder on the device</th>{f.mode === 'Mirror' && <th>Direction</th>}<th>Last sync</th><th></th></tr></thead>
+                        <thead><tr><th>Device</th><th>{f.kind === 'Photos' ? 'Backs up' : 'Folder on the device'}</th>{f.mode === 'Mirror' && <th>Direction</th>}<th>Last sync</th><th></th></tr></thead>
                         <tbody>
                           {f.devices.map(d => (
                             <tr key={d.deviceId}>
@@ -289,7 +289,18 @@ export default function Folders() {
                                   })()}
                                 </span>
                               </td>
-                              <td data-label="Folder" className="wrap"><code title={d.localPath}>{d.localPath}</code></td>
+                              <td data-label={f.kind === 'Photos' ? 'Backs up' : 'Folder'} className="wrap">
+                                {f.kind === 'Photos'
+                                  ? <span>
+                                      {describeMedia(d.media ?? EVERYTHING)}
+                                      {d.mediaCounts && (
+                                        <span className="status-msg">
+                                          {countText(d.mediaCounts.photos, d.mediaCounts.videos)} · {formatBytes(d.mediaCounts.bytes)} in the last snapshot
+                                        </span>
+                                      )}
+                                    </span>
+                                  : <code title={d.localPath}>{d.localPath}</code>}
+                              </td>
                               {f.mode === 'Mirror' && (
                                 <td data-label="Direction" className="nowrap"><span className="pill">{d.direction === 'Download' ? '⬇ Download' : '⬆ Upload'}</span></td>
                               )}

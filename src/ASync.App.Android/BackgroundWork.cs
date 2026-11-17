@@ -134,6 +134,7 @@ internal static class BackgroundWork
         var plan = BackgroundPlanner.Plan(folders);
         var scheduled = BackgroundState.Load(_context).Scheduled;
         var changes = BackgroundPlanner.Diff(new Dictionary<int, string>(scheduled), plan);
+        EnsureMediaTrigger();
         if (changes.IsEmpty) return;
         foreach (var folder in changes.Schedule) Schedule(folder);
         foreach (var id in changes.Cancel)
@@ -201,6 +202,25 @@ internal static class BackgroundWork
             return 0;
         });
         Log.Info("ASync", "Background: signed out, all background work cancelled.");
+    }
+
+    /// <summary>
+    /// The media content trigger (<see cref="MediaTriggerWorker"/>) while there are Photos folders and ASync may read photos; cancelled
+    /// otherwise. <paramref name="next"/>: the trigger fired and schedules the next one (appended after itself).
+    /// </summary>
+    public static void EnsureMediaTrigger(bool next = false)
+    {
+        if (_runtime is null || !_runtime.FoldersLoaded) return;
+        Safely(() =>
+        {
+            var photos = BackgroundPlanner.PhotoFolders(_runtime.Folders.Select(f => f.Folder));
+            if (photos.Count == 0 || AndroidPhotoAccess.Instance.Access == MediaAccess.None)
+            {
+                if (!next) Work.CancelUniqueWork(MediaTriggerWorker.Name);
+                return;
+            }
+            Work.EnqueueUniqueWork(MediaTriggerWorker.Name, next ? ExistingWorkPolicy.AppendOrReplace! : ExistingWorkPolicy.Keep!, MediaTriggerWorker.Build());
+        });
     }
 
     /// <summary>A wake-up from the server: an expedited job runs the folders it concerns (<see cref="BackgroundPlanner.FoldersToWake"/>).</summary>

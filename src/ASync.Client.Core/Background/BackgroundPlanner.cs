@@ -26,12 +26,19 @@ public static class BackgroundPlanner
     /// <summary>WorkManager's (and JobScheduler's) shortest period.</summary>
     public const int MinimumIntervalMinutes = 15;
 
+    /// <summary>Whether a folder has something to run on this device: a local folder, or (Photos) the photo library.</summary>
+    public static bool HasPlace(DeviceFolderDto f) => f.LocalPath.Length > 0 || f.Kind == FolderKind.Photos;
+
+    /// <summary>The Photos folders that new photos and videos start (the media content trigger, task 19).</summary>
+    public static IReadOnlyList<int> PhotoFolders(IEnumerable<DeviceFolderDto> folders) =>
+        [.. folders.Where(f => !f.Paused && f.Kind == FolderKind.Photos).Select(f => f.FolderId).Order()];
+
     /// <summary>
-    /// The folders to schedule: every unpaused folder with a local folder chosen, at <c>max(interval, 15 min)</c>. Locked
-    /// end-to-end folders are scheduled too (their run says why it cannot back up, and the server sees it).
+    /// The folders to schedule: every unpaused folder with a local folder chosen (or a Photos folder), at <c>max(interval, 15 min)</c>.
+    /// Locked end-to-end folders are scheduled too (their run says why it cannot back up, and the server sees it).
     /// </summary>
     public static IReadOnlyList<ScheduledFolder> Plan(IEnumerable<DeviceFolderDto> folders) =>
-        [.. folders.Where(f => !f.Paused && f.LocalPath.Length > 0)
+        [.. folders.Where(f => !f.Paused && HasPlace(f))
             .OrderBy(f => f.FolderId)
             .Select(f => new ScheduledFolder(f.FolderId, f.Name, Math.Max(MinimumIntervalMinutes, f.IntervalMinutes),
                 f.Conditions?.UnmeteredOnly == true, f.Conditions?.ChargingOnly == true, f.Conditions?.BatteryNotLow == true))];
@@ -50,7 +57,7 @@ public static class BackgroundPlanner
     /// Download); for an overdue device or a test, all of them. Paused folders and folders without a local folder never.
     /// </summary>
     public static IReadOnlyList<int> FoldersToWake(IEnumerable<DeviceFolderDto> folders, string reason) =>
-        [.. folders.Where(f => !f.Paused && f.LocalPath.Length > 0
+        [.. folders.Where(f => !f.Paused && HasPlace(f)
                                && (reason != PushWake.Changed || (f.Mode != SyncMode.Backup && f.Direction != MirrorDirection.Upload)))
             .Select(f => f.FolderId).Order()];
 

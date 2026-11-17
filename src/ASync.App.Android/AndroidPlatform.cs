@@ -157,6 +157,8 @@ public sealed class AndroidPlatform(Func<MainActivity?> activity) : IPlatformSer
 
     public IStorageAccess? Storage => AndroidStorage.Instance;
 
+    public IPhotoAccess? Photos => AndroidPhotoAccess.Instance;
+
     public bool SupportsStartAtLogin => false;
     public bool IsStartAtLoginEnabled() => false;
     public void SetStartAtLogin(bool enabled) { }

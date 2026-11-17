@@ -20,6 +20,12 @@
 #   Adding folders from the app (task 18): New folder (a TwoWay folder at a real path chosen in the All files access
 #   picker, "added from" the phone in the web UI, synced both ways with async-cli); Add to a folder (one made in the web
 #   UI, downloaded); with "May add folders" switched off in the web UI the app says where to allow it.
+#   Photos and videos (task 19, scripts/smoke-android-photos.sh): the library seeded with JPEGs and a video in two albums; the
+#   permission's explanation and the system's dialog; a Photos folder made in the web UI's API with one album chosen from the
+#   phone's live album list; backed up; the snapshot's tree (<year>/<month>/<name>~<id>.<ext> + .json) and byte-identical originals
+#   restored offline by async-cli from a copy of the repository with the recovery key, the sidecar's fields, the web snapshot
+#   browser's download; a new photo starting a backup through the MediaStore content trigger; a restore into the wiped album
+#   (byte for byte, back in MediaStore) and a second one skipping everything.
 #   Background work (M4-2): the foreground-service notification during the large transfer; the battery prompt and the
 #   system's exemption question; the folders' periodic WorkManager jobs; with the app in the background and its process
 #   killed (am kill), a file changed by async-cli arrives through the folder's periodic job, which the system runs in a
@@ -223,7 +229,8 @@ cli() { "$CLI" --config "$work/cli-config" "$@"; }
 # cli_sync: async-cli syncs Phone docs; again while the phone holds the folder's lease (it syncs by itself too).
 cli_sync() {
   local out
-  for _ in 1 2 3 4 5 6; do
+  # The phone may be running the folder again by itself (a reconnect, a settled file) for a while: up to two minutes.
+  for _ in $(seq 1 24); do
     out=$(cli sync --folder "$docs" 2>&1) || true
     [[ "$out" != *"Another device is syncing"* ]] && return 0
     sleep 5
@@ -1006,6 +1013,10 @@ ctl add-folder-close >/dev/null
 # The owner removes them from the web UI as usual (the restart check counts the phone's folders).
 api DELETE "/api/folders/$newf" >/dev/null && api DELETE "/api/folders/$joinf" >/dev/null && pass "the owner deletes both in the web UI" || fail "delete"
 wait_state '(.folders | any(.name == "Phone new" or .name == "Shared")) | not' 30 && pass "and they leave the phone's dashboard" || fail "folders gone" "$(state)"
+
+# Photo and video backups (task 19): its own file, sourced, with this script's helpers.
+# shellcheck source=scripts/smoke-android-photos.sh
+source scripts/smoke-android-photos.sh
 
 section "restart"
 adb shell am force-stop "$pkg"

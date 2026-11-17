@@ -141,7 +141,7 @@ export default function Devices() {
                       <span>{d.mayAddFolders ? 'Allowed' : 'Off'}</span>
                     </label>
                   </td>
-                  <td className="actions-cell">
+                  <td className="actions-cell stacked">
                     <div className="row-actions">
                       <button className="secondary small" onClick={() => rename(d)}>Rename</button>
                       <button className="danger small" onClick={() => revoke(d)}>Remove</button>

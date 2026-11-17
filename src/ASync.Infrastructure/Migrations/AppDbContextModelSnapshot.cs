@@ -241,6 +241,16 @@ namespace ASync.Infrastructure.Migrations
                     b.Property<bool>("MayAddFolders")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("MediaAccess")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime?>("MediaAlbumsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MediaAlbumsJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -508,6 +518,18 @@ namespace ASync.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<long?>("MediaBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("MediaPhotos")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("MediaSelectionJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<int?>("MediaVideos")
+                        .HasColumnType("integer");
 
                     b.Property<bool>("Paused")
                         .HasColumnType("boolean");
