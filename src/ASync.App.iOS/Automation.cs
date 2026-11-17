@@ -25,7 +25,7 @@ namespace ASync.App.iOS;
 /// bookmark of a directory, as the picker makes one; answers its location), <c>add-folder new|join</c>,
 /// <c>add-folder-set &lt;field&gt; &lt;value&gt;</c>, <c>add-folder-local</c>, <c>add-folder-submit</c>, <c>add-folder-state</c>,
 /// <c>add-folder-close</c>, <c>unlock|setup &lt;folder&gt;</c>, <c>setup-passphrase &lt;text&gt;</c>, <c>setup-done</c>,
-/// <c>secret &lt;text&gt;</c>, <c>settings</c>, <c>back</c>, <c>theme light|dark|system</c>, <c>show &lt;control&gt;</c>,
+/// <c>secret &lt;text&gt;</c>, <c>settings</c>, <c>notifications on|off</c>, <c>back</c>, <c>theme light|dark|system</c>, <c>show &lt;control&gt;</c>,
 /// <c>signout</c>, <c>keyinfo</c>, <c>haskey &lt;reference&gt;</c>, <c>files</c> (the store's files: names, prefixes, sizes), <c>selftest</c> (the local tree contract on
 /// bookmarked directories), <c>home</c> (the container's path).</para>
 /// </summary>
@@ -223,6 +223,11 @@ internal static class Automation
                 return "ok";
             case "back":
                 return shell.GoBack() ? "handled" : "nothing to close";
+            case "notifications":
+                // notifications on|off: the Settings switch (the smoke test turns it off: iOS's permission question would
+                // cover the screenshots, and simctl cannot answer it).
+                shell.SaveSettings(shell.Settings with { Notifications = arg != "off" });
+                return "ok";
             case "theme":
             {
                 var theme = arg switch { "light" => Services.ThemeChoice.Light, "dark" => Services.ThemeChoice.Dark, _ => Services.ThemeChoice.System };

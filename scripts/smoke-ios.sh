@@ -211,6 +211,9 @@ launch() {
   wait_for 60 ctl state || { tail -40 "$logs/app-stdout-$1.log" "$logs/app-stderr-$1.log"; echo "the app's automation did not answer" >&2; exit 1; }
 }
 launch 1
+# iOS asks whether ASync may send notifications when the first is due (a folder failing), and simctl cannot answer: the
+# question would cover the screenshots. Off, as the Settings switch does.
+ctl "notifications off" >/dev/null
 pass "the app runs (automation on 127.0.0.1:$auto_port, container $container)"
 docs="$container/Documents"
 
