@@ -56,6 +56,8 @@ editing releases and `workflow_dispatch` are a person's steps, not an agent's.
 scripts/package.sh linux-x64                 # one target's packages into artifacts/packages/<rid> (needs nfpm on Linux)
 scripts/smoke-packages.sh                    # .deb/.rpm installed and removed in Debian/Fedora containers
 XVFB=/path/to/Xvfb scripts/smoke-update.sh   # AppImage A → B self-update with the agent service, under Xvfb
+scripts/check-ios.sh                         # the iOS head's C# compiled on Linux (iOS reference assemblies; no app built)
+git push origin HEAD:ios-ci/<task>           # asks ios.yml for a macOS run (simulator smoke test, .ipa); delete the branch after
 dotnet run scripts/render-icons.cs           # packaging/icons from the logo (only when it changes)
 ```
 

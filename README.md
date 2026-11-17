@@ -7,7 +7,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 > headless CLI agent and the desktop app (Linux; built for Windows and macOS, not tried there yet) work: devices sync
 > and back up folders through the server today. Desktop installers with self-update are built for every release (tried
 > on Linux; not code-signed yet). The Android app (an APK to sideload) syncs and backs up in the background too, and the
-> server can wake it through UnifiedPush (ntfy); iOS comes later. The current version is in [VERSION](VERSION), changes are in
+> server can wake it through UnifiedPush (ntfy). The iOS app (an .ipa to sideload) enrolls and syncs while it is open;
+> background syncing on iOS comes next. The current version is in [VERSION](VERSION), changes are in
 > [RELEASE_NOTES.md](RELEASE_NOTES.md), and the design, roadmap and known gaps are in [AGENTS.md](AGENTS.md).
 
 <p>
@@ -318,6 +319,8 @@ Listing accounts and calendars from the web is the same phone setting as browsin
 - The Android app was tried on an Android 15 emulator only (not on a phone yet), background work, UnifiedPush and the
   Files app view included. Phones of some makers stop background work beyond what Android does: see
   [Background sync on Android](#background-sync-on-android). See "The Android app" for what else it cannot do yet.
+- The iOS app syncs only while it is open, and was tried on the iOS simulator only (in CI); it is sideloaded (no App Store
+  or TestFlight yet). See [The iOS app](#the-ios-app).
 
 What comes next is listed in [AGENTS.md](AGENTS.md) under "Milestones and current stage" (the mobile apps).
 
@@ -716,6 +719,55 @@ app: *More details → Install anyway*. One APK covers Android 8.0 and later on 
 To build it: `dotnet workload install android`, an Android SDK (`ANDROID_HOME`) and JDK 17, then
 `scripts/package-android.sh` (APK in `artifacts/packages/android`).
 
+## The iOS app
+
+<p>
+  <img src="docs/screenshots/ios-enroll-light.png" alt="Adding the iPhone" width="24%">
+  <img src="docs/screenshots/ios-dashboard-light.png" alt="A synced folder" width="24%">
+  <img src="docs/screenshots/ios-folder-picker-light.png" alt="Choosing a folder with the system's picker" width="24%">
+  <img src="docs/screenshots/ios-folders-dark.png" alt="Folders, dark" width="24%">
+</p>
+
+**Early: the foundation (v0.1.6).** The same pages as the Android app, on iOS 15 and later, while the app is open; syncing in
+the background comes next. Like on Android, the phone never needs its browser: the server is set up in the web UI on a
+computer.
+- **Adding the iPhone:** scan the QR code of *Devices → Add device* with the app's *Scan the QR code* (or with the Camera
+  app: it opens ASync), tap or paste its `async://pair` link, type the server address and the code, or *Approve on your
+  computer* (a short code to enter in the web UI there). The device's key is made in the iPhone's **Secure Enclave** and
+  never leaves it; what the app stores about the device is encrypted with a key in the Keychain (this device only, readable
+  after the first unlock). Signing out deletes the key.
+- **Folders:** the app's own folder, *On My iPhone › ASync* in the Files app (put files there from any app), or any folder you
+  pick with *Choose folder…* (the system's picker: On My iPhone, iCloud Drive, other apps' storage); ASync keeps the
+  permission to it across restarts. If a picked folder is deleted, moved off the device or ASync is reinstalled, the folder
+  says *Choose the folder again* and nothing is synced or deleted. *New folder…* and *Add to a folder…* work as on Android,
+  and so do Two-way, Mirror and Backup folders, *Sync now*, pause, end-to-end setup and unlocking. From the web UI on a
+  computer, *Browse…* lists the app's own folder (picked folders are chosen on the iPhone).
+- **Not yet:** syncing with the app closed (iOS suspends it soon after it leaves the screen: open it, and folders run at
+  once), Wi-Fi/charging conditions and wake-ups from the server; photos, contacts and calendars; ASync's folders in the Files
+  app. Files of iCloud Drive that are not downloaded to the iPhone yet are not fetched. Tried on the iOS simulator only
+  (in CI): the camera scanner and the Secure Enclave run only on a real iPhone.
+
+### Installing the iOS app
+
+There is no App Store or TestFlight build yet (that needs a paid Apple developer account). Each release has
+`ASync-<version>-unsigned.ipa`, which you **sideload** with [SideStore](https://sidestore.io) or
+[AltStore](https://altstore.io): they sign it with your own Apple ID on your device.
+1. Install SideStore (or AltStore) on the iPhone, following its guide (once, with a computer).
+2. Download `ASync-<version>-unsigned.ipa` from the [releases](https://github.com/jncchds/ASync/releases) on the iPhone and open
+   it with SideStore (*Share → SideStore*, or *+* in its *My Apps*).
+3. Open ASync and add the iPhone (above).
+- With a free Apple ID the signature lasts **7 days**: SideStore refreshes it in the background (AltStore needs its AltServer on
+  your computer, on the same Wi-Fi). An app whose signature ran out does not open until it is refreshed; your enrollment and
+  folders stay.
+- **Updates:** install the newer .ipa the same way, over the old one; enrollment and folders stay.
+- **Uninstalling** removes the app's data, its key and its Keychain items; remove the device in the web UI too. Files in
+  *On My iPhone › ASync* go with the app (move them out first); picked folders stay where they are.
+- **http servers** (no TLS, e.g. on your LAN) work, as on the other apps; iOS asks once whether ASync may use the local
+  network. Prefer https.
+
+To build it you need a Mac with Xcode and `dotnet workload install ios`: `scripts/package-ios.sh` (the unsigned .ipa) or
+`scripts/package-ios.sh --simulator`. On Linux, `scripts/check-ios.sh` compiles the app's code without building it.
+
 ## Run an agent
 
 `async-cli` is the headless agent for servers, NAS boxes and other machines without a screen. It syncs and
@@ -864,6 +916,9 @@ throw-away stack, and `SCREENSHOTS=docs/screenshots scripts/smoke-desktop.sh` re
 for the .deb/.rpm); `scripts/smoke-packages.sh` installs and removes the .deb and .rpm in Debian and Fedora containers,
 and `scripts/smoke-update.sh` runs an AppImage under Xvfb and updates it from one local build to the next, agent
 service included.
+The iOS app builds only on a Mac: `scripts/check-ios.sh` compiles its code on Linux against the iOS reference assemblies,
+and `.github/workflows/ios.yml` builds it, runs `scripts/smoke-ios.sh` on a simulator and makes the .ipa on GitHub's macOS
+runners, when the iOS app changes on `main`, for version tags, or when a branch `ios-ci/<name>` is pushed to ask for a run.
 
 ## License
 

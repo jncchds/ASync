@@ -78,7 +78,10 @@ src/
   ASync.App.Desktop/      Win/Linux/macOS head (async-desktop): window, tray, single instance, start at login,
                           notifications, installs the agent service; also *is* the service (`async-desktop service run`)
   ASync.App.Tests/        xunit v3: view models with a fake agent, views in Avalonia.Headless
-  ASync.App.iOS/          (later) PhotoKit, Contacts, EventKit, BGTaskScheduler, APNs, background URLSession
+  ASync.App.iOS/          iOS head (task 21): the agent in-process, the Secure Enclave key and the Keychain-sealed store,
+                          the app's Documents and bookmarked folders, QR scanner, async://pair links (not in ASync.slnx: needs
+                          the ios workload and Xcode; Shared/ is plain C# tested in ASync.App.Tests); later BGTaskScheduler,
+                          APNs, background URLSession (22), PhotoKit (23), Contacts/EventKit (24), File Provider (25)
   ASync.App.Android/      Android head (M4-1): the agent in-process, Android Keystore keys and sealed store, SAF trees,
                           QR scanner, async://pair links, WorkManager and UnifiedPush (M4-2), the documents
                           provider (M4-3) (not in ASync.slnx: needs the android workload). photos (task 19:
@@ -95,6 +98,9 @@ scripts/
   smoke-desktop.sh        the real desktop app under Xvfb with the real agent service and server stack (Linux)
   package-android.sh      the Android APK (and AAB): both ABIs, signed (release keystore from CI secrets, else debug)
   smoke-android.sh        the Android app on an emulator: enroll, the system folder picker, SAF sync both ways, backup
+  check-ios.sh            the iOS head's C# compiled on Linux against the iOS reference assemblies (no app built)
+  package-ios.sh          the iOS app on a Mac: the unsigned .ipa, a simulator build, or a signed .ipa for TestFlight
+  smoke-ios.sh            the iOS app on a simulator (macOS, CI): native server + Homebrew PostgreSQL, enroll, sync, bookmarks
   test-backends-env.sh    ASYNC_TEST_* variables for the containers of docker-compose.test.yml
 ```
 
@@ -2133,6 +2139,127 @@ section "documents provider" (below).
   mount per account (`~/ASync`), the cache as here.
 - The documents provider itself: an end-to-end Mirror/TwoWay layout (not there yet), a `ContentObserver` for SAF folders.
 
+## iOS app (task 21)
+
+`src/ASync.App.iOS` (net10.0-ios, iOS 15+, bundle id `ua.pp.chds.async`, the same id family as Android) is the Avalonia.iOS head
+of the shared `ASync.App`: enroll, show and sync folders while the app is open, add folders from the app. Background work
+(BGTaskScheduler, background URLSession, APNs wake-ups, run conditions) is task 22, photos (PhotoKit) task 23, contacts and
+calendars (Contacts, EventKit) task 24, the File Provider extension task 25. Like the Android head it is not in `ASync.slnx`:
+it needs the `ios` workload and Xcode, so it builds only on a Mac, which here means GitHub's macOS runners (`ios.yml`, below);
+`scripts/check-ios.sh` compiles its C# on Linux against the iOS reference assemblies (`Microsoft.iOS.Ref`) and Avalonia.iOS's
+library, warnings as errors, with the platform analyzer set to iOS 15, without building an app. That is how the head is
+developed: on Linux first, then one batched run on a Mac.
+
+**Structure.** `AppDelegate.cs` (`Program.Main`, `AppDelegate : AvaloniaAppDelegate<IosShellApp>`, one scene and one view),
+`IosAgent.cs` (the agent), `IosPlatform.cs` (`IPlatformServices`), `Keychain.cs` (device key, store key), `Bookmarks.cs`
+(NSURL bookmarks), `QrScanner.cs`, `Automation.cs` (tests only), and `Shared/`: plain C# (BCL, the engine, the client library)
+compiled into the head **and linked into `ASync.App.Tests`**, where it is tested on Linux: `IosFolders.cs` (locations, the
+bookmark store, the tree factory and trees), `IosSecrets.cs` (the sealing format, the public key's encoding),
+`IosBrowseScope.cs`, `PairingLinkInbox.cs`. The project keeps room for an app extension and an app group (task 25):
+`Entitlements.plist` is used only when the app is signed and holds the Keychain group (`$(AppIdentifierPrefix)ua.pp.chds.async`)
+that the extension will share; the app group and `aps-environment` go there with their tasks. The plists carry no XML
+comments (the build's plist reader); the csproj explains them.
+
+**The agent runs in the app's process** (`IosAgent`, as `AndroidAgent`): one `AgentRuntime` per process, `AgentMode.InApp`,
+`ControlChannel = false`, `WaitForIdentity`, the sealed store and the Secure Enclave keys, `IosTreeFactory`, `IosBrowseScope`;
+the shared view models reach it through `InProcessAgentConnector`. Unlike Android it keeps the desktop's scheduling for now
+(`RunAtStart`, `RunOnInterval`): while the app is in the foreground folders run at start, on their interval and on the server's
+events; coming back to the foreground (Avalonia's `IActivatableLifetime`, `ActivationKind.Background`) runs every folder, at most
+once a minute. iOS suspends the app soon after it leaves the screen; task 22 moves the scheduling to BGTaskScheduler with
+`BackgroundPlanner` as Android did with WorkManager. `Conditions` is null (nothing blocks) and the apps say so under the
+conditions editor (`ConditionsNote`). The store is `Library/Application Support/async` (not Documents, which the Files app
+shows, and not .NET's `SpecialFolder.ApplicationData`, which is `Documents/.config` on iOS), excluded from backups
+(`NSURLIsExcludedFromBackupKey`: its keys stay on this device, so a restored copy could not be read anyway); the log is
+`Library/Logs/async.log` (`RollingFileLoggerProvider`) and stdout. HTTP is .NET's own stack (`UseNativeHttpHandler=false`), as on
+Android and the desktop; `NSURLSession` comes with background transfers. Release builds are AOT with the interpreter for what AOT
+cannot compile ahead (`MtouchInterpreter=-all`; the client library's reflection JSON), `TrimMode=partial`.
+
+**Device identity** (`Keychain.cs`; the server and its formats unchanged):
+- `SecureEnclaveDeviceKeys : IDeviceKeyStore` makes an EC P-256 key with `SecKeyCreateRandomKey` in the **Secure Enclave**
+  (`kSecAttrTokenIDSecureEnclave`, permanent, application tag `ua.pp.chds.async.device.<guid>`, access control
+  `AfterFirstUnlockThisDeviceOnly` + `PrivateKeyUsage`), never exportable; the identity keeps `ioskey:<tag>` (the store writes
+  `ref:ioskey:<tag>`). The simulator has no Secure Enclave: only there (`Runtime.Arch == SIMULATOR`) a failed Secure Enclave key
+  falls back to an ordinary Keychain key with the same accessibility. The public key is `SecKeyCopyExternalRepresentation`
+  (X9.63, `04 ‖ X ‖ Y`) turned into the SubjectPublicKeyInfo the server keeps (`AppleKeys.SpkiFromX963`: the fixed P-256 prefix);
+  signatures are `ecdsaSignatureMessageX962SHA256`, DER, converted with `EcdsaSignatures.DerToP1363` (tested against .NET's own
+  DER signatures and SPKI). After-first-unlock accessibility is what lets task 22's background work sign in while the phone is
+  locked; a phone that has not been unlocked since it started says so instead of failing obscurely.
+- **The store is sealed** (`SealedStoreProtector`, `ISecretProtector` with `SealsFiles`): AES-256-GCM under a 32-byte key kept as
+  a Keychain generic password (`KeychainSealingKey`: service `ua.pp.chds.async.store`, `AfterFirstUnlockThisDeviceOnly`, never
+  synced or backed up), written as `ioskc:1:<id>:base64(nonce ‖ ciphertext ‖ tag)` with `ioskc:1:<id>` as associated data (a
+  value cannot stand in for another secret or another format version; a newer version's value says "update the app"). Files of
+  an earlier format (plain JSON, plain or another protector's secrets) are read and rewritten sealed by `FileClientStore`, as on
+  Android. Tested: round trip, the id and version bound, another key, damage, the store wholly sealed with the key reference
+  inside, a plain store migrated (`IosTests`).
+- Sign-out (`forget`) deletes the device key from the Keychain; a failed enrollment deletes the key it made (the agent's
+  existing behaviour through `IDeviceKeyStore.Delete`). The store key stays (it seals nothing once the files are gone).
+
+**Enrollment** (the shared `EnrollViewModel`): server and code; a pasted `async://pair` link; an **opened** one: `CFBundleURLTypes`
+registers `async`, Avalonia hands opened URLs (also the one that launched the app, from the scene's connection options) to
+`IActivatableLifetime.Activated` as `ProtocolActivatedEventArgs`, and `PairingLinkInbox` keeps the link until the shell shows the
+enrollment form (a cold start first connects to the agent) and drops it when the device is enrolled already (tested); *Scan the
+QR code* (`QrScanner`: an `AVCaptureSession` with `AVCaptureMetadataOutput` for QR codes, the system's decoder, no third-party SDK,
+`NSCameraUsageDescription`; not offered without a camera, as on the simulator) enrolls at once; the device-code flow.
+`OffersWebUi` is false as on Android. Plain `http://` servers work: the app's HTTP stack is .NET's, which App Transport Security
+does not cover, and `NSAppTransportSecurity` allows arbitrary loads and local networking for the system's parts
+(`NSLocalNetworkUsageDescription` for iOS 14's local network prompt).
+
+**Folders** (`IosFolders.cs`). An app reaches its own container and the folders the person picks; nothing else. Local paths:
+- **`~/Documents/…`**: the app's Documents, which the Files app shows as *On My iPhone › ASync* (`UIFileSharingEnabled`,
+  `LSSupportsOpeningDocumentsInPlace`). Never an absolute path: iOS moves an app's data container (its UUID changes on
+  reinstalls, restores and some updates), so the factory reads `/…/Containers/Data/Application/<UUID>/…` of an earlier install,
+  and the current container's absolute path (what the web UI's browsing hands over), as the same `~/…` place
+  (`IosLocations.HomeRelative`), and the tree's `Location` stays `~/…` so the sync state does not see a move (`HomeTree`).
+- **`bookmark:<id>/<where>`**: a folder chosen with the system's document picker (`UIDocumentPickerViewController` for
+  `UTType.folder`) outside the app: On My iPhone, iCloud Drive, another app's provider. Kept as a **security-scoped bookmark**
+  (`NSURL bookmarkData`, made while the picked URL is accessed; on iOS a picked URL's bookmark carries its scope implicitly) in
+  `bookmarks.json` of the store, by id; the part after the slash is only for people ("iCloud Drive › Work", from the picked path:
+  `Mobile Documents/com~apple~CloudDocs`, an app's iCloud container, `File Provider Storage`) and is what the web UI shows. A
+  folder picked inside the app's own Documents is stored as `~/Documents/…` instead. `BookmarkTree` resolves the bookmark
+  (`URLByResolvingBookmarkData`, without UI), starts accessing it and keeps it open while the process lives, resolving again
+  after a minute or when its folder is missing (a folder moved in the Files app is followed); a **stale** bookmark is made again
+  and kept. When it cannot be resolved (the folder deleted, the provider gone, the app reinstalled so the id is unknown) the tree
+  does not exist, `UnavailableReason` says why and "Choose the folder again with Change folder…", and every call throws
+  `UnauthorizedAccessException` with that reason: a run stops before changing anything and never takes the folder for empty (as
+  a revoked SAF tree). Bookmarks no folder uses any more are forgotten when the folder list changes (`IosTreeFactory.Prune`, an
+  hour's grace for one a form is still filling in; never on a starting agent's empty list), not when the picker answers (the
+  change may still be refused).
+- Anything else (the web UI's "choose on the phone", a path typed for another device) is a tree that does not exist with "This
+  folder has no place on this iPhone yet: choose it with Change folder…". `Validate` (set-path, adding folders) refuses paths
+  outside `~/Documents` and missing ones with what to do. `SamePlace` maps a container path, its `~/…` and a bookmark of a folder
+  in the container to one place. Nothing is watched (`Watchable` false: no file-change events for an app); folders run on their
+  interval, on *Sync now* and when the app comes to the front. Modification times can be set (POSIX underneath).
+- Providers that are not local (iCloud Drive's files not yet downloaded, other apps' file providers with placeholders) would need
+  `NSFileCoordinator` reads; that is not done yet (an open item for task 25, which brings the File Provider side anyway).
+- *Choose folder…* (`IosPlatform.PickFolderAsync`) opens the document picker at the folder's current place or Documents; *Open
+  folder* opens the Files app there (`shareddocuments://`). *New folder…* / *Add to a folder…* (task 18) use the same picker for
+  "where it lives"; end-to-end setup and unlock are the shared dialogs.
+- Tested (`IosTests`, with a fake `IBookmarkResolver`): the path forms and display names, the bookmark store, the local tree
+  contract (`LocalTreeContract`, linked) through `BookmarkTree`, resolving once and again after a move, stale bookmarks, every
+  failure message, pruning, the container move. `scripts/smoke-ios.sh` runs the same contract on the simulator (`selftest`:
+  bookmarks made by NSURL).
+
+**Browsing from the web** (task 17): `IosBrowseScope` offers *On My iPhone › ASync* (the app's Documents) as the only starting
+point, nothing above it (the rest of the container is the app's private data with the device's key) and refuses everything
+else; picked folders are not browsable from the web (they need the picker on the phone, like Android's document trees).
+
+**Platform:** `IosPlatform`: the device's name (since iOS 16 "iPhone" without Apple's user-assigned-name entitlement; people
+rename it in the form), `DeviceNoun` "iPhone"/"iPad", links in Safari, notifications through UserNotifications (permission asked
+when the first is due), the theme, no start at login, no self-update (a newer .ipa from the releases).
+
+**Automation (tests only):** a Unix socket at `<container>/tmp/automation.sock`, only when the app is launched with
+`ASYNC_APP_AUTOMATION=1` (`SIMCTL_CHILD_ASYNC_APP_AUTOMATION=1 xcrun simctl launch`: only `simctl` or a debugger sets an app's
+environment; an app opened from the home screen never has it). Bound by a relative name: a simulator container's path is
+longer than a socket path's 104 bytes; the test links a short path to it. One line per command, one line of answer (state,
+enroll, link, devicecode, sync/run tickets, choose (the real picker), pick (what the next picker returns), bookmark (made by
+NSURL as the picker does), add-folder…, setup/unlock, signout, keyinfo, haskey, files, selftest, theme, show…: see the file).
+
+**Not yet (and which task brings it):** background syncing, run conditions and APNs wake-ups (task 22: BGTaskScheduler,
+background URLSession, the relay), photos (task 23: PhotoKit into the `MediaTree` of task 19), contacts and calendars (task 24:
+Contacts and EventKit into task 20's collection trees), the File Provider extension (task 25, with the app group). The camera
+scanner and the Secure Enclave key are only exercised on a device (the simulator has neither); the unsigned .ipa has not been
+tried on a phone yet.
+
 ## Background work and wake-ups (M3–M4)
 
 Implemented: the desktop agent service ("Agent service and control channel"), the server's overdue detection and alerts
@@ -2733,8 +2860,42 @@ contacts and calendars part is `scripts/smoke-android-collections.sh`): see its 
   them the APK is signed with the runner's debug keystore, so each build has another signature and cannot update an
   installed one. `release` waits for it and attaches the APK and AAB (no Velopack feed: the loop skips them). The emulator
   smoke test is not in CI (no KVM on the standard runners); it is run by hand.
-- **Not yet:** winget/Homebrew/Flathub listings, an apt/dnf repository (the .deb/.rpm are downloads), MSIX.
-- **iOS:** TestFlight and the App Store.
+- **iOS** (`.github/workflows/ios.yml`, task 21): GitHub's macOS runners are the only Mac, and they are slow and few, so the
+  Mac job runs **only when asked for**, never on a schedule, and a newer push to the same ref cancels the run before it
+  (`concurrency: ios-<ref>`):
+  - **`ios-ci/**` branches: the explicit request.** Agents may not use `workflow_dispatch`, so a worker whose iOS part is
+    ready pushes its commit to such a branch (`git push origin HEAD:ios-ci/<task>`), watches the run (`gh run watch`, `gh run
+    view --log-failed`, `gh run download`), batches its fixes, pushes again to the same branch, and deletes the branch
+    afterwards (`git push origin --delete ios-ci/<task>`). Chosen over a label or a commit-message marker: it needs nothing but
+    git, cannot start by accident (no other branch matches), states which commit is tested, and pushing `task/**` branches
+    stays free.
+  - **`main`:** a push runs the Mac job only when it changes the iOS head or how it is built (`src/ASync.App.iOS/`,
+    `scripts/*ios*.sh`, `ios.yml`, `Directory.Packages.props`, `Directory.Build.props`), decided by the `decide` job from the
+    push's compare (a path filter on the trigger would also filter `ios-ci/**` and tags). Shared code (ASync.App, the client
+    library, the engine) changes in nearly every task and is covered on every push by the Linux `check` job instead:
+    `scripts/check-ios.sh` and `IosTests` on `ubuntu-24.04`, a few minutes.
+  - **Version tags:** the full Mac job, then the unsigned .ipa is **attached to that tag's GitHub Release** once
+    `docker-publish.yml` has published it (polling up to 90 minutes, `gh release upload --clobber`): the desktop and Android
+    release never waits for a macOS runner, and a slow or failed iOS build leaves the rest of the release alone (the .ipa is
+    then in the run's `packages-ios` artifact). `docker-publish.yml` is unchanged.
+  - Pull requests touching the iOS head or its scripts (path-filtered), and `workflow_dispatch` for a person.
+  - **The Mac job** (`macos-26`, pinned with its Xcode, `/Applications/Xcode_26.6.app`, and the ios workload through the
+    workload set `10.111.1` = Microsoft.NET.Sdk.iOS 26.5.10315, whose minimum is Xcode 26.6; `check-ios.sh` uses the same
+    reference pack: move the three together): restores the workload and NuGet (cached), runs `IosTests` on macOS, builds for
+    the simulator (`scripts/package-ios.sh --simulator`), runs **`scripts/smoke-ios.sh`**: the server built and run natively
+    with PostgreSQL from Homebrew (macOS runners have no Docker; a CI-only exception to "the server only in Docker", which
+    stays the rule everywhere else), the app installed in a new booted simulator (`xcrun simctl`), driven through its
+    automation socket, screenshots with `xcrun simctl io … screenshot`; then builds the **unsigned .ipa**
+    (`scripts/package-ios.sh`: Release for `ios-arm64` with `EnableCodeSigning=false`, zipped as `Payload/ASync.app`), and uploads
+    `packages-ios`, `ios-screenshots` and `ios-logs` (server, PostgreSQL, the app's stdout and agent log, the simulator's log).
+  - **Signing and TestFlight** are written and skipped until their secrets exist (`HAS_IOS_SIGNING`, `HAS_APPSTORE_API` job
+    variables, since `if:` cannot read secrets): `IOS_DISTRIBUTION_P12` (base64) and `IOS_DISTRIBUTION_P12_PASSWORD` go into a
+    temporary keychain, `IOS_PROVISIONING_PROFILE` (base64) is installed by its UUID, `scripts/package-ios.sh --signed` publishes a
+    signed .ipa, and on tags `xcrun altool --upload-app` sends it to TestFlight with an App Store Connect API key
+    (`APPSTORE_API_KEY_ID`, `APPSTORE_API_ISSUER_ID`, `APPSTORE_API_KEY_P8`). Until then APNs and the File Provider extension
+    (later tasks) must work signed and degrade cleanly unsigned.
+  - Validated with `actionlint` (1.7.12, which knows `macos-26`) and shellcheck.
+- **Not yet:** winget/Homebrew/Flathub listings, an apt/dnf repository (the .deb/.rpm are downloads), MSIX, the App Store.
 - **Android:** the sideloadable APK (above) for now; later a Play AAB and an F-Droid build, both with UnifiedPush.
 
 ## Milestones and current stage
