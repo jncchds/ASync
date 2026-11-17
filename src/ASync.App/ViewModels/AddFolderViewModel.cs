@@ -185,6 +185,7 @@ public sealed partial class AddFolderViewModel : ObservableObject
     // ── New folder ────────────────────────────────────────────────────────────
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(LocalTitle))]
     [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
     public partial string Name { get; set; } = "";
 

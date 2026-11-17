@@ -171,10 +171,6 @@ The folder follows the same rules as in the web UI (no folder inside another on 
 use) and appears there at once, marked *added from <device>*; retention, excludes and the other settings, and deleting
 it, are done in the web UI as usual.
 
-<p>
-  <img src="docs/screenshots/light-17-devices-adds-folders.png" alt="The Devices page with the Adds folders switch" width="64%">
-</p>
-
 **Which devices may do it** is up to you: the *Devices* page has *Adds folders* per device. It is on for phones and
 computers you added with a one-time code or approved in the browser, and off for devices added with a reusable code
 (scripted agents) and for devices added before this version. When it is off, the app says *Allowed in the web UI under
