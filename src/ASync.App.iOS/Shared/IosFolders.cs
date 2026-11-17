@@ -273,7 +273,10 @@ public sealed class IosTreeFactory(string home, BookmarkStore bookmarks, IBookma
         if (IosLocations.TryParseBookmark(location, out var id, out var where)) return new BookmarkTree(this, location, id, where);
         if (IosLocations.Absolute(location, home) is { } absolute)
             return new HomeTree(new FileSystemTree(absolute), IosLocations.HomeRelative(location, home)!);
-        return new FileSystemTree(location);
+        // Not a place on this device ("choose on the phone", a path typed for another one): nothing to open, and why.
+        var reason = $"This folder has no place on this {device} yet: choose it with Change folder….";
+        return new GuardedTree(new FileSystemTree(Path.IsPathFullyQualified(location) ? location : Path.Combine(home, "tmp", "none")), () => reason,
+            watchable: false);
     }
 
     public string? Validate(string location)

@@ -9,6 +9,12 @@
     .github/workflows/ios.yml, scripts/package-ios.sh). scripts/check-ios.sh compiles its C# on Linux against the iOS
     reference assemblies, without building an app.
     The files in Shared/ are plain C# and are also compiled into ASync.App.Tests.
+    Info.plist (no comments: the build's plist reader): the async:// URL scheme, UIFileSharingEnabled and
+    LSSupportsOpeningDocumentsInPlace (the app's Documents in the Files app as "On My iPhone › ASync"), the camera and local
+    network texts, an App Transport Security exception (self-hosted servers are often plain http on a LAN; the app's HTTP
+    stack is .NET's, which ATS does not cover anyway), UILaunchScreen (without one iOS runs the app letterboxed).
+    Entitlements.plist: only used when signed (simulator builds ad hoc, TestFlight); the Keychain group of the device key and
+    the store's key. APNs (task 22) and the app group shared with the File Provider extension (task 25) are added there.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0-ios</TargetFramework>
@@ -21,6 +27,8 @@
     <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
     <ApplicationVersion>$(Version)</ApplicationVersion>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Assets.xcassets/AppIcon.appiconset: the logo (packaging/icons/async-1024.png), one 1024 px image as Xcode 14+ takes it. -->
+    <AppIcon>AppIcon</AppIcon>
     <!-- Devices run ahead-of-time compiled code only. The client library and the engine serialize some state by reflection
          (as on Android): the interpreter is there for what AOT cannot compile ahead (-all: everything else is AOT). -->
     <MtouchInterpreter>-all</MtouchInterpreter>

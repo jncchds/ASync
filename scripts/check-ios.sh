@@ -47,6 +47,10 @@ cat > "$work/IosCheck.csproj" <<EOF
     <Compile Include="$root/src/ASync.App.iOS/**/*.cs" Exclude="$root/src/ASync.App.iOS/obj/**;$root/src/ASync.App.iOS/bin/**" />
     <Compile Include="$root/src/ASync.Tests/Local/LocalTreeContract.cs" />
     <Compile Include="SupportedOn.cs" />
+    <!-- The iOS SDK's implicit usings (Microsoft.iOS.Sdk.ImplicitNamespaceImports.props), so ambiguities show here too. -->
+    <Using Include="CoreGraphics" />
+    <Using Include="Foundation" />
+    <Using Include="UIKit" />
     <Reference Include="Microsoft.iOS"><HintPath>$root/$ref</HintPath></Reference>
     <Reference Include="Avalonia.iOS"><HintPath>$root/$av</HintPath></Reference>
     <PackageReference Include="Avalonia" />

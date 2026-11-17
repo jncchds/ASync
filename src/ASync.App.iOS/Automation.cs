@@ -13,9 +13,10 @@ namespace ASync.App.iOS;
 
 /// <summary>
 /// Tests only (<c>scripts/smoke-ios.sh</c> on the simulator): line commands on a Unix socket, one line of answer each, the
-/// iOS form of the desktop's automation socket. Only when the app is started with <c>ASYNC_APP_AUTOMATION</c> naming the
-/// socket's path (<c>SIMCTL_CHILD_ASYNC_APP_AUTOMATION=… xcrun simctl launch</c>: a simulator app runs on the Mac and sees
-/// its file system). An app opened from the home screen never has the variable, so this is never on in normal use.
+/// iOS form of the desktop's automation socket, at <c>&lt;container&gt;/tmp/automation.sock</c>. Only when the app is started
+/// with <c>ASYNC_APP_AUTOMATION=1</c> (<c>SIMCTL_CHILD_ASYNC_APP_AUTOMATION=1 xcrun simctl launch</c>; a simulator app runs on
+/// the Mac, which reaches the socket in the app's data container). An app opened from the home screen never has the
+/// variable, so this is never on in normal use.
 /// <para>Commands: <c>state</c>, <c>enroll &lt;server&gt; &lt;code&gt;</c>, <c>link &lt;async://…&gt;</c> (as if opened),
 /// <c>devicecode &lt;server&gt;</c>, <c>sync &lt;folder&gt;</c> (answers a ticket) and <c>run &lt;ticket&gt;</c>, <c>syncall</c>,
 /// <c>choose &lt;folder&gt;</c> (Change folder… with the real document picker), <c>picker</c> (whether it is shown),
@@ -24,7 +25,7 @@ namespace ASync.App.iOS;
 /// <c>add-folder-set &lt;field&gt; &lt;value&gt;</c>, <c>add-folder-local</c>, <c>add-folder-submit</c>, <c>add-folder-state</c>,
 /// <c>add-folder-close</c>, <c>unlock|setup &lt;folder&gt;</c>, <c>setup-passphrase &lt;text&gt;</c>, <c>setup-done</c>,
 /// <c>secret &lt;text&gt;</c>, <c>settings</c>, <c>back</c>, <c>theme light|dark|system</c>, <c>show &lt;control&gt;</c>,
-/// <c>keyinfo</c>, <c>files</c> (the store's files: names, prefixes, sizes), <c>selftest</c> (the local tree contract on
+/// <c>signout</c>, <c>keyinfo</c>, <c>haskey &lt;reference&gt;</c>, <c>files</c> (the store's files: names, prefixes, sizes), <c>selftest</c> (the local tree contract on
 /// bookmarked directories), <c>home</c> (the container's path).</para>
 /// </summary>
 internal static class Automation
@@ -37,11 +38,18 @@ internal static class Automation
 
     public static void StartIfRequested(ShellViewModel shell, IosPlatform platform)
     {
-        if (_started || Environment.GetEnvironmentVariable(EnvironmentVariable) is not { Length: > 0 } path) return;
+        if (_started || Environment.GetEnvironmentVariable(EnvironmentVariable) is not ("1" or "true")) return;
         _started = true;
+        // <container>/tmp/automation.sock, bound by a relative name: a simulator container's path is longer than a Unix
+        // socket's 104 characters. The test links a short path to it (macOS follows the link on connect).
+        var directory = Path.Combine(IosAgent.Home, "tmp");
+        Directory.CreateDirectory(directory);
+        Directory.SetCurrentDirectory(directory);
+        const string name = "automation.sock";
+        var path = Path.Combine(directory, name);
         if (File.Exists(path)) File.Delete(path);
         var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-        socket.Bind(new UnixDomainSocketEndPoint(path));
+        socket.Bind(new UnixDomainSocketEndPoint(name));
         socket.Listen(4);
         Console.WriteLine($"ASync: automation on {path}");
         _ = Task.Run(async () =>
@@ -224,8 +232,20 @@ internal static class Automation
                     scroller.Offset = new Avalonia.Vector(0, Math.Max(0, at.Y - 12));
                 return "ok";
             }
+            case "signout":
+            {
+                // Settings → Sign out → confirm, as a person does (the agent forgets the identity and deletes the key).
+                shell.OpenSettingsCommand.Execute(null);
+                if (shell.SettingsPage is not { } settings) return "no settings";
+                settings.SignOutCommand.Execute(null);
+                await settings.ConfirmSignOutCommand.ExecuteAsync(null);
+                return shell.Message ?? settings.Error ?? "ok";
+            }
             case "keyinfo":
                 return await Task.Run(KeyInfo);
+            case "haskey":
+                // haskey <reference>: where that key is now ("missing (ItemNotFound)" once deleted).
+                return await Task.Run(() => SecureEnclaveDeviceKeys.Describe(arg));
             case "files":
                 return await Task.Run(StoreFiles);
             case "selftest":
@@ -243,7 +263,8 @@ internal static class Automation
         return new JsonObject
         {
             ["enrolled"] = identity is not null,
-            ["reference"] = identity?.PrivateKey is { } k && k.StartsWith(SecureEnclaveDeviceKeys.Prefix, StringComparison.Ordinal) ? "ioskey:…" : identity is null ? null : "other",
+            // The Keychain item's tag: a name, not the key (which never leaves the Secure Enclave or the Keychain).
+            ["reference"] = identity?.PrivateKey is { } k && k.StartsWith(SecureEnclaveDeviceKeys.Prefix, StringComparison.Ordinal) ? k : identity is null ? null : "software",
             ["where"] = identity is null ? null : SecureEnclaveDeviceKeys.Describe(identity.PrivateKey),
             ["simulator"] = SecureEnclaveDeviceKeys.IsSimulator,
         }.ToJsonString();

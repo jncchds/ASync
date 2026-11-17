@@ -1,0 +1,231 @@
+name: iOS
+
+# The iOS app (src/ASync.App.iOS) builds only on a Mac, so on GitHub's macOS runners, which are slow and few: the macOS job
+# runs only when asked for (AGENTS.md "Packaging and CI", iOS):
+#   - a push to an ios-ci/** branch: an explicit request (`git push origin HEAD:ios-ci/<name>`, deleted afterwards), how an
+#     agent, which may not use workflow_dispatch, asks for a run when its iOS work is ready;
+#   - a push to main that changes the iOS head or how it is built (the `decide` job's list), so merges of other work do not
+#     start a Mac; the shared code is covered on every push by the Linux `check` job;
+#   - a version tag: the unsigned .ipa is attached to that tag's GitHub Release once docker-publish.yml has published it
+#     (the desktop and Android release never waits for macOS);
+#   - pull requests touching the iOS head, and workflow_dispatch (for a person).
+# No schedules. A newer push to the same ref cancels the run before it.
+on:
+  push:
+    branches:
+      - main
+      - 'ios-ci/**'
+    tags:
+      - 'v*'
+  pull_request:
+    paths:
+      - 'src/ASync.App.iOS/**'
+      - '.github/workflows/ios.yml'
+      - 'scripts/*ios*.sh'
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  # The ios workload is pinned with the Xcode it needs (WorkloadDependencies.json of the workload: Xcode 26.6 for 26.5.x);
+  # scripts/check-ios.sh compiles against the same reference pack. Move all three together.
+  IOS_WORKLOAD_SET: '10.111.1'    # Microsoft.NET.Sdk.iOS 26.5.10315
+  XCODE: '/Applications/Xcode_26.6.app'
+
+jobs:
+  # Whether this push needs the Mac: always for ios-ci/**, tags, pull requests (already path-filtered) and manual runs; for
+  # main only when the iOS head or its build changed.
+  decide:
+    runs-on: ubuntu-24.04
+    outputs:
+      mac: ${{ steps.decide.outputs.mac }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          mac=true
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+              echo "A new main: running."
+            else
+              changed=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$GITHUB_SHA" --paginate --jq '.files[].filename')
+              relevant=$(printf '%s\n' "$changed" | grep -E '^(src/ASync\.App\.iOS/|scripts/[^/]*ios[^/]*\.sh$|\.github/workflows/ios\.yml$|Directory\.(Packages|Build)\.props$)' || true)
+              if [ -z "$relevant" ]; then
+                mac=false
+                echo "Nothing of the iOS head or its build changed: no Mac (the check job compiles the head and runs its tests)."
+              else
+                printf 'iOS changes:\n%s\n' "$relevant"
+              fi
+            fi
+          fi
+          echo "mac=$mac" >> "$GITHUB_OUTPUT"
+
+  # On Linux, every time: the iOS head compiled against the iOS reference assemblies, and its shared code's tests.
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.1xx'
+
+      - name: Compile the iOS head (scripts/check-ios.sh)
+        run: scripts/check-ios.sh
+
+      - name: The iOS head's shared code (IosTests)
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests'
+
+  ios:
+    needs: [decide, check]
+    if: needs.decide.outputs.mac == 'true'
+    runs-on: macos-26
+    timeout-minutes: 100
+    permissions:
+      contents: write   # attaching the .ipa to a release
+    env:
+      # `if:` cannot read secrets: the signing and TestFlight steps look at these.
+      HAS_IOS_SIGNING: ${{ secrets.IOS_DISTRIBUTION_P12 != '' && secrets.IOS_PROVISIONING_PROFILE != '' }}
+      HAS_APPSTORE_API: ${{ secrets.APPSTORE_API_KEY_P8 != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check the tag against VERSION
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION ($version)."
+            exit 1
+          fi
+
+      - name: Xcode
+        run: |
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.1xx'
+
+      - name: NuGet cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-ios-${{ hashFiles('Directory.Packages.props') }}-${{ env.IOS_WORKLOAD_SET }}
+
+      - name: The ios workload
+        run: dotnet workload install ios --version "$IOS_WORKLOAD_SET"
+
+      # The shared iOS code on macOS itself (/var and /private/var, the real container layout of paths).
+      - name: Unit tests (IosTests)
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests'
+
+      - name: Build for the simulator
+        run: scripts/package-ios.sh --simulator
+
+      - name: PostgreSQL for the smoke test's server
+        run: brew list postgresql@16 >/dev/null 2>&1 || brew install postgresql@16
+
+      # The server runs natively here (no Docker on macOS runners): a CI-only exception, see scripts/smoke-ios.sh.
+      - name: Smoke test on the simulator
+        run: |
+          mkdir -p artifacts/ios-screenshots
+          APP=artifacts/packages/ios/simulator/ASync.app SCREENSHOTS=artifacts/ios-screenshots scripts/smoke-ios.sh
+
+      - name: The unsigned .ipa (SideStore / AltStore)
+        run: scripts/package-ios.sh
+
+      - name: Signing identity and profile
+        if: env.HAS_IOS_SIGNING == 'true'
+        env:
+          IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+        run: |
+          keychain="$RUNNER_TEMP/ios-signing.keychain-db"
+          password=$(openssl rand -hex 16)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          echo "$IOS_DISTRIBUTION_P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security import "$RUNNER_TEMP/dist.p12" -k "$keychain" -P "$IOS_DISTRIBUTION_P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" >/dev/null
+          existing=()
+          while IFS= read -r k; do existing+=("$k"); done < <(security list-keychains -d user | tr -d '"' | sed 's/^ *//')
+          security list-keychains -d user -s "$keychain" "${existing[@]}"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/async.mobileprovision"
+          uuid=$(security cms -D -i "$RUNNER_TEMP/async.mobileprovision" | plutil -extract UUID raw -)
+          cp "$RUNNER_TEMP/async.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$uuid.mobileprovision"
+          identity=$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Apple Distribution[^"]*\)".*/\1/p' | head -1)
+          { echo "ASYNC_IOS_CODESIGN_KEY=$identity"; echo "ASYNC_IOS_PROVISION=$uuid"; } >> "$GITHUB_ENV"
+
+      - name: The signed .ipa
+        if: env.HAS_IOS_SIGNING == 'true'
+        run: scripts/package-ios.sh --signed
+
+      - name: Upload to TestFlight
+        if: env.HAS_IOS_SIGNING == 'true' && env.HAS_APPSTORE_API == 'true' && github.ref_type == 'tag'
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          APPSTORE_API_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+        run: |
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo "$APPSTORE_API_KEY_P8" > "$HOME/.appstoreconnect/private_keys/AuthKey_$APPSTORE_API_KEY_ID.p8"
+          xcrun altool --upload-app -t ios -f "artifacts/packages/ios/ASync-$(tr -d '[:space:]' < VERSION).ipa" \
+            --apiKey "$APPSTORE_API_KEY_ID" --apiIssuer "$APPSTORE_API_ISSUER_ID"
+
+      - name: Upload the .ipa
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-ios
+          path: artifacts/packages/ios/*.ipa
+          if-no-files-found: error
+
+      - name: Upload the screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-screenshots
+          path: artifacts/ios-screenshots/
+          if-no-files-found: warn
+
+      - name: Upload the logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-logs
+          path: artifacts/ios-smoke/logs/
+          if-no-files-found: warn
+
+      # docker-publish.yml makes the Release once its own jobs pass; this waits for it (up to 90 minutes) and adds the
+      # unsigned .ipa, so neither workflow waits for the other's runners to start.
+      - name: Attach the .ipa to the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ipa="artifacts/packages/ios/ASync-$(tr -d '[:space:]' < VERSION)-unsigned.ipa"
+          for _ in $(seq 1 180); do
+            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              gh release upload "$GITHUB_REF_NAME" "$ipa" --clobber
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::The release $GITHUB_REF_NAME did not appear within 90 minutes; the .ipa is in this run's packages-ios artifact."
+          exit 1
