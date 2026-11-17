@@ -2880,7 +2880,7 @@ contacts and calendars part is `scripts/smoke-android-collections.sh`): see its 
     then in the run's `packages-ios` artifact). `docker-publish.yml` is unchanged.
   - Pull requests touching the iOS head or its scripts (path-filtered), and `workflow_dispatch` for a person.
   - **The Mac job** (`macos-26`, pinned with its Xcode, `/Applications/Xcode_26.6.app`, and the ios workload through the
-    workload set `10.111.1` = Microsoft.NET.Sdk.iOS 26.5.10315, whose minimum is Xcode 26.6; `check-ios.sh` uses the same
+    workload set `10.0.111.1` (the CLI's spelling of the NuGet package version 10.111.1) = Microsoft.NET.Sdk.iOS 26.5.10315, whose minimum is Xcode 26.6; `check-ios.sh` uses the same
     reference pack: move the three together): restores the workload and NuGet (cached), runs `IosTests` on macOS, builds for
     the simulator (`scripts/package-ios.sh --simulator`), runs **`scripts/smoke-ios.sh`**: the server built and run natively
     with PostgreSQL from Homebrew (macOS runners have no Docker; a CI-only exception to "the server only in Docker", which

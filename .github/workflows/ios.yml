@@ -36,7 +36,7 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
   # The ios workload is pinned with the Xcode it needs (WorkloadDependencies.json of the workload: Xcode 26.6 for 26.5.x);
   # scripts/check-ios.sh compiles against the same reference pack. Move all three together.
-  IOS_WORKLOAD_SET: '10.111.1'    # Microsoft.NET.Sdk.iOS 26.5.10315
+  IOS_WORKLOAD_SET: '10.0.111.1'  # the NuGet package Microsoft.NET.Workloads.10.0.100 10.111.1: Microsoft.NET.Sdk.iOS 26.5.10315
   XCODE: '/Applications/Xcode_26.6.app'
 
 jobs:
