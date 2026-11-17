@@ -224,6 +224,7 @@ link="async://pair?s=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.qu
 ctl "link $link" >/dev/null
 wait_state ".enrollCode == \"$code\" and .enrollServer == \"$server\" and .useCode" 20 \
   && pass "an async://pair link fills in the server and the code" || fail "link" "$(state)"
+sleep 2 # the first frames after a launch can still be black
 shot enroll
 
 answer=$(ctl "devicecode $server")

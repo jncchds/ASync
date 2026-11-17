@@ -3012,7 +3012,7 @@ contacts and calendars part is `scripts/smoke-android-collections.sh`): see its 
      security-scoped bookmarks, enrollment by code, link, QR scan and device code, adding folders from the app, the web UI
      browsing the app's Documents; `scripts/check-ios.sh` (Linux), `scripts/package-ios.sh`, `scripts/smoke-ios.sh` and
      `.github/workflows/ios.yml` (only on request: `ios-ci/**`, iOS changes on `main`, tags). Verified on an iOS 26.5
-     simulator (iPhone 17) in CI against a native server: all 40 checks of `smoke-ios.sh` (run 44160695773): a pairing link
+     simulator (iPhone 17) in CI against a native server: every check of `smoke-ios.sh` (runs 44160695773 and 44167814039, about 40 each): a pairing link
      filling the form (also one opened through iOS's own URL routing), the device-code flow, sign-out deleting the Keychain
      key, enrolling by code with a **Secure Enclave** key (the simulator on Apple silicon has one) whose converted
      signatures the server accepts, the sealed store, a TwoWay folder in `~/Documents/Sync` both ways with `async-cli` (an
