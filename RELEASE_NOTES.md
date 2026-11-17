@@ -1,6 +1,6 @@
 # Release notes
 
-## v0.1.6 — 2026-11-17
+## v0.1.5 — 2026-11-17
 
 - feat: **Back up photos and videos from your phone.** A new kind of folder, *Photos & videos* (in the web UI and in the
   phone's *New folder…*), backs up the phone's photo library: everything, or the albums you choose from the phone's own
@@ -21,13 +21,10 @@
 - ci: **Packages are built only after the tests pass.** The desktop/CLI packages and the Android APK now wait for the
   test, end-to-end and Windows/macOS jobs, so a failing commit no longer spends runner time on packages that the
   release would not use anyway.
-- fix(test): the v0.1.5 release run failed on Windows: eight app tests of the phone's storage paths (All files access,
+- fix(test): the first v0.1.5 tag failed on Windows: eight app tests of the phone's storage paths (All files access,
   browsing, adding a folder), which are Unix paths and only run on Android, now skip on Windows. A photo-restore test
   that could read the progress before it was complete waits for it, and the app sets the progress before the
   "restoring" flag.
-
-## v0.1.5 — 2026-11-17
-
 - feat: **Add folders from the apps.** The Android and desktop apps have *New folder…* (name; Two-way, Mirror or
   Backup; the Mirror direction; end-to-end encryption for backups; which of your storage back-ends; the directory on it,
   filled in from the name; how often it runs; and where it lives on the device, chosen with the phone's folder picker,
