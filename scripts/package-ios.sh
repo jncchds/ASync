@@ -36,7 +36,8 @@ build=(dotnet build "$project" -c Release -f net10.0-ios -nologo)
 case $mode in
   simulator)
     rid=iossimulator-$([[ "$(uname -m)" == arm64 ]] && echo arm64 || echo x64)
-    "${build[@]}" -r "$rid"
+    # Ad hoc ("-"): the simulator needs a signature (for the entitlements: the Keychain group) but no identity.
+    "${build[@]}" -r "$rid" -p:CodesignKey=-
     app=src/ASync.App.iOS/bin/Release/net10.0-ios/$rid/ASync.app
     rm -rf "$out/simulator" && mkdir -p "$out/simulator"
     cp -R "$app" "$out/simulator/ASync.app"
