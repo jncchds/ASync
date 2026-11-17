@@ -1,0 +1,14 @@
+Task 6 of a sequenced series run by an orchestrator session (one task per session). Work in /mnt/git/ASync in a new worktree, on a new branch `task/06-plain-folder-browser` based on the LOCAL `main` branch (it is ahead of origin/main and holds tasks 1-5; do not base on origin/main). Follow CLAUDE.md strictly (build checks, version check-bump flow, release notes, AGENTS.md + README updates, migrations only through `dotnet ef` — in ~/.dotnet/tools; never run the server outside Docker). Read AGENTS.md first: "Plain layout", "Web UI: folders and snapshot browsing" (reuse its patterns: download tickets, streaming, ZIP via SyncWriteBuffer, path validation), "Web UI style", and "Before M3: gaps to close", item 5.
+
+Goal: a web UI for Mirror and TwoWay folders (plain layout, not end-to-end), on par with the snapshot browser.
+
+1. Browse the folder's current files on storage: directories first, then files, with size and modified time; download a file or a directory as ZIP through the existing download-ticket mechanism.
+2. Versions: for a file, list its earlier versions (`.async/versions/<path>~<stamp>`) with time and size; download one; restore one (the current file becomes a version, as PlainStore already does). A "show files with versions" view or per-file history entry point — decide what is usable.
+3. Trash: list deleted files grouped by deletion time (`.async/trash/<stamp>/<path>`), download, restore to the original path (refuse or rename on conflict — decide), and empty trash (with confirmation).
+4. Restores change the storage, so they must take the folder's lease (the same one devices use) to avoid racing a device's reconcile, refuse with a clear message when a device holds it, and afterwards notify devices with `folder.changed` so TwoWay/Mirror-Download devices pull the restored file. Mirror-Upload devices would overwrite or delete it on their next run: warn in the UI.
+5. Hide `.async/` itself from the normal file listing. Owner only; device tokens 403; path validation as in the snapshot browser (`..` → 400).
+6. UI: a "Files" entry on Mirror/TwoWay folders alongside the existing "Snapshots" for Backup ones; must fit 390 px (table.stack pattern).
+7. Tests: unit tests on a local PlainStore; extend scripts/e2e-sync.cs: a TwoWay folder, a file edited twice and one deleted by an agent, then through the API list versions, restore a version and a trashed file, and the agent pulls both back locally. Also check the lease refusal. Run unit tests and scripts/e2e-sync.sh and make them pass.
+8. Docs: AGENTS.md (design, gap item 5 marked done), README (features, screenshots only if you can produce them with the existing docs/screenshots approach; otherwise skip).
+
+Do not start other gap-list items. When done: commit and push the branch to origin (leave main alone: the orchestrator merges; no PR needed), and end with a short report: branch, what was built, test results with numbers, design decisions, anything left open.

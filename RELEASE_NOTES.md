@@ -30,6 +30,8 @@
 - fix(android): the background folder runs have a stable worker name again (task 17 had put it on the browse wake-up
   worker by mistake). On the first start after this update the app re-enqueues the folders' scheduled work under the new
   name, so phones that already have the app keep running their folders in the background.
+- docs: the task briefs (tasks 1–22), planning notes and worker drafts the app was built from are kept in
+  `docs/orchestration/`.
 
 ## v0.1.5 — 2026-11-17
 

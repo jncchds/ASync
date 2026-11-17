@@ -1,0 +1,7 @@
+- [Web UI style](web-ui-style.md) — nopds/abook family look (sidebar, cards, pills, Inter) with ASync's plum/fuchsia palette
+- [Orchestrated task flow](orchestrated-task-flow.md) — merge task branches into local main only, then delete worktree + local and remote branch
+- [Screenshots via remote](screenshots-via-remote.md) — send UI screenshots with SendUserFile; tell worker sessions to do the same
+- [Virtual file systems](virtual-file-systems.md) — planned: native VFS per platform (DocumentsProvider, Cloud Files API, File Provider, FUSE) as tasks after M4-1
+- [Queued tasks 16–20](queued-tasks-16-18.md) — after task 15: Android all-files access, web browsing of device folders, adding folders from the app, photo backup, contacts/calendars backup
+- [iOS plan](ios-plan.md) — orchestrator from 2026-11-17: session 31c6ab0b; iOS built on GitHub macOS runners, run those jobs as rarely as possible; tasks 21–25 after Android; signing and CI-server decisions
+- [Workers wake the orchestrator](workers-wake-orchestrator.md) — every brief: report via SendMessage, resume the orchestrator if it is offline

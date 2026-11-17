@@ -1,0 +1,38 @@
+Report from ASync 19 android photos: task 19 (photo and video backup) is done and pushed on branch task/19-android-photos (based on local main 3795bed; commits f557e8d feature, 93dc03a smoke-found fixes, 2b64b65 docs). Not merged, no tags, no PR.
+
+BUILT
+- Migration PhotosMediaSelection (dotnet ef). FolderDevice.MediaSelectionJson (all, or albums by stable id + name; filters since / videos / screenshots) replaces the local path (stored empty), plus MediaPhotos/Videos/Bytes from the report. Device.MediaAlbumsJson/At/MediaAccess = the last album list (names + counts only). Phones only (Android/iOS); a computer gets a 400.
+- GET /api/devices/{id}/albums. Same SignalR client-result mechanism as task 17 (hub method "albums"), the asleep phone woken with the browse push. Offline / turned off / failure → the stored list with live:false and the reason. Devices PUT /api/sync/media/albums after each Photos backup. DECISION: the SAME "Allow browsing folders from the web" switch covers albums.
+- Permanent layout (AGENTS "Extra data sources → Photos and videos"): <yyyy>/<MM>/<stem>~<shortid>.<ext> original as-is, .<role>.<ext> extra resources (iOS), <stem>~<shortid>.json sidecar format 1. UTC year/month from date taken. Albums are not directories; dedup comes from chunks.
+- MediaTree, a read-only ILocalTree over IMediaLibrary (Client.Core/Media, BCL, fake for tests): the normal BackupJob runs it; unchanged assets are reused without reading. New optional ILocalTree.AlwaysRead for sidecars. No engine format change.
+- Safety: a Photos run that sees nothing of its selection while snapshots exist is refused with no empty snapshot (smoke found that a wiped album made restore-newest restore nothing).
+- Android: AndroidMediaLibrary (MediaStore, setRequireOriginal + ACCESS_MEDIA_LOCATION, EXIF location, inserts with IS_PENDING). AndroidPhotoAccess (READ_MEDIA_IMAGES/VIDEO, the partial READ_MEDIA_VISUAL_USER_SELECTED explained, READ_EXTERNAL_STORAGE maxSdk 29→32). MediaTriggerWorker (WorkManager content-URI trigger; run conditions apply). BackgroundPlanner now schedules Photos folders.
+- Restore into the library: the app offers a snapshot choice and progress. It skips by id + size, or by SHA-256 within the same relative path. async-cli restore writes plain files + sidecars; the web snapshot browser downloads originals (no thumbnails).
+- Web: a "Photos & videos" folder type. The device form has the media selection and album picker (live / last reported, refresh), since / videos / screenshots, plus counts. App: Photos screen (permission explanation, albums), card actions, New folder / Add to a folder offer Photos on phones.
+- Item 7: at 1280 px Remove was still clipped, so Rename/Remove now stack. The four Devices screenshots were retaken and the README image is back.
+- Fixed task 17 code: RefreshLiveConnectionAsync now reloads folders after a fresh hub connection (a folder attached at that moment arrived minutes late).
+
+TESTS (all passing)
+- ASync.Tests 613/613 with the test stack up (new MediaBackupTests, DeviceMediaServiceTests, ApiPhotosTests).
+- ASync.App.Tests 149/149 (PhotosTests).
+- e2e-sync.sh 324 passed.
+- Android smoke on the Android 15 emulator with ntfy: 199/199 in run 4. The photos part is 26 checks: seeding two albums, the permission explanation and dialog, the live album list, one album chosen via the API, the backup, an offline async-cli restore with the recovery key showing the tree and byte-identical originals with GPS, the sidecar fields, a web download, the content trigger, the restore choice, a wiped album refused, and restore byte for byte and then skipping everything.
+- Runs 1–3 failed on causes now fixed (the restore bug, check bugs, a lease-retry timeout, a one-off network error, the reload bug).
+
+SCREENSHOTS (sent to the person)
+- Web: *-18-photos-albums ×4 and light-19-add-photos-folder.
+- Android: android-photos-{permission,permission-dialog,albums,dashboard,restore}-{light,dark}.
+- Devices: *-17-devices-adds-folders ×4.
+
+ONLY COMPILED
+- Android 8–12 permissions.
+- Partial access with photos actually picked.
+- SD-card photos.
+- Real motion photos.
+- iOS (mapping notes are in AGENTS).
+
+OPEN
+- Pre-existing: in BackgroundWork.cs the [Register("ua.pp.chds.async.FolderRunWorker")] sits on BrowseWakeWorker (warning CS1587), so FolderRunWorker's Java name is not stable. Moving it breaks installed phones' stored WorkManager work unless re-enqueued on upgrade; worth a small task.
+- No thumbnails.
+- The location cache is per process.
+- Note: SendMessage to "ASync" was ambiguous (3 Remote Control sessions) and none was b2861529, so this report came as a resume.
