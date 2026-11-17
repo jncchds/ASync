@@ -18,7 +18,7 @@ namespace ASync.App.iOS;
 /// Mac's loopback). Only when the app is started with <c>ASYNC_APP_AUTOMATION=&lt;port&gt;</c>
 /// (<c>SIMCTL_CHILD_ASYNC_APP_AUTOMATION=47821 xcrun simctl launch</c>). An app opened from the home screen never has the
 /// variable, so this is never on in normal use.
-/// <para>Commands: <c>state</c>, <c>enroll &lt;server&gt; &lt;code&gt;</c>, <c>link &lt;async://…&gt;</c> (as if opened),
+/// <para>Commands: <c>state</c>, <c>enroll &lt;server&gt; &lt;code&gt;</c>, <c>link &lt;async://…&gt;</c> (as if opened), <c>openurl &lt;url&gt;</c> (opened through iOS),
 /// <c>devicecode &lt;server&gt;</c>, <c>sync &lt;folder&gt;</c> (answers a ticket) and <c>run &lt;ticket&gt;</c>, <c>syncall</c>,
 /// <c>choose &lt;folder&gt;</c> (Change folder… with the real document picker), <c>picker</c> (whether it is shown),
 /// <c>picker-cancel</c>, <c>pick &lt;location&gt;</c> (what the next picker returns), <c>bookmark &lt;path&gt;</c> (a
@@ -101,6 +101,13 @@ internal static class Automation
             }
             case "link":
                 IosShellApp.OpenLink(arg);
+                return "ok";
+            case "openurl":
+                // The link opened through iOS (UIApplication.openURL of the app's own scheme), as another app opens it: the
+                // URL scheme, the scene's openURLContexts and Avalonia's activation. (`simctl openurl` makes iOS ask "Open in
+                // ASync?", which simctl cannot tap.)
+                if (NSUrl.FromString(arg) is not { } url) return "not a URL";
+                UIApplication.SharedApplication.OpenUrl(url, new UIApplicationOpenUrlOptions(), opened => Console.WriteLine($"ASync: openURL {opened}"));
                 return "ok";
             case "devicecode":
                 shell.Enroll.UseDeviceCode = true;
@@ -278,8 +285,10 @@ internal static class Automation
         var files = new JsonArray();
         foreach (var file in Directory.EnumerateFiles(IosAgent.ConfigDirectory, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
         {
-            if (file.Contains("/state/", StringComparison.Ordinal)) continue;
-            var text = File.ReadAllText(file);
+            if (file.Contains("/state/", StringComparison.Ordinal) || file.EndsWith(".lock", StringComparison.Ordinal)) continue;
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch (IOException) { continue; } // held open by the agent
             files.Add(new JsonObject
             {
                 ["name"] = Path.GetRelativePath(IosAgent.ConfigDirectory, file),

@@ -6,7 +6,7 @@
 #
 # The app is driven through its automation socket (src/ASync.App.iOS/Automation.cs, only on with ASYNC_APP_AUTOMATION=<port>,
 # which only `simctl launch` can set), the simulator through `xcrun simctl` (no paid account, no XCUITest). It checks:
-#   the app installs and starts; an opened async://pair link (simctl openurl) fills the enrollment form; the device-code
+#   the app installs and starts; an async://pair link fills the enrollment form (and, last, one opened through iOS: openURL of the app's own scheme, since `simctl openurl` makes iOS ask "Open in ASync?", which simctl cannot tap); the device-code
 #   flow (the code shown, approved through the web UI's API, enrolled); signing out deletes the device key from the
 #   Keychain; enrolling by code with a new key (the Secure Enclave on a device, a Keychain key on the simulator) whose
 #   DER signatures, converted to P1363, the server accepts; the server lists the device as iOS; the store's files sealed
@@ -218,9 +218,9 @@ section "enrolling"
 wait_state '.page == "EnrollViewModel"' 60 && pass "the enrollment form" || fail "enroll page" "$(state)"
 code=$(api POST /api/devices/enrollments '{"reusable":false,"label":"ios smoke"}' | jq -r .code)
 link="async://pair?s=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$server")&c=$code"
-xcrun simctl openurl "$udid" "$link"
+ctl "link $link" >/dev/null
 wait_state ".enrollCode == \"$code\" and .enrollServer == \"$server\" and .useCode" 20 \
-  && pass "an opened async://pair link fills in the server and the code" || fail "opened link" "$(state)"
+  && pass "an async://pair link fills in the server and the code" || fail "link" "$(state)"
 shot enroll
 
 answer=$(ctl "devicecode $server")
@@ -229,15 +229,17 @@ api POST /api/devices/approvals "{\"userCode\":\"$answer\",\"approve\":true}" >/
 wait_state '.page == "DashboardViewModel"' 60 && pass "approved in the web UI: enrolled" || fail "device-code enroll" "$(state)"
 wait_state '.state == "Connected"' 60 && pass "signed in with the new key" || fail "connected (device code)" "$(state)"
 first_key=$(ctl keyinfo | jq -r .reference)
+first_device=$(api GET /api/devices | jq -r --arg old "$first_device" '.[] | select(.revokedAt == null and .platform == "IOS" and .id != $old) | .id' | head -1)
 answer=$(ctl signout)
 wait_state '.page == "EnrollViewModel"' 30 && pass "signed out ($answer)" || fail "sign out" "$answer $(state)"
 gone=$(ctl "haskey $first_key")
 [[ "$gone" == missing* ]] && pass "signing out deleted the device key from the Keychain" || fail "key deleted" "$gone"
+api DELETE "/api/devices/$first_device" >/dev/null # and removed in the web UI, as the app says
 
 answer=$(ctl "enroll $server $code")
 wait_state '.page == "DashboardViewModel"' 60 && pass "enrolled by code ($answer)" || fail "enroll by code" "$answer $(state)"
 wait_state '.state == "Connected"' 60 && pass "signed in: the server accepted the key's signatures (DER → P1363)" || fail "connected" "$(state)"
-device=$(api GET /api/devices | jq -r '.[] | select(.revokedAt == null and .platform == "IOS") | .id' | head -1)
+device=$(api GET /api/devices | jq -r --arg old "$first_device" '.[] | select(.revokedAt == null and .platform == "IOS" and .id != $old) | .id' | head -1)
 [[ -n "$device" ]] && pass "the server lists the device as iOS ($device)" || fail "device on server" "$(api GET /api/devices)"
 keys=$(ctl keyinfo)
 jq -e '(.reference | startswith("ioskey:")) and (.where == "Secure Enclave" or (.simulator and .where == "Keychain (software)"))' <<<"$keys" >/dev/null \
@@ -333,6 +335,20 @@ section "restart"
 launch 2
 wait_state '.page == "DashboardViewModel" and .state == "Connected"' 60 && pass "after a restart: still enrolled, signed in again" || fail "restart" "$(state)"
 wait_state '.folders | length == 3' 30 && pass "the three folders are back" || fail "folders after restart" "$(state)"
+
+section "a pairing link opened through iOS"
+# Last: if iOS asked "Open in ASync?" here, the question would cover the screens after it (simctl cannot tap it).
+ctl signout >/dev/null
+wait_state '.page == "EnrollViewModel"' 30 || fail "signed out again" "$(state)"
+code3=$(api POST /api/devices/enrollments '{"reusable":false,"label":"ios link"}' | jq -r .code)
+link="async://pair?s=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$server")&c=$code3"
+ctl "openurl $link" >/dev/null
+if wait_state ".enrollCode == \"$code3\" and .enrollServer == \"$server\"" 20; then
+  pass "an async://pair link opened through iOS (URL scheme, scene, activation) fills in the form"
+else
+  xcrun simctl io "$udid" screenshot --type=png "$logs/openurl.png" >/dev/null 2>&1 || true
+  fail "link opened through iOS (screen in logs/openurl.png)" "$(state)"
+fi
 
 echo
 if ((failures)); then echo "$failures check(s) failed (logs: $logs)"; exit 1; fi

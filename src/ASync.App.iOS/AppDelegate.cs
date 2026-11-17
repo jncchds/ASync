@@ -45,7 +45,11 @@ public sealed class IosShellApp : App
         {
             activatable.Activated += (_, e) =>
             {
-                if (e is ProtocolActivatedEventArgs { Uri: var uri }) OpenLink(uri.OriginalString);
+                if (e is ProtocolActivatedEventArgs { Uri: var uri })
+                {
+                    Console.WriteLine($"ASync: opened {uri.Scheme}://{uri.Host}");
+                    OpenLink(uri.OriginalString);
+                }
                 else if (e.Kind == ActivationKind.Background) IosAgent.AppOpened(); // back to the foreground
             };
         }
