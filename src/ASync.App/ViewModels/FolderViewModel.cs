@@ -172,11 +172,12 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         }
         else
         {
-            RestoreRunning = restore.Running;
+            // Progress and text first, the running flag last: whoever reacts to RestoreRunning sees the matching numbers.
             RestorePercent = restore.Total > 0 ? 100.0 * restore.Done / restore.Total : 0;
             RestoreText = restore.Running
                 ? $"Restoring snapshot {restore.Snapshot} into the photo library: {restore.Done} of {restore.Total} ({restore.Restored} restored, {restore.Skipped} already there)"
                 : $"Restore of snapshot {restore.Snapshot}: {restore.Message}";
+            RestoreRunning = restore.Running;
         }
         RestorePhotosCommand.NotifyCanExecuteChanged();
     }

@@ -2485,6 +2485,9 @@ restore's progress, New folder and Add to a folder on a phone and not on a compu
   - Image tags are `latest`, the `VERSION` value and `sha-…`.
   - Pushes to branches publish nothing. Pull requests run the tests and the end-to-end test, and a manual run
     (`workflow_dispatch`) builds the chosen ref.
+  - **Job order:** `test`, `e2e` and `agent-desktop` (Windows, macOS) run first. `package`, `android` and
+    `build-and-push` need all three, so a failing commit builds no packages, APK or images; `release` needs everything.
+    Tests of Android-only logic that use real Unix paths (`/storage/emulated/0`) return early on Windows.
   - The `test` job builds Release with `-warnaserror`, starts `docker-compose.test.yml` with `up -d --wait` (every
     server healthy) and runs `dotnet test --no-build` with the GitHubActionsTestLogger: failed tests appear as
     annotations and in the job summary, readable without access to the raw logs. The TRX (`test-results`) and,

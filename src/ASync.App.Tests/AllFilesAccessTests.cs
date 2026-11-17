@@ -135,6 +135,7 @@ public sealed class AllFilesAccessTests : IDisposable
     [Fact]
     public async Task WithoutTheAccess_ChoosingAFolderExplainsFirst_ThenThePickerOnceGranted()
     {
+        if (OperatingSystem.IsWindows()) return; // phone storage paths are Unix paths: this runs on Android only
         var (f, storage) = await PhoneAsync("", granted: false);
         await using var _ = f;
         var folder = f.Shell.Dashboard.Folders.Single();
@@ -171,6 +172,7 @@ public sealed class AllFilesAccessTests : IDisposable
     [Fact]
     public async Task ThePicker_GoesToVolumes_Download_AndNewFolders_AndRefusesAndroidData()
     {
+        if (OperatingSystem.IsWindows()) return; // phone storage paths are Unix paths: this runs on Android only
         var (f, _) = await PhoneAsync("", granted: true);
         await using var __ = f;
         await f.Shell.Dashboard.Folders.Single().ChooseFolderCommand.ExecuteAsync(null);
@@ -205,6 +207,7 @@ public sealed class AllFilesAccessTests : IDisposable
     [Fact]
     public async Task ThePicker_OpensAtTheFoldersCurrentPlace_AlsoForADocumentTree()
     {
+        if (OperatingSystem.IsWindows()) return; // phone storage paths are Unix paths: this runs on Android only
         var (f, _) = await PhoneAsync("content://com.android.externalstorage.documents/tree/primary%3ADCIM%2FCamera", granted: true);
         await using var __ = f;
         await f.Shell.Dashboard.Folders.Single().ChooseFolderCommand.ExecuteAsync(null);
@@ -238,6 +241,7 @@ public sealed class AllFilesAccessTests : IDisposable
     [Fact]
     public async Task ADocumentTreeFolder_IsOfferedItsRealPath_OnceTheAccessIsGranted_AndKeepsItWhenSwitched()
     {
+        if (OperatingSystem.IsWindows()) return; // phone storage paths are Unix paths: this runs on Android only
         const string tree = "content://com.android.externalstorage.documents/tree/primary%3ADCIM";
         var (f, storage) = await PhoneAsync(tree, granted: false);
         await using var _ = f;
@@ -321,6 +325,7 @@ public sealed class AllFilesAccessTests : IDisposable
     [AvaloniaFact]
     public async Task OnAPhone_TheExplanationThePickerAndTheSettingsCardFit()
     {
+        if (OperatingSystem.IsWindows()) return; // phone storage paths are Unix paths: this runs on Android only
         var storage = new FakeStorage(Volumes);
         var f = new ShellFixture();
         f.Platform.Phone = true;

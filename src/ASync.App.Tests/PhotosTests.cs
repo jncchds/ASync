@@ -139,13 +139,13 @@ public sealed class PhotosTests
         Assert.Contains("restore-media 3 0190aaaa000070008000000000000002", f.Agent.Calls);
 
         f.Agent.PushStatus(Statuses.Connected(folder) with { MediaRestore = new MediaRestoreDto(3, "1a2b3c4d", true, 2, 8, 1, 1, "IMG_2.jpg") });
-        await ShellFixture.Until(() => card.RestoreRunning, "the restore's progress");
+        await ShellFixture.Until(() => card.RestoreRunning && card.RestoreText?.Contains("2 of 8") == true, "the restore's progress");
         Assert.Equal(25, card.RestorePercent);
         Assert.Contains("2 of 8 (1 restored, 1 already there)", card.RestoreText);
         Assert.False(card.RestorePhotosCommand.CanExecute(null));
 
         f.Agent.PushStatus(Statuses.Connected(folder) with { MediaRestore = new MediaRestoreDto(3, "1a2b3c4d", false, 8, 8, 5, 3, null, "5 restored, 3 already in the library") });
-        await ShellFixture.Until(() => !card.RestoreRunning, "the restore's end");
+        await ShellFixture.Until(() => !card.RestoreRunning && card.RestoreText?.Contains("5 restored") == true, "the restore's end");
         Assert.Contains("5 restored, 3 already in the library", card.RestoreText);
     }
 

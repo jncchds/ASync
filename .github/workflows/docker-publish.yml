@@ -125,7 +125,10 @@ jobs:
   #   macOS: MACOS_CERTIFICATE (base64 .p12 with the Developer ID Application and Installer identities),
   #          MACOS_CERTIFICATE_PASSWORD, MACOS_SIGN_APP_IDENTITY, MACOS_SIGN_INSTALL_IDENTITY;
   #          notarization also: APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (an app-specific password)
+  # Packages are built only once every test job has passed: a release needs all of them, and building them for a
+  # failing commit only spends runner minutes (macOS and Windows ones above all).
   package:
+    needs: [test, e2e, agent-desktop]
     strategy:
       fail-fast: false
       matrix:
@@ -252,6 +255,7 @@ jobs:
   # (ANDROID_KEYSTORE: the .jks in base64, ANDROID_KEY_ALIAS, ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD), otherwise with
   # the runner's throw-away debug keystore (such an APK cannot update one signed differently).
   android:
+    needs: [test, e2e, agent-desktop]
     runs-on: ubuntu-24.04
     env:
       HAS_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE != '' }}

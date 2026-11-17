@@ -259,6 +259,7 @@ public sealed class AddFolderTests : IDisposable
     [Fact]
     public async Task OnAPhone_TheLocalFolderComesFromThePhonesPicker()
     {
+        if (OperatingSystem.IsWindows()) return; // phone storage paths are Unix paths: this runs on Android only
         var internalStorage = Path.Combine(_root, "emulated", "0");
         Directory.CreateDirectory(Path.Combine(internalStorage, "DCIM"));
         var storage = new FakeStorage(new StorageVolumeInfo("Internal storage", internalStorage, true, false)) { HasAllFilesAccess = true };

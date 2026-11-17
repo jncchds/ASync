@@ -184,6 +184,7 @@ public sealed class BrowsingTests : IDisposable
     [Fact]
     public void APhone_ListsItsVolumes_WithoutAndroidDataOrObb()
     {
+        if (OperatingSystem.IsWindows()) return; // phone storage paths are Unix paths: this runs on Android only
         var storage = new FakeStorage(Volumes) { HasAllFilesAccess = true };
         var browser = new DeviceBrowser(new PhoneBrowseScope(storage), () => true);
 
@@ -217,6 +218,7 @@ public sealed class BrowsingTests : IDisposable
     [Fact]
     public void APhone_CreatesFoldersOnItsStorage()
     {
+        if (OperatingSystem.IsWindows()) return; // phone storage paths are Unix paths: this runs on Android only
         var storage = new FakeStorage(Volumes) { HasAllFilesAccess = true };
         var browser = new DeviceBrowser(new PhoneBrowseScope(storage), () => true);
 
