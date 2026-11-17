@@ -11,18 +11,23 @@ public record DeviceDto(
 
 // ── Push (wake-ups, M4-2) ─────────────────────────────────────────────────────
 
-/// <summary>How the server can wake a device. Only UnifiedPush so far (relay, APNs and FCM later).</summary>
-public enum PushTargetType { UnifiedPush }
+/// <summary>
+/// How the server can wake a device: UnifiedPush (an endpoint the device's distributor made) or APNs (the iOS app's device
+/// token, sent by the server itself with <c>Push__Mode=Direct</c>; task 22). FCM and the relay later. Stored by name.
+/// </summary>
+public enum PushTargetType { UnifiedPush, Apns }
 
 /// <summary>
 /// A device registering where it can be woken (<c>PUT /api/sync/push</c>, device token): for UnifiedPush the endpoint its
-/// distributor gave it. <c>DELETE /api/sync/push</c> removes it.
+/// distributor gave it; for APNs the device token in hex and <paramref name="Environment"/>, the app's
+/// <c>aps-environment</c> (<c>development</c> = Apple's sandbox, <c>production</c>; null = production).
+/// <c>DELETE /api/sync/push</c> removes it.
 /// </summary>
-public record PushTargetRequest(PushTargetType Type, string Endpoint);
+public record PushTargetRequest(PushTargetType Type, string Endpoint, string? Environment = null);
 
 /// <summary>
-/// A device's push registration as people see it: the endpoint's host only (the full URL can wake the device), and the
-/// last wake-up. <paramref name="Enabled"/>: the server's <c>Push__Mode</c> sends wake-ups of this type.
+/// A device's push registration as people see it: the endpoint's host only (the full URL can wake the device; for APNs
+/// "APNs" or "APNs sandbox", never the token), and the last wake-up. <paramref name="Enabled"/>: the server's <c>Push__Mode</c> sends wake-ups of this type.
 /// </summary>
 public record DevicePushDto(PushTargetType Type, string Host, DateTime RegisteredAt, DateTime? LastWakeAt, bool? LastWakeOk, string? LastWakeError,
     bool Enabled);
