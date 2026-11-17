@@ -105,7 +105,8 @@ public sealed partial class SettingsViewModel : ObservableObject
                 null => "",
                 { Locked: true } => "Turned off where the agent was started (--no-browse or ASYNC_ALLOW_BROWSE=0).",
                 { Allowed: true, Unavailable: { } why } => why,
-                { Allowed: true } => $"When you attach a folder in {where}, you can pick its place on this {_shell.Platform.DeviceNoun} instead of typing the path. Nothing is listed unless you ask, and only while this {_shell.Platform.DeviceNoun} is online.",
+                { Allowed: true } => $"When you attach a folder in {where}, you can pick its place on this {_shell.Platform.DeviceNoun} instead of typing the path. Nothing is listed unless you ask, and only while this {_shell.Platform.DeviceNoun} is online." +
+                                     (_shell.Platform.Photos is not null ? " The same goes for its photo albums, when you choose what a Photos folder backs up." : ""),
                 _ => $"Folder paths for this {_shell.Platform.DeviceNoun} are typed in {where}.",
             };
         }

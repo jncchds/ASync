@@ -47,6 +47,7 @@
             <RadioButton GroupName="mode" Name="ModeTwoWay" Content="Two-way" IsChecked="{Binding IsTwoWay}" />
             <RadioButton GroupName="mode" Name="ModeMirror" Content="Mirror" IsChecked="{Binding IsMirror}" />
             <RadioButton GroupName="mode" Name="ModeBackup" Content="Backup" IsChecked="{Binding IsBackup}" />
+            <RadioButton GroupName="mode" Name="ModePhotos" Content="Photos &amp; videos" IsChecked="{Binding IsPhotosMode}" IsVisible="{Binding OffersPhotos}" />
           </WrapPanel>
           <TextBlock Classes="muted small" Text="{Binding ModeHint}" TextWrapping="Wrap" />
         </StackPanel>
@@ -125,11 +126,17 @@
     <Border Classes="card" Name="LocalCard" IsVisible="{Binding ShowLocal}">
       <StackPanel Spacing="8">
         <TextBlock Classes="label" Text="{Binding LocalTitle}" TextWrapping="Wrap" />
-        <TextBox Name="LocalPath" Text="{Binding LocalPath}" Classes="mono" IsVisible="{Binding CanTypePath}"
-                 PlaceholderText="A folder on this computer" />
-        <TextBlock Name="LocalDisplay" Classes="mono" Text="{Binding LocalDisplay}" TextWrapping="Wrap" IsVisible="{Binding IsPhone}"
-                   Classes.muted="{Binding !HasLocalPath}" />
-        <Button Classes="secondary" Name="ChooseLocal" Content="Choose folder…" Command="{Binding ChooseLocalCommand}" HorizontalAlignment="Left" />
+        <StackPanel Spacing="8" IsVisible="{Binding ForFiles}">
+          <TextBox Name="LocalPath" Text="{Binding LocalPath}" Classes="mono" IsVisible="{Binding CanTypePath}"
+                   PlaceholderText="A folder on this computer" />
+          <TextBlock Name="LocalDisplay" Classes="mono" Text="{Binding LocalDisplay}" TextWrapping="Wrap" IsVisible="{Binding IsPhone}"
+                     Classes.muted="{Binding !HasLocalPath}" />
+          <Button Classes="secondary" Name="ChooseLocal" Content="Choose folder…" Command="{Binding ChooseLocalCommand}" HorizontalAlignment="Left" />
+        </StackPanel>
+        <StackPanel Spacing="8" IsVisible="{Binding ForPhotos}">
+          <TextBlock Name="MediaText" Text="{Binding MediaText}" TextWrapping="Wrap" />
+          <Button Classes="secondary" Name="ChooseMedia" Content="Choose photos…" Command="{Binding ChoosePhotosCommand}" HorizontalAlignment="Left" />
+        </StackPanel>
       </StackPanel>
     </Border>
 

@@ -48,6 +48,11 @@ public static class Format
         return unit == 0 ? $"{bytes} B" : value.ToString(value >= 100 ? "0" : "0.#", CultureInfo.InvariantCulture) + " " + units[unit];
     }
 
+    /// <summary>"12 photos, 3 videos"; "1 photo".</summary>
+    public static string MediaCounts(int photos, int videos) =>
+        $"{photos.ToString("N0", CultureInfo.CurrentCulture)} photo{(photos == 1 ? "" : "s")}" +
+        (videos > 0 ? $", {videos.ToString("N0", CultureInfo.CurrentCulture)} video{(videos == 1 ? "" : "s")}" : "");
+
     /// <summary>"just now", "5 min ago", "3 h ago", "2 days ago".</summary>
     public static string Ago(DateTimeOffset at, DateTimeOffset now)
     {

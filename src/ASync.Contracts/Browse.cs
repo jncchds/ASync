@@ -81,9 +81,10 @@ public sealed record BrowseReply(BrowseListing? Listing = null, DeviceBrowseRefu
 /// <summary>
 /// What a device tells the server about browsing when its hub connection opens and whenever it changes (the hub's
 /// <c>ReportBrowse</c>). <paramref name="Allowed"/>: the device's setting; <paramref name="NeedsAllFilesAccess"/>: a phone
-/// that could browse once All files access is on.
+/// that could browse once All files access is on. <paramref name="Media"/> (task 19): what the device can read of its photo
+/// library (null: an agent from before, or none); its albums are listed under the same <paramref name="Allowed"/>.
 /// </summary>
-public sealed record DeviceBrowseState(bool Allowed, bool NeedsAllFilesAccess = false);
+public sealed record DeviceBrowseState(bool Allowed, bool NeedsAllFilesAccess = false, MediaAccess? Media = null);
 
 /// <summary>Whether the web UI can browse a device's folders now, and if not, why.</summary>
 public enum BrowseAvailability

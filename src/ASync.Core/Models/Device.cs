@@ -41,6 +41,14 @@ public class Device
     public bool? LastPushOk { get; set; }
     public string? LastPushError { get; set; }
 
+    /// <summary>
+    /// The last album list the device reported (task 19): JSON of <see cref="MediaAlbumDto"/>s, names and counts only, for the web UI
+    /// while the device is offline. Null = never reported. <see cref="MediaAccess"/>: what it could read of its library then.
+    /// </summary>
+    public string? MediaAlbumsJson { get; set; }
+    public DateTime? MediaAlbumsAt { get; set; }
+    public MediaAccess? MediaAccess { get; set; }
+
     public AppUser? User { get; set; }
 }
 

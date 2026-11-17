@@ -61,12 +61,83 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
     /// <summary>A request of this folder is running (sync now, pause, a new path).</summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SyncNowCommand), nameof(TogglePauseCommand), nameof(ChooseFolderCommand), nameof(ChooseSystemFolderCommand),
-        nameof(SwitchToRealPathCommand), nameof(SaveConditionsCommand))]
+        nameof(SwitchToRealPathCommand), nameof(SaveConditionsCommand), nameof(ChoosePhotosCommand), nameof(RestorePhotosCommand))]
     public partial bool Working { get; private set; }
 
     public string PauseText => Paused ? "Resume" : "Pause";
 
-    public bool NeedsPath => !HasLocalPath;
+    public bool NeedsPath => !HasLocalPath && !IsPhotos;
+
+    /// <summary>The buttons of a folder on disk (open, change): not for a Photos folder, which has a selection instead.</summary>
+    public bool ShowFolderButtons => HasLocalPath && !IsPhotos;
+
+    /// <summary>Sync now / Back up now: a folder with a place on this device, or a Photos folder.</summary>
+    public bool CanRunHere => HasLocalPath || IsPhotos;
+
+    public string RunNowText => IsPhotos ? "Back up now" : "Sync now";
+
+    // ── Photos folders (task 19) ──────────────────────────────────────────────
+
+    [ObservableProperty] public partial bool IsPhotos { get; private set; }
+
+    /// <summary>What a Photos folder backs up here ("All photos and videos", "2 albums: …").</summary>
+    [ObservableProperty] public partial string? MediaText { get; private set; }
+
+    /// <summary>What its last backup holds ("1,204 photos, 37 videos · 6.1 GB").</summary>
+    [ObservableProperty] public partial string? MediaCountsText { get; private set; }
+
+    /// <summary>ASync may not read the photos (or only some): what to do about it, or null.</summary>
+    [ObservableProperty] public partial string? PhotoAccessText { get; private set; }
+
+    [ObservableProperty] public partial bool RestoreRunning { get; private set; }
+    [ObservableProperty] public partial string? RestoreText { get; private set; }
+    [ObservableProperty] public partial double RestorePercent { get; private set; }
+
+    private MediaAccess PhotoAccess => shell.Platform.Photos?.Access ?? MediaAccess.Unsupported;
+
+    /// <summary>The Photos screen: the permission's explanation while it is missing, then all photos or chosen albums.</summary>
+    [RelayCommand(CanExecute = nameof(CanChange))]
+    private async Task ChoosePhotos()
+    {
+        var dialog = new PhotosViewModel(shell, Name, _folder.Media, async selection =>
+        {
+            Working = true;
+            try { return await shell.RunAsync((s, ct) => s.SetMediaAsync(Id, selection, ct)!); }
+            finally { Working = false; }
+        });
+        shell.PhotosDialog = dialog;
+        await dialog.LoadAlbumsAsync();
+    }
+
+    private bool CanRestorePhotos() => !Working && !RestoreRunning && IsPhotos && _folder.LastResult is not null;
+
+    /// <summary>Puts this device's newest snapshot back into the photo library (what is already there is skipped).</summary>
+    [RelayCommand(CanExecute = nameof(CanRestorePhotos))]
+    private async Task RestorePhotos()
+    {
+        Working = true;
+        try { await shell.RunAsync((s, ct) => s.RestoreMediaAsync(Id, null, ct)!); }
+        finally { Working = false; }
+    }
+
+    /// <summary>The agent's restore into the library, when it is this folder's.</summary>
+    public void UpdateRestore(MediaRestoreDto? restore)
+    {
+        if (restore is null || restore.FolderId != Id)
+        {
+            RestoreRunning = false;
+            RestoreText = null;
+        }
+        else
+        {
+            RestoreRunning = restore.Running;
+            RestorePercent = restore.Total > 0 ? 100.0 * restore.Done / restore.Total : 0;
+            RestoreText = restore.Running
+                ? $"Restoring snapshot {restore.Snapshot} into the photo library: {restore.Done} of {restore.Total} ({restore.Restored} restored, {restore.Skipped} already there)"
+                : $"Restore of snapshot {restore.Snapshot}: {restore.Message}";
+        }
+        RestorePhotosCommand.NotifyCanExecuteChanged();
+    }
 
     public string ChooseFolderText => HasLocalPath ? "Change folder…" : "Choose folder…";
 
@@ -76,7 +147,18 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         Name = f.Name;
         ModeText = Format.Mode(f.Mode, f.Direction);
         IsEndToEnd = f.Encryption == FolderEncryption.EndToEnd;
-        LocalPath = f.LocalPath is { Length: > 0 } path ? shell.Platform.DisplayPath(path) : $"No folder on this {shell.Platform.DeviceNoun} yet";
+        IsPhotos = f.Kind == FolderKind.Photos;
+        MediaText = IsPhotos ? (f.Media ?? MediaSelectionDto.Everything).Describe() : null;
+        MediaCountsText = f.MediaCounts is { } counts ? $"{Format.MediaCounts(counts.Photos, counts.Videos)} · {Format.Bytes(counts.Bytes)}" : null;
+        PhotoAccessText = !IsPhotos ? null : PhotoAccess switch
+        {
+            MediaAccess.None => "ASync may not read the photos yet: open Photos… to allow it.",
+            MediaAccess.Partial => "ASync may read only the photos chosen for it (\"Select photos\"): only those are backed up.",
+            MediaAccess.Unsupported => $"This {shell.Platform.DeviceNoun} has no photo library: Photos folders are backed up by phones.",
+            _ => null,
+        };
+        LocalPath = IsPhotos ? $"Photo library: {MediaText}"
+            : f.LocalPath is { Length: > 0 } path ? shell.Platform.DisplayPath(path) : $"No folder on this {shell.Platform.DeviceNoun} yet";
         HasLocalPath = f.LocalPath is { Length: > 0 };
         Paused = f.Paused;
         Locked = f.Locked;
@@ -119,7 +201,8 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             { Paused: true } => new Pill("Paused", PillKind.Muted),
             { NeedsSetup: true } => new Pill("Not set up", PillKind.Warning),
             { Locked: true } => new Pill("Locked", PillKind.Warning),
-            { LocalPath.Length: 0 } => new Pill("No local folder", PillKind.Warning),
+            { Kind: FolderKind.Photos } when PhotoAccess is MediaAccess.None or MediaAccess.Unsupported => new Pill("No access", PillKind.Warning),
+            { Kind: not FolderKind.Photos, LocalPath.Length: 0 } => new Pill("No local folder", PillKind.Warning),
             { LastResult: { Ok: false, Skipped: false } } => new Pill("Failed", PillKind.Danger),
             { Alerts: [{ Kind: AlertKind.Failing or AlertKind.CheckFailed or AlertKind.PruneFailed }, ..] } => new Pill("Problem", PillKind.Danger),
             { Alerts: [{ Kind: AlertKind.Overdue }, ..] } => new Pill("Overdue", PillKind.Warning),
@@ -131,6 +214,10 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         OnPropertyChanged(nameof(CanBeUnlocked));
         SetUpEncryptionCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(NeedsPath));
+        OnPropertyChanged(nameof(ShowFolderButtons));
+        OnPropertyChanged(nameof(CanRunHere));
+        OnPropertyChanged(nameof(RunNowText));
+        RestorePhotosCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ChooseFolderText));
         RefreshStorage();
         SyncNowCommand.NotifyCanExecuteChanged();
@@ -148,14 +235,14 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             { Paused: true } => "Paused",
             { NeedsSetup: true } => "Waits for its encryption to be set up",
             { Locked: true } => "Waits to be unlocked",
-            { LocalPath.Length: 0 } => "Waits for a local folder",
+            { Kind: not FolderKind.Photos, LocalPath.Length: 0 } => "Waits for a local folder",
             { Waiting: { } waiting } => waiting,
             { NextRunAt: { } next } => $"Next run {Format.In(next, now)}",
             _ => $"Every {_folder.IntervalMinutes} min",
         };
     }
 
-    private bool CanSync() => !Working && HasLocalPath && !Paused && !Locked;
+    private bool CanSync() => !Working && CanRunHere && !Paused && !Locked;
 
     [RelayCommand(CanExecute = nameof(CanSync))]
     private async Task SyncNow()

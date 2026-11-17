@@ -92,6 +92,14 @@ public class FolderDevice
     /// <summary>Not while the battery is low (Android's "battery low": about 15 %).</summary>
     public bool BatteryNotLow { get; set; }
 
+    // Photos folders (task 19): what the device backs up instead of a local path (which is then empty).
+    /// <summary>JSON of a <see cref="MediaSelectionDto"/>; null on other kinds.</summary>
+    public string? MediaSelectionJson { get; set; }
+    /// <summary>What the device's last successful Photos backup holds (its snapshot): photos, videos and their bytes. Null = no report yet.</summary>
+    public int? MediaPhotos { get; set; }
+    public int? MediaVideos { get; set; }
+    public long? MediaBytes { get; set; }
+
     public Folder? Folder { get; set; }
     public Device? Device { get; set; }
 }

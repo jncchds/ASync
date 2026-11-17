@@ -92,5 +92,12 @@
       <ContentControl Name="FolderDialogHost" Content="{Binding FolderDialog}" VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
                       MaxWidth="560" Margin="12,24" />
     </Border>
+
+    <!-- A Photos folder: the permission, then what to back up (tall like the folder picker). -->
+    <Border Grid.Row="0" Grid.RowSpan="4" Background="{DynamicResource Backdrop}"
+            IsVisible="{Binding PhotosDialog, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <ContentControl Name="PhotosDialogHost" Content="{Binding PhotosDialog}" VerticalAlignment="Center" HorizontalAlignment="Stretch"
+                      MaxWidth="560" Margin="12,24" />
+    </Border>
   </Grid>
 </UserControl>

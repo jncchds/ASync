@@ -11,12 +11,18 @@ namespace ASync.Api.Services;
 public interface IDeviceBrowseChannel
 {
     Task<BrowseReply> BrowseAsync(string connectionId, BrowseRequest request, CancellationToken ct);
+
+    /// <summary>Asks for the device's photo albums (task 19, <see cref="DeviceMediaService"/>).</summary>
+    Task<MediaAlbumsReply> AlbumsAsync(string connectionId, MediaAlbumsRequest request, CancellationToken ct);
 }
 
 public sealed class HubDeviceBrowseChannel(IHubContext<SyncHub> hub) : IDeviceBrowseChannel
 {
     public Task<BrowseReply> BrowseAsync(string connectionId, BrowseRequest request, CancellationToken ct) =>
         hub.Clients.Client(connectionId).InvokeAsync<BrowseReply>("browse", request, ct);
+
+    public Task<MediaAlbumsReply> AlbumsAsync(string connectionId, MediaAlbumsRequest request, CancellationToken ct) =>
+        hub.Clients.Client(connectionId).InvokeAsync<MediaAlbumsReply>("albums", request, ct);
 }
 
 /// <summary>Wakes a device that is offline (a phone the system put to sleep). Behind an interface for tests.</summary>

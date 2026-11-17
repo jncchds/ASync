@@ -28,6 +28,9 @@ namespace ASync.App.Android;
 /// <c>switch-real &lt;folder&gt;</c>, <c>storage [refresh]</c>.
 /// Adding folders (task 18): <c>add-folder new|join</c>, <c>add-folder-set &lt;field&gt; &lt;value&gt;</c>, <c>add-folder-local</c> (the
 /// picker), <c>add-folder-submit</c>, <c>add-folder-state</c>, <c>add-folder-reload</c>, <c>add-folder-close</c>.
+/// Photos (task 19): <c>photos-dialog &lt;folder&gt;</c> (the Photos screen of a folder card), <c>photos-state</c>, <c>photos-allow</c>,
+/// <c>photos-albums all|&lt;name&gt;,…</c>, <c>photos-save</c>; without the UI <c>bg-photos</c> (access, location, albums, the restore),
+/// <c>bg-photos-set &lt;folder&gt; all|&lt;album id&gt;,…</c>, <c>bg-photos-restore &lt;folder&gt; [snapshot]</c>, <c>bg-photos-trigger</c>.
 /// </summary>
 [BroadcastReceiver(Name = "ua.pp.chds.async.Automation", Exported = true, Permission = "android.permission.DUMP")]
 [IntentFilter(["ua.pp.chds.async.AUTOMATION"])]
@@ -314,6 +317,29 @@ public sealed class Automation : BroadcastReceiver
                 if (Avalonia.VisualExtensions.TranslatePoint(control, new Avalonia.Point(0, 0), content) is { } at) scroller.Offset = new Avalonia.Vector(0, Math.Max(0, at.Y - 12));
                 return "ok";
             }
+            case "photos-dialog":
+                await Folder(arg).ChoosePhotosCommand.ExecuteAsync(null);
+                return PhotosState(shell);
+            case "photos-state":
+                return PhotosState(shell);
+            case "photos-allow":
+                (shell.PhotosDialog ?? throw new InvalidOperationException("The Photos screen is not open.")).AllowCommand.Execute(null);
+                return "asked";
+            case "photos-albums":
+            {
+                var photos = shell.PhotosDialog ?? throw new InvalidOperationException("The Photos screen is not open.");
+                if (arg == "all") photos.BackUpAll = true;
+                else
+                {
+                    photos.ChooseAlbums = true;
+                    var names = arg.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var album in photos.Albums) album.IsChecked = names.Contains(album.Name);
+                }
+                return PhotosState(shell);
+            }
+            case "photos-save":
+                await (shell.PhotosDialog ?? throw new InvalidOperationException("The Photos screen is not open.")).SaveCommand.ExecuteAsync(null);
+                return shell.PhotosDialog is null ? "saved" : PhotosState(shell);
             case "back":
                 return shell.GoBack() ? "handled" : "nothing to close";
             case "selftest":
@@ -421,10 +447,45 @@ public sealed class Automation : BroadcastReceiver
             case "bg-battery":
                 AndroidBackgroundServices.Instance.RequestIgnoreBatteryOptimizations();
                 return "asked";
+            case "bg-photos":
+            {
+                var library = await runtime.MediaLibraryAsync(CancellationToken.None);
+                var status = await runtime.StatusAsync(CancellationToken.None);
+                return JsonSerializer.Serialize(new
+                {
+                    access = library.Access.ToString(), location = AndroidPhotoAccess.Instance.HasLocation, library.Photos, library.Videos, library.Problem,
+                    albums = library.Albums.Select(a => new { a.Id, a.Name, a.Photos, a.Videos, a.Path }),
+                    restore = status.MediaRestore,
+                    folders = status.Folders.Where(f => f.Kind == ASync.Contracts.FolderKind.Photos)
+                        .Select(f => new { id = f.FolderId, f.Name, media = f.Media?.Describe(), counts = f.MediaCounts, last = f.LastResult?.Message }),
+                }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            }
+            case "bg-photos-set":
+            {
+                // bg-photos-set <folder> all|<album id>,<album id>…
+                var folderId = int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
+                if (parts[2] == "all") return await runtime.SetMediaAsync(folderId, ASync.Contracts.MediaSelectionDto.Everything, CancellationToken.None);
+                var library = await runtime.MediaLibraryAsync(CancellationToken.None);
+                var ids = parts[2].Split(',');
+                return await runtime.SetMediaAsync(folderId, new ASync.Contracts.MediaSelectionDto(false,
+                    [.. library.Albums.Where(a => ids.Contains(a.Id)).Select(a => new ASync.Contracts.MediaAlbumRef(a.Id, a.Name))]), CancellationToken.None);
+            }
+            case "bg-photos-restore":
+                return await runtime.RestoreMediaAsync(int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
+                    parts.Length > 2 ? parts[2] : null, CancellationToken.None);
+            case "bg-photos-trigger":
+                BackgroundWork.EnsureMediaTrigger();
+                return "ensured";
             default:
                 return $"unknown command \"{parts[0]}\"";
         }
     }
+
+    private static string PhotosState(ShellViewModel shell) => shell.PhotosDialog is not { } d ? "closed" : JsonSerializer.Serialize(new
+    {
+        access = d.Access.ToString(), d.NeedsPermission, d.IsPartial, d.HasLocation, d.BackUpAll, d.IncludeVideos, d.IncludeScreenshots, d.LibraryText, d.Error,
+        albums = d.Albums.Select(a => new { a.Id, a.Name, a.Counts, a.IsChecked }),
+    }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
     private static string SelfTest(string folderId)
     {

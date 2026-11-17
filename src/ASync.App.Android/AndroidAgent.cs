@@ -74,6 +74,9 @@ public static class AndroidAgent
                 RunOnInterval = false,
                 // The web UI may browse the shared storage's real paths, with All files access only (task 17).
                 Browse = new PhoneBrowseScope(AndroidStorage.Instance),
+                // Photos folders back up MediaStore (task 19); its albums are listed for the web UI under the same browsing setting.
+                Media = new AndroidMediaLibrary(app),
+                MediaSource = AndroidMediaLibrary.Source,
             }, loggers);
             runtime.Start();
             _runtime = runtime;

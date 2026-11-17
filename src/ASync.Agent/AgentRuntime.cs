@@ -66,6 +66,12 @@ public sealed record AgentOptions
     /// kept but not used.
     /// </summary>
     public bool BrowsingForcedOff { get; init; }
+
+    /// <summary>The device's photo library for Photos folders (task 19: Android's MediaStore); null: none (computers, the CLI).</summary>
+    public ASync.Client.Core.Media.IMediaLibrary? Media { get; init; }
+
+    /// <summary>Which library the sidecars name ("android-mediastore").</summary>
+    public string MediaSource { get; init; } = "";
 }
 
 /// <summary>The agent's own settings in its config directory (<c>agent-settings.json</c>); everything about folders is on the server.</summary>
@@ -115,6 +121,9 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
     private readonly ConcurrentDictionary<int, FolderRunResult?> _publishedResults = new();
     private readonly ConcurrentDictionary<int, ProgressSnapshot?> _publishedProgress = new();
+    private readonly ConcurrentDictionary<int, MediaCountsDto> _mediaCounts = new();
+    private volatile MediaRestoreDto? _mediaRestore;
+    private Task? _mediaRestoring;
     private AgentLock? _lock;
     private ControlServer? _server;
     private readonly ControlEventHub _events = new();
@@ -330,6 +339,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         {
             AllowMassDeletion = _options.AllowMassDeletion, LocalTrees = _options.LocalTrees, Conditions = _options.Conditions,
             SettleTime = _options.SettleTime, RunAtStart = _options.RunAtStart, RunOnInterval = _options.RunOnInterval,
+            Media = _options.Media, MediaSource = _options.MediaSource,
             // The config directory (the device's key; the Docker image's /config volume) is never offered as a starting point.
             Browser = _options.Browse is { } scope
                 ? new DeviceBrowser(scope is DesktopBrowseScope desktop ? desktop.Hiding(_store.Root) : scope, () => BrowsingAllowed)
@@ -342,6 +352,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         agent.RemoteChanged += id => RaiseObserver(RemoteFolderChanged is { } changed ? () => changed(id) : null);
         agent.FolderRan += r =>
         {
+            if (r.Media is { } counts) _mediaCounts[r.FolderId] = counts;
             try { FolderRan?.Invoke(r); }
             catch (Exception e) { _logger.LogDebug("A run listener failed: {Message}", e.Message); }
         };
@@ -583,6 +594,8 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             Folders = agent is null ? [] : [.. agent.Folders.Select(Map)],
             Enrollment = _enrollment,
             Browsing = BrowsingStatus(),
+            Media = MediaAccessNow(),
+            MediaRestore = _mediaRestore,
         };
     }
 
@@ -597,6 +610,9 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             Direction = f.Direction,
             Encryption = f.Encryption,
             LocalPath = f.LocalPath,
+            Kind = f.Kind,
+            Media = f.Media,
+            MediaCounts = _mediaCounts.GetValueOrDefault(f.FolderId),
             IntervalMinutes = f.IntervalMinutes,
             Paused = f.Paused,
             Locked = f.Encryption == FolderEncryption.EndToEnd && (!f.RepositoryReady || !_store.HasRepositoryKeys(f.FolderId)),
@@ -764,6 +780,17 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
 
     public async Task<FolderAddedDto> CreateFolderAsync(DeviceCreateFolderRequest request, CancellationToken ct)
     {
+        if (request.Folder?.Kind == FolderKind.Photos)
+        {
+            if (_options.Media is null) throw new ControlException(NoPhotoLibrary);
+            request = request with { LocalPath = "", Media = request.Media ?? MediaSelectionDto.Everything };
+            if (request.Media.Problem() is { } bad) throw new ControlException(bad);
+            var (photoAgent, photoApi) = Running();
+            var made = await AskServerAsync(() => photoApi.CreateFolderAsync(request, ct));
+            _logger.LogInformation("Created the Photos folder \"{Name}\" from this device ({Selection}).", made.Folder.Name, request.Media.Describe());
+            await photoAgent.ReloadAsync(ct);
+            return new FolderAddedDto(made.Folder.FolderId, $"\"{made.Folder.Name}\" was created and backs up {Lower(request.Media.Describe())}.", made.RecoveryKey);
+        }
         if (string.IsNullOrWhiteSpace(request.LocalPath)) throw new ControlException("Choose where the folder lives on this device.");
         if (_options.LocalTrees.Validate(request.LocalPath) is { } invalid) throw new ControlException(invalid);
         var (agent, api) = Running();
@@ -788,6 +815,117 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             ? joined.RepositoryReady ? $"This device is now part of \"{joined.Name}\". Unlock it to back up." : $"This device is now part of \"{joined.Name}\". Set up its encryption to start."
             : $"This device now {(joined.Mode == SyncMode.Backup ? "backs up" : "syncs")} \"{joined.Name}\" at {joined.LocalPath}.";
         return new FolderAddedDto(joined.FolderId, message);
+    }
+
+    // ── Photos (task 19) ──────────────────────────────────────────────────────
+
+    private const string NoPhotoLibrary = "This device has no photo library ASync can back up: Photos folders are for phones.";
+
+    private static string Lower(string s) => s.Length > 0 ? char.ToLowerInvariant(s[0]) + s[1..] : s;
+
+    private MediaAccess? MediaAccessNow()
+    {
+        try { return _options.Media?.Access; }
+        catch (Exception e) when (e is not OperationCanceledException) { return MediaAccess.None; }
+    }
+
+    public Task<MediaLibraryDto> MediaLibraryAsync(CancellationToken ct)
+    {
+        if (_options.Media is not { } media) return Task.FromResult(new MediaLibraryDto(MediaAccess.Unsupported, [], Problem: NoPhotoLibrary));
+        return Task.Run(() =>
+        {
+            var access = media.Access;
+            if (access is MediaAccess.None or MediaAccess.Unsupported)
+                return new MediaLibraryDto(access, [], Problem: "ASync may not read the photos on this device yet.");
+            var albums = media.Albums();
+            return new MediaLibraryDto(access,
+                [.. albums.OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).Select(a => new MediaAlbumDto(a.Id, a.Name, a.Photos, a.Videos, a.Path))],
+                albums.Sum(a => a.Photos), albums.Sum(a => a.Videos));
+        }, ct);
+    }
+
+    public async Task<string> SetMediaAsync(int folderId, MediaSelectionDto media, CancellationToken ct)
+    {
+        if (media.Problem() is { } bad) throw new ControlException(bad);
+        var (agent, api) = Running();
+        var folder = await FolderAsync(api, folderId, ct);
+        if (folder.Kind != FolderKind.Photos) throw new ControlException($"\"{folder.Name}\" is not a Photos folder.");
+        await AskServerAsync(() => api.UpdateOwnSettingsAsync(folder.FolderId, new UpdateDeviceFolderRequest(Media: media, ExpectedRevision: folder.Revision), ct));
+        await agent.ReloadAsync(ct);
+        return $"\"{folder.Name}\" now backs up {Lower(media.Describe())}.";
+    }
+
+    public async Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct)
+    {
+        if (_options.Media is null) throw new ControlException(NoPhotoLibrary);
+        if (media.Problem() is { } bad) throw new ControlException(bad);
+        var (agent, api) = Running();
+        var joined = await AskServerAsync(() => api.JoinFolderAsync(folderId, new DeviceJoinFolderRequest("", Media: media), ct));
+        _logger.LogInformation("Joined the Photos folder \"{Name}\" ({Selection}).", joined.Name, media.Describe());
+        await agent.ReloadAsync(ct);
+        return new FolderAddedDto(joined.FolderId, joined.Encryption == FolderEncryption.EndToEnd
+            ? joined.RepositoryReady ? $"This phone is now part of \"{joined.Name}\". Unlock it to back up." : $"This phone is now part of \"{joined.Name}\". Set up its encryption to start."
+            : $"This phone now backs up {Lower(media.Describe())} into \"{joined.Name}\".");
+    }
+
+    public async Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct)
+    {
+        if (_options.Media is not { } library) throw new ControlException(NoPhotoLibrary);
+        if (library.Access != MediaAccess.Full)
+            throw new ControlException("Allow ASync full access to photos and videos first: a restore needs to see what is already in the library.");
+        if (_mediaRestoring is { IsCompleted: false }) throw new ControlException("A restore into the photo library is already running.");
+        var (_, api) = Running();
+        var folder = await FolderAsync(api, folderId, ct);
+        if (folder.Kind != FolderKind.Photos) throw new ControlException($"\"{folder.Name}\" is not a Photos folder.");
+        ASync.Engine.Repository.Repository repo;
+        ASync.Engine.Repository.Snapshot chosen;
+        try
+        {
+            repo = await RepositoryAccess.OpenAsync(api, _store, folder, new RemoteStorageBackend(api, folder.FolderId), ct);
+            var snapshots = await repo.ListSnapshotsAsync(ct);
+            var source = api.Identity!.DeviceId.ToString("N");
+            chosen = (snapshot is { Length: > 0 }
+                    ? ASync.Engine.Repository.Repository.FindSnapshots(snapshots, snapshot) is [var one] ? one
+                      : throw new ControlException($"No single snapshot matches \"{snapshot}\".")
+                    : snapshots.LastOrDefault(s => s.Source == source) ?? snapshots.LastOrDefault())
+                ?? throw new ControlException($"\"{folder.Name}\" has no snapshots yet.");
+        }
+        catch (Exception e) when (e is ApiException or HttpRequestException or SyncRefusedException or IOException)
+        {
+            throw new ControlException(e.Message);
+        }
+        var shortId = ASync.Engine.Repository.Repository.ShortSnapshotId(chosen.Id);
+        _mediaRestore = new MediaRestoreDto(folderId, shortId, true, 0, 0, 0, 0, null);
+        Publish(StatusEvent());
+        var last = DateTimeOffset.MinValue;
+        var progress = new Progress<ASync.Client.Core.Media.MediaRestoreProgress>(p =>
+        {
+            _mediaRestore = new MediaRestoreDto(folderId, shortId, true, p.Done, p.Total, p.Restored, p.Skipped, p.Current);
+            if (DateTimeOffset.UtcNow - last < TimeSpan.FromMilliseconds(500)) return;
+            last = DateTimeOffset.UtcNow;
+            Publish(StatusEvent());
+        });
+        _logger.LogInformation("Restoring snapshot {Snapshot} of \"{Name}\" into the photo library.", shortId, folder.Name);
+        _mediaRestoring = Task.Run(async () =>
+        {
+            try
+            {
+                var result = await new ASync.Client.Core.Media.MediaRestorer(repo, library).RunAsync(chosen, progress, CancellationToken.None);
+                _mediaRestore = new MediaRestoreDto(folderId, shortId, false, result.Total, result.Total, result.Restored, result.Skipped, null,
+                    result.Message, result.Errors.Count == 0);
+                _logger.LogInformation("Restore into the photo library: {Message}", result.Message);
+            }
+            catch (Exception e)
+            {
+                _mediaRestore = (_mediaRestore ?? new MediaRestoreDto(folderId, shortId, false, 0, 0, 0, 0, null)) with
+                {
+                    Running = false, Ok = false, Message = $"The restore stopped: {e.Message}",
+                };
+                _logger.LogWarning("Restore into the photo library failed: {Message}", e.Message);
+            }
+            Publish(StatusEvent());
+        });
+        return $"Restoring snapshot {shortId} of \"{folder.Name}\" into the photo library…";
     }
 
     public async Task<string> LeaveFolderAsync(int folderId, CancellationToken ct)

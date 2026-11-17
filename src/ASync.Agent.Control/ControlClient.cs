@@ -119,6 +119,19 @@ public sealed class ControlClient : IAsyncDisposable
     public async Task<string> LeaveFolderAsync(int folderId, CancellationToken ct = default) =>
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.LeaveFolder, FolderId = folderId }, ct)).Message ?? "";
 
+    public async Task<MediaLibraryDto> MediaLibraryAsync(CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.MediaLibrary }, ct)).MediaLibrary
+        ?? throw new InvalidDataException("No photo library in the answer.");
+
+    public async Task<string> SetMediaAsync(int folderId, MediaSelectionDto media, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.SetMedia, FolderId = folderId, Media = media }, ct)).Message ?? "";
+
+    public async Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct = default) =>
+        Added(await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.JoinFolder, FolderId = folderId, Media = media }, ct));
+
+    public async Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.RestoreMedia, FolderId = folderId, Snapshot = snapshot }, ct)).Message ?? "";
+
     private static FolderAddedDto Added(ControlResponse r) =>
         new(r.FolderId ?? throw new InvalidDataException("No folder in the answer."), r.Message ?? "", r.RecoveryKey);
 

@@ -61,7 +61,20 @@ public interface IAgentSession : IAsyncDisposable
 
     Task<string> LeaveFolderAsync(int folderId, CancellationToken ct) => throw new ControlException(NoFolders);
 
+    /// <summary>The device's photo library: what may be read, and its albums (task 19).</summary>
+    Task<MediaLibraryDto> MediaLibraryAsync(CancellationToken ct) => throw new ControlException(NoPhotos);
+
+    /// <summary>Which photos and videos a Photos folder backs up on this device.</summary>
+    Task<string> SetMediaAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => throw new ControlException(NoPhotos);
+
+    /// <summary>Attaches this device to one of the owner's Photos folders.</summary>
+    Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => throw new ControlException(NoPhotos);
+
+    /// <summary>Starts restoring a Photos snapshot (null: this device's newest) into the photo library.</summary>
+    Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) => throw new ControlException(NoPhotos);
+
     const string NoFolders = "This agent cannot add folders: update it (async-cli or the agent service).";
+    const string NoPhotos = "This agent cannot back up photos: update it.";
 }
 
 /// <summary>The agent of a config directory, over its Unix socket or named pipe.</summary>
@@ -93,6 +106,10 @@ public sealed class ControlAgentConnector(string configDirectory) : IAgentConnec
         public Task<FolderAddedDto> JoinFolderAsync(int folderId, string path, MirrorDirection? direction, CancellationToken ct) =>
             client.JoinFolderAsync(folderId, path, direction, ct);
         public Task<string> LeaveFolderAsync(int folderId, CancellationToken ct) => client.LeaveFolderAsync(folderId, ct);
+        public Task<MediaLibraryDto> MediaLibraryAsync(CancellationToken ct) => client.MediaLibraryAsync(ct);
+        public Task<string> SetMediaAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => client.SetMediaAsync(folderId, media, ct);
+        public Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => client.JoinPhotosAsync(folderId, media, ct);
+        public Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) => client.RestoreMediaAsync(folderId, snapshot, ct);
         public ValueTask DisposeAsync() => client.DisposeAsync();
     }
 }

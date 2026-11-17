@@ -90,6 +90,18 @@ public static class ControlProtocol
         public const string JoinFolder = "join-folder";
         /// <summary>Detach this device from a folder (<c>folderId</c>); the folder and its data stay.</summary>
         public const string LeaveFolder = "leave-folder";
+
+        // Added for photo backups (task 19, still protocol 1). A Photos folder's join-folder sends media instead of path.
+
+        /// <summary>What this device may read of its photo library, and its albums: <see cref="ControlResponse.MediaLibrary"/>.</summary>
+        public const string MediaLibrary = "media-library";
+        /// <summary>Change which photos and videos a Photos folder backs up on this device (<c>folderId</c>, <c>media</c>).</summary>
+        public const string SetMedia = "set-media";
+        /// <summary>
+        /// Start restoring a Photos folder's snapshot (<c>folderId</c>, <c>snapshot</c>: an id, or this device's newest when absent) into
+        /// the photo library. It runs in the agent; <see cref="AgentStatusDto.MediaRestore"/> follows it.
+        /// </summary>
+        public const string RestoreMedia = "restore-media";
     }
 }
 
@@ -120,6 +132,10 @@ public sealed record ControlRequest
     public DeviceCreateFolderRequest? NewFolder { get; init; }
     /// <summary><c>join-folder</c>: which way a Mirror folder copies on this device.</summary>
     public MirrorDirection? Direction { get; init; }
+    /// <summary><c>set-media</c>, <c>join-folder</c> of a Photos folder: which photos and videos it backs up.</summary>
+    public MediaSelectionDto? Media { get; init; }
+    /// <summary><c>restore-media</c>: the snapshot (id, or a prefix or suffix of one).</summary>
+    public string? Snapshot { get; init; }
 }
 
 public sealed record ControlResponse
@@ -141,7 +157,19 @@ public sealed record ControlResponse
     public DeviceFolderOptionsDto? FolderOptions { get; init; }
     /// <summary><c>create-folder</c>, <c>join-folder</c>: the folder.</summary>
     public int? FolderId { get; init; }
+    /// <summary><c>media-library</c>: the photo library.</summary>
+    public MediaLibraryDto? MediaLibrary { get; init; }
 }
+
+/// <summary>
+/// The device's photo library as the agent sees it (task 19). <paramref name="Access"/>: what the permissions allow;
+/// <paramref name="Problem"/>: why it cannot be read, for people.
+/// </summary>
+public sealed record MediaLibraryDto(MediaAccess Access, List<MediaAlbumDto> Albums, int Photos = 0, int Videos = 0, string? Problem = null);
+
+/// <summary>A restore of a Photos snapshot into the library: running (<paramref name="Done"/> of <paramref name="Total"/>) or finished (<paramref name="Message"/>).</summary>
+public sealed record MediaRestoreDto(int FolderId, string Snapshot, bool Running, int Done, int Total, int Restored, int Skipped, string? Current,
+    string? Message = null, bool Ok = true);
 
 /// <summary>A line of the event stream.</summary>
 public sealed record ControlEventMessage
@@ -217,6 +245,10 @@ public sealed record AgentStatusDto
     public PendingEnrollmentDto? Enrollment { get; init; }
     /// <summary>Browsing this device's folders from the web UI (null: an older agent without it).</summary>
     public BrowsingStatusDto? Browsing { get; init; }
+    /// <summary>What the agent may read of the device's photo library (null: an agent without photo backups, or none here).</summary>
+    public MediaAccess? Media { get; init; }
+    /// <summary>The last (or running) restore into the photo library.</summary>
+    public MediaRestoreDto? MediaRestore { get; init; }
 }
 
 /// <summary>
@@ -245,6 +277,12 @@ public sealed record FolderStatusDto
     public MirrorDirection? Direction { get; init; }
     public FolderEncryption Encryption { get; init; }
     public string LocalPath { get; init; } = "";
+    /// <summary>Files, or Photos (task 19: <see cref="Media"/> instead of a local path).</summary>
+    public FolderKind Kind { get; init; }
+    /// <summary>A Photos folder's selection on this device.</summary>
+    public MediaSelectionDto? Media { get; init; }
+    /// <summary>A Photos folder's last backup: what it holds.</summary>
+    public MediaCountsDto? MediaCounts { get; init; }
     public int IntervalMinutes { get; init; }
     public bool Paused { get; init; }
     /// <summary>End-to-end and not unlocked on this device (or not set up yet): it cannot run.</summary>

@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import {
-  attachFolderDevice, BROWSE_HINTS, errorMessage, isConflict, type Device, type Folder, type FolderDevice, type MirrorDirection,
+  attachFolderDevice, BROWSE_HINTS, errorMessage, EVERYTHING, isConflict, type Device, type Folder, type FolderDevice, type MediaSelection,
+  type MirrorDirection,
 } from '../api'
 import DeviceFolderPicker from './DeviceFolderPicker'
+import MediaSelectionFields from './MediaSelectionFields'
+import { hasPhotoLibrary } from '../utils/folders'
 
 interface Props {
   folder: Folder
@@ -17,7 +20,9 @@ interface Props {
 
 /** Adds a device to a folder, or changes where and how it syncs there. */
 export default function FolderDeviceForm({ folder, devices, existing, onSaved, onCancel, onReload }: Props) {
-  const available = devices.filter(d => !folder.devices.some(m => m.deviceId === d.id))
+  const photos = folder.kind === 'Photos'
+  const available = devices.filter(d => !folder.devices.some(m => m.deviceId === d.id) && (!photos || hasPhotoLibrary(d)))
+  const [media, setMedia] = useState<MediaSelection>(existing?.media ?? EVERYTHING)
   const [startRevision] = useState(folder.revision)
   const [deviceId, setDeviceId] = useState(existing?.deviceId ?? available[0]?.id ?? '')
   const [localPath, setLocalPath] = useState(existing?.localPath ?? '')
@@ -39,13 +44,15 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (photos && !media.all && (media.albums ?? []).length === 0) { setError('Choose at least one album, or back up all photos and videos.'); return }
     setBusy(true)
     setError('')
     setConflict(false)
     try {
       await attachFolderDevice(folder.id, {
-        deviceId, localPath: localPath.trim(), direction: folder.mode === 'Mirror' ? direction : null, paused,
+        deviceId, localPath: photos ? '' : localPath.trim(), direction: folder.mode === 'Mirror' ? direction : null, paused,
         expectedRevision: startRevision, conditions: { unmeteredOnly, chargingOnly, batteryNotLow },
+        ...(photos ? { media: { ...media, albums: media.all ? [] : media.albums } } : {}),
       })
       onSaved()
     } catch (err) {
@@ -59,7 +66,11 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
   if (!existing && available.length === 0)
     return (
       <div className="subform">
-        <p className="hint">All your devices are already in this folder. Add more devices on the Devices page.</p>
+        <p className="hint">
+          {photos
+            ? 'All your phones are already in this folder (only phones back up their photos). Add a phone on the Devices page.'
+            : 'All your devices are already in this folder. Add more devices on the Devices page.'}
+        </p>
         <button type="button" className="secondary small" onClick={onCancel}>Close</button>
       </div>
     )
@@ -75,7 +86,7 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
               : available.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </label>
-        <label className="path-field">
+        {!photos && <label className="path-field">
           Folder on the device
           <span className="input-with-button">
             <input value={localPath} onChange={e => setLocalPath(e.target.value)} required maxLength={1000} placeholder={placeholder} />
@@ -88,7 +99,7 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
           {browse && browse !== 'Available' && !browsing && (
             <span className="hint">{BROWSE_HINTS[browse]}{browse === 'Wakeable' ? '' : ' Type the path instead.'}</span>
           )}
-        </label>
+        </label>}
         {folder.mode === 'Mirror' && (
           <label>
             Direction
@@ -99,7 +110,11 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
           </label>
         )}
       </div>
-      {browsing && deviceId && (
+      {photos && deviceId && (
+        <MediaSelectionFields key={deviceId} deviceId={deviceId} deviceName={deviceName} value={media} onChange={setMedia}
+          waking={browse === 'Wakeable'} />
+      )}
+      {!photos && browsing && deviceId && (
         <DeviceFolderPicker
           key={deviceId}
           deviceId={deviceId}

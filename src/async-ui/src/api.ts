@@ -394,6 +394,56 @@ export interface FolderDevice {
   lastSyncMessage: string | null
   /** When the device may run the folder by itself (null from an older server = none). */
   conditions: RunConditions | null
+  /** Photos folders: which photos and videos the device backs up (its local path is then empty). */
+  media?: MediaSelection | null
+  /** Photos folders: what the device's last backup holds. */
+  mediaCounts?: MediaCounts | null
+}
+
+// ── Photos and videos (task 19) ───────────────────────────────────────────────
+
+export interface MediaAlbumRef { id: string; name: string }
+
+/** All photos and videos, or chosen albums; plus filters. */
+export interface MediaSelection {
+  all: boolean
+  albums: MediaAlbumRef[] | null
+  /** ISO date (UTC): only what was taken on or after it. */
+  since: string | null
+  includeVideos: boolean
+  includeScreenshots: boolean
+}
+
+export const EVERYTHING: MediaSelection = { all: true, albums: [], since: null, includeVideos: true, includeScreenshots: true }
+
+export interface MediaCounts { photos: number; videos: number; bytes: number }
+
+export type MediaAccess = 'Full' | 'Partial' | 'None' | 'Unsupported'
+
+export interface MediaAlbum { id: string; name: string; photos: number; videos: number; path: string | null }
+
+/** A device's albums: live from the device, or the list it reported last (live false, with why). */
+export interface DeviceAlbums {
+  live: boolean
+  albums: MediaAlbum[]
+  access: MediaAccess | null
+  reportedAt: string | null
+  message: string | null
+  photos: number
+  videos: number
+}
+
+export const getDeviceAlbums = (id: string) => api.get<DeviceAlbums>(`/devices/${id}/albums`).then(r => r.data)
+
+/** "All photos and videos", "2 albums: Camera, Holidays · since 2024-01-01 · no screenshots" (as the server's Describe). */
+export function describeMedia(m: MediaSelection): string {
+  const albums = m.albums ?? []
+  const parts = [m.all ? (m.includeVideos ? 'All photos and videos' : 'All photos')
+    : `${albums.length} album${albums.length === 1 ? '' : 's'}: ${albums.map(a => a.name).join(', ')}`]
+  if (!m.all && !m.includeVideos) parts.push('no videos')
+  if (m.since) parts.push(`since ${m.since.slice(0, 10)}`)
+  if (!m.includeScreenshots) parts.push('no screenshots')
+  return parts.join(' · ')
 }
 
 /** Automatic runs wait for these; "Sync now" on the device ignores them. */
@@ -533,6 +583,8 @@ export interface AttachDevice {
   expectedRevision?: number
   /** Omitted = keep the device's current ones. */
   conditions?: RunConditions
+  /** Photos folders: the selection instead of a local path. */
+  media?: MediaSelection
 }
 
 export const getFolders = () => api.get<Folder[]>('/folders').then(r => r.data)

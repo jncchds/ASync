@@ -18,7 +18,14 @@
        distributed outside Google Play, whose policy restricts MANAGE_EXTERNAL_STORAGE. -->
   <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
-  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+  <!-- Before Android 13 the storage permission is also what reads photos and videos (Photos folders, task 19). -->
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+  <!-- Photos folders (task 19): photos and videos on Android 13+, Android 14's "Select photos" (partial access), and the location
+       inside the originals (without it MediaStore removes it from what ASync reads). -->
+  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+  <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+  <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+  <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
   <!-- Android 11+ package visibility: find installed UnifiedPush distributors (ntfy, …). -->
   <queries>
     <intent>

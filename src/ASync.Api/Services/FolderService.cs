@@ -53,7 +53,7 @@ public class FolderService(
         f.IntervalMinutes, f.Excludes, Retention(f), f.VersionsKeepDays, f.TrashKeepDays, f.Revision, f.RepositoryReady,
         [.. f.Devices.OrderBy(d => d.Device?.Name).Select(d => new FolderDeviceDto(
             d.DeviceId, d.Device?.Name ?? "", d.Device?.Platform ?? DevicePlatform.Unknown, d.LocalPath, d.Direction, d.Paused,
-            d.LastSyncAt, d.LastSyncOk, d.LastSyncMessage, Conditions(d)))],
+            d.LastSyncAt, d.LastSyncOk, d.LastSyncMessage, Conditions(d), Media(d), MediaCounts(d)))],
         f.CreatedAt, f.PruneIntervalDays, f.CheckIntervalDays, f.CheckReadDataPercent,
         f.LastPruneAt is { } pruned ? new MaintenanceStatusDto(pruned, f.LastPruneOk == true, f.LastPruneMessage, f.LastPruneBy) : null,
         f.LastCheckAt is { } checkedAt ? new MaintenanceStatusDto(checkedAt, f.LastCheckOk == true, f.LastCheckMessage, f.LastCheckBy) : null,
@@ -61,9 +61,46 @@ public class FolderService(
 
     public static DeviceFolderDto ToDeviceDto(Folder f, FolderDevice m) => new(
         f.Id, f.Name, f.Mode, f.Encryption, f.Kind, f.IntervalMinutes, f.Excludes, Retention(f), f.VersionsKeepDays, f.TrashKeepDays,
-        f.Revision, f.RepositoryReady, m.LocalPath, m.Direction, m.Paused, Conditions(m));
+        f.Revision, f.RepositoryReady, m.LocalPath, m.Direction, m.Paused, Conditions(m), Media(m));
 
     public static RunConditionsDto Conditions(FolderDevice m) => new(m.UnmeteredOnly, m.ChargingOnly, m.BatteryNotLow);
+
+    /// <summary>A Photos membership's selection (everything when none was saved); null for other kinds.</summary>
+    public static MediaSelectionDto? Media(FolderDevice m) =>
+        m.MediaSelectionJson is { } json ? JsonSerializer.Deserialize<MediaSelectionDto>(json, JsonSerializerOptions.Web) ?? MediaSelectionDto.Everything : null;
+
+    public static MediaCountsDto? MediaCounts(FolderDevice m) =>
+        m.MediaPhotos is int photos ? new MediaCountsDto(photos, m.MediaVideos ?? 0, m.MediaBytes ?? 0) : null;
+
+    /// <summary>Which devices can back up a photo library (the server decides by the platform the device enrolled with).</summary>
+    public static bool HasPhotoLibrary(DevicePlatform platform) => platform is DevicePlatform.Android or DevicePlatform.IOS;
+
+    public const string NoPhotoLibrary = "Only phones back up their photos (the ASync app on Android; iOS later). Computers back up a Pictures folder as files.";
+
+    /// <summary>
+    /// The membership's place on the device: a local path, or for a Photos folder its media selection (the path is then empty).
+    /// <paramref name="media"/> null keeps the saved selection (everything for a new one).
+    /// </summary>
+    private static string? ApplyPlace(Folder folder, FolderDevice m, Device device, string? localPath, MediaSelectionDto? media)
+    {
+        if (folder.Kind == FolderKind.Photos)
+        {
+            if (!HasPhotoLibrary(device.Platform)) return NoPhotoLibrary;
+            var selection = media ?? Media(m) ?? MediaSelectionDto.Everything;
+            if (selection.Problem() is { } problem) return problem;
+            selection = selection with
+            {
+                Albums = selection.All ? [] : [.. selection.Albums!.DistinctBy(a => a.Id).Select(a => new MediaAlbumRef(a.Id.Trim(), (a.Name ?? "").Trim()))],
+                Since = selection.Since is { } since ? DateTime.SpecifyKind(since, DateTimeKind.Utc) : null,
+            };
+            m.MediaSelectionJson = JsonSerializer.Serialize(selection, JsonSerializerOptions.Web);
+            m.LocalPath = "";
+            return null;
+        }
+        m.MediaSelectionJson = null;
+        m.LocalPath = (localPath ?? "").Trim();
+        return null;
+    }
 
     private static void Apply(FolderDevice m, RunConditionsDto? conditions)
     {
@@ -80,7 +117,7 @@ public class FolderService(
     /// The device that creates a folder itself (task 18): attached at once at <paramref name="LocalPath"/>, in the same
     /// save as the folder, and named as where the folder came from.
     /// </summary>
-    public record FirstDevice(Device Device, string LocalPath, MirrorDirection? Direction);
+    public record FirstDevice(Device Device, string LocalPath, MirrorDirection? Direction, MediaSelectionDto? Media = null);
 
     /// <summary>
     /// Creates a folder of <paramref name="userId"/>: the web UI's, or a device's (<paramref name="firstDevice"/>, which must
@@ -93,8 +130,10 @@ public class FolderService(
             if (firstDevice.Device.UserId != userId || firstDevice.Device.RevokedAt is not null)
                 return ServiceResult<CreatedFolder>.Fail("Choose one of your devices.");
             // Before anything is made on the storage: a refused membership must not leave a repository behind.
-            if (ValidateMembership(req.Mode, firstDevice.LocalPath, firstDevice.Direction) is { } badMembership)
+            if (ValidateMembership(req.Kind, req.Mode, firstDevice.LocalPath, firstDevice.Direction) is { } badMembership)
                 return ServiceResult<CreatedFolder>.Fail(badMembership);
+            if (req.Kind == FolderKind.Photos && (!HasPhotoLibrary(firstDevice.Device.Platform) ? NoPhotoLibrary : (firstDevice.Media ?? MediaSelectionDto.Everything).Problem()) is { } badMedia)
+                return ServiceResult<CreatedFolder>.Fail(badMedia);
         }
         var backend = await backends.GetAsync(req.StorageBackendId);
         if (backend is null || !StorageBackendService.CanUse(backend, userId))
@@ -144,11 +183,15 @@ public class FolderService(
         };
         Apply(folder, req);
         if (firstDevice is { } first)
-            folder.Devices.Add(new FolderDevice
+        {
+            var membership = new FolderDevice
             {
-                DeviceId = first.Device.Id, Device = first.Device, LocalPath = first.LocalPath.Trim(),
+                DeviceId = first.Device.Id, Device = first.Device,
                 Direction = folder.Mode == SyncMode.Mirror ? first.Direction : null, AttachedAt = Now,
-            });
+            };
+            ApplyPlace(folder, membership, first.Device, first.LocalPath, first.Media); // validated above
+            folder.Devices.Add(membership);
+        }
 
         string? recoveryKey = null;
         if (folder.Mode == SyncMode.Backup && folder.Encryption == FolderEncryption.Transport)
@@ -356,15 +399,13 @@ public class FolderService(
         var device = await devices.GetAsync(req.DeviceId);
         if (device is null || device.UserId != folder.UserId || device.RevokedAt is not null)
             return ServiceResult<Folder>.Fail("Choose one of your devices.");
-        if (ValidateMembership(folder.Mode, req.LocalPath, req.Direction) is { } invalid) return ServiceResult<Folder>.Fail(invalid);
+        if (ValidateMembership(folder.Kind, folder.Mode, req.LocalPath, req.Direction) is { } invalid) return ServiceResult<Folder>.Fail(invalid);
 
         var membership = folder.Devices.FirstOrDefault(d => d.DeviceId == req.DeviceId);
-        if (membership is null)
-        {
-            membership = new FolderDevice { FolderId = folder.Id, DeviceId = device.Id, Device = device, AttachedAt = Now };
-            folder.Devices.Add(membership);
-        }
-        membership.LocalPath = req.LocalPath.Trim();
+        var isNew = membership is null;
+        membership ??= new FolderDevice { FolderId = folder.Id, DeviceId = device.Id, Device = device, AttachedAt = Now };
+        if (ApplyPlace(folder, membership, device, req.LocalPath, req.Media) is { } badPlace) return ServiceResult<Folder>.Fail(badPlace);
+        if (isNew) folder.Devices.Add(membership);
         membership.Direction = folder.Mode == SyncMode.Mirror ? req.Direction : null;
         if (membership.Paused && !req.Paused) membership.AttachedAt = Now; // resumed: overdue detection starts afresh
         membership.Paused = req.Paused;
@@ -390,8 +431,10 @@ public class FolderService(
         if (req.ExpectedRevision is long expected && expected != folder.Revision) return ServiceResult<Folder>.Fail(Conflict);
         var path = req.LocalPath?.Trim() ?? membership.LocalPath;
         var direction = req.Direction ?? membership.Direction;
-        if (ValidateMembership(folder.Mode, path, direction) is { } invalid) return ServiceResult<Folder>.Fail(invalid);
-        membership.LocalPath = path;
+        if (ValidateMembership(folder.Kind, folder.Mode, path, direction) is { } invalid) return ServiceResult<Folder>.Fail(invalid);
+        var device = membership.Device ?? await devices.GetAsync(membership.DeviceId);
+        if (device is null) return ServiceResult<Folder>.Fail("This device was removed from the account.");
+        if (ApplyPlace(folder, membership, device, path, req.Media) is { } badPlace) return ServiceResult<Folder>.Fail(badPlace);
         membership.Direction = folder.Mode == SyncMode.Mirror ? direction : null;
         if (req.Paused is bool paused)
         {
@@ -403,8 +446,9 @@ public class FolderService(
         return ServiceResult<Folder>.Ok(folder);
     }
 
-    private static string? ValidateMembership(SyncMode mode, string? localPath, MirrorDirection? direction)
+    private static string? ValidateMembership(FolderKind kind, SyncMode mode, string? localPath, MirrorDirection? direction)
     {
+        if (kind == FolderKind.Photos) return null; // a media selection instead of a path (ApplyPlace)
         if (string.IsNullOrWhiteSpace(localPath) || localPath.Length > 1000) return "Choose the folder's location on the device.";
         if (mode == SyncMode.Mirror && direction is null) return "Choose whether this device uploads or downloads.";
         return null;
@@ -432,7 +476,8 @@ public class FolderService(
     {
         if (folder.UserId != device.UserId) return Task.FromResult(ServiceResult<Folder>.Fail("Choose one of your folders."));
         if (folder.Devices.Any(d => d.DeviceId == device.Id)) return Task.FromResult(ServiceResult<Folder>.Fail(AlreadyMember));
-        return AttachDeviceAsync(folder, new AttachDeviceRequest(device.Id, req.LocalPath ?? "", req.Direction, ExpectedRevision: req.ExpectedRevision));
+        return AttachDeviceAsync(folder, new AttachDeviceRequest(device.Id, req.LocalPath ?? "", req.Direction, ExpectedRevision: req.ExpectedRevision,
+            Media: req.Media));
     }
 
     /// <summary>The owner's folders a device may join (it is not part of them yet), and the back-ends it may create folders on.</summary>
@@ -471,6 +516,8 @@ public class FolderService(
             ? $"{report.Uploaded} up, {report.Downloaded} down, {report.Deleted} deleted{(report.Conflicts > 0 ? $", {report.Conflicts} conflicts" : "")}"
             : "Failed");
         membership.LastSyncMessage = message.Length > 1000 ? message[..1000] : message;
+        if (report is { Ok: true, Media: { } media } && membership.Folder?.Kind == FolderKind.Photos)
+            (membership.MediaPhotos, membership.MediaVideos, membership.MediaBytes) = (Math.Max(0, media.Photos), Math.Max(0, media.Videos), Math.Max(0, media.Bytes));
         await folders.SaveAsync();
         await notifier.ToUserAsync(membership.Folder!.UserId, SyncEvents.FolderStatus, membership.FolderId, membership.DeviceId);
     }

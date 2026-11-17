@@ -2,6 +2,16 @@
 
 ## v0.1.5 — 2026-11-17
 
+- feat: **Back up photos and videos from your phone.** A new kind of folder, *Photos & videos* (in the web UI and in the
+  phone's *New folder…*), backs up the phone's photo library: everything, or the albums you choose from the phone's own
+  list in the web UI (asked live from the phone, or the list it reported last when it is offline), optionally without
+  videos or screenshots or only from a date. Originals are kept exactly as they are, each with a small file of its
+  details (date taken, size, dimensions, location, albums, favourite), in year and month directories, so a restore gives
+  plain files. A photo in two albums or renamed is stored once, unchanged photos are not read again, and new photos are
+  backed up soon after you take them. The app asks for access to photos and explains why (and what Android 14's *Select
+  photos* means), shows how many photos and videos the last backup holds, and puts a snapshot back into the phone's
+  photos with *Restore into the library…*, skipping what is still there. Several phones can share one Photos folder.
+- fix: the *Devices* page's screenshot is back in the README (retaken after the table was made to fit narrower screens).
 - feat: **Add folders from the apps.** The Android and desktop apps have *New folder…* (name; Two-way, Mirror or
   Backup; the Mirror direction; end-to-end encryption for backups; which of your storage back-ends; the directory on it,
   filled in from the name; how often it runs; and where it lives on the device, chosen with the phone's folder picker,

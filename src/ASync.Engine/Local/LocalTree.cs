@@ -47,6 +47,12 @@ public interface ILocalTree
     bool Watchable => FileSystemPath is not null;
 
     /// <summary>
+    /// Whether a backup reads this file every time rather than trusting an unchanged size and modification time (a photo
+    /// library's sidecars, generated from metadata that can change without either). Its content is still deduplicated.
+    /// </summary>
+    bool AlwaysRead(string path) => false;
+
+    /// <summary>
     /// The entries of a directory. Throws <see cref="UnauthorizedAccessException"/> when it cannot be read (it must
     /// never look empty instead: a sync would delete its files elsewhere) and <see cref="DirectoryNotFoundException"/>
     /// when it does not exist.

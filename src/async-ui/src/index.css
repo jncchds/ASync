@@ -366,6 +366,22 @@ pre.command {
 .tree-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .crumbs { font-size: 0.9rem; overflow-wrap: anywhere; min-width: 0; }
 
+/* ── Photos folders: the device's media selection and album picker (task 19) ── */
+.media-fields .choice-row { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin-bottom: 0.5rem; }
+.album-picker {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 0.6rem;
+  display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; min-width: 0;
+}
+.album-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.album-list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.album-list li { border-bottom: 1px solid var(--border); min-width: 0; }
+.album-list li:last-child { border-bottom: none; }
+.album-list label.checkbox { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; margin: 0; cursor: pointer; }
+.album-list label.checkbox:hover { background: var(--accent-faint); }
+.album-name { overflow-wrap: anywhere; min-width: 0; flex: 1 1 auto; }
+.album-list .small-text { white-space: nowrap; }
+.media-filters { margin-top: 0.25rem; }
+
 /* ── Device folder picker (FolderDeviceForm's Browse…) ── */
 .path-field { min-width: 0; }
 .input-with-button { display: flex; gap: 0.4rem; align-items: stretch; min-width: 0; }

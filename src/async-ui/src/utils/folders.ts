@@ -1,4 +1,4 @@
-import type { FolderKind, SyncMode } from '../api'
+import type { DevicePlatform, FolderKind, SyncMode } from '../api'
 
 export const MODES: { mode: SyncMode; label: string; blurb: string }[] = [
   { mode: 'Backup', label: 'Backup', blurb: 'Snapshots you can go back to, with retention rules' },
@@ -16,3 +16,12 @@ export const KINDS: { kind: FolderKind; label: string }[] = [
 ]
 
 export const kindLabel = (k: FolderKind) => KINDS.find(x => x.kind === k)?.label ?? k
+
+/** Devices with a photo library ASync can back up (the server refuses the others for Photos folders). */
+export const hasPhotoLibrary = (d: { platform: DevicePlatform }) => d.platform === 'Android' || d.platform === 'IOS'
+
+/** "12 photos, 3 videos". */
+export function countText(photos: number, videos: number): string {
+  const p = `${photos.toLocaleString()} photo${photos === 1 ? '' : 's'}`
+  return videos > 0 ? `${p}, ${videos.toLocaleString()} video${videos === 1 ? '' : 's'}` : p
+}

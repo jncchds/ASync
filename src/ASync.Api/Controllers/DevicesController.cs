@@ -62,6 +62,15 @@ public class DevicesController : ControllerBase
         return Answer(await _browse.BrowseAsync(User.UserId(), id, new BrowseRequest(req.Path, NewFolder: req.Name), HttpContext.RequestAborted));
     }
 
+    /// <summary>
+    /// The device's photo albums with counts (task 19, the Photos folder's media selection): asked live when the device is online (an
+    /// asleep phone is woken), otherwise the last list it reported, with <c>live: false</c> and why. Someone else's device: 404.
+    /// </summary>
+    [HttpGet("{id:guid}/albums")]
+    [EnableRateLimiting(RateLimits.Browse)]
+    public async Task<ActionResult<DeviceAlbumsDto>> Albums(Guid id, [FromServices] DeviceMediaService media) =>
+        await media.AlbumsAsync(User.UserId(), id, HttpContext.RequestAborted) is { } albums ? albums : NotFound(new { message = "Device not found." });
+
     private ActionResult<BrowseListing> Answer(BrowseOutcome outcome) =>
         outcome.Listing is { } listing ? listing : StatusCode(outcome.Status, new { message = outcome.Message });
 

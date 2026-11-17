@@ -14,8 +14,18 @@ namespace ASync.Tests;
 /// </summary>
 public class DeviceBrowseServiceTests
 {
-    private sealed class FakeChannel : IDeviceBrowseChannel
+    internal sealed class FakeChannel : IDeviceBrowseChannel
     {
+        public Func<MediaAlbumsRequest, CancellationToken, Task<MediaAlbumsReply>> Albums { get; set; } =
+            (_, _) => Task.FromResult(new MediaAlbumsReply([new MediaAlbumDto("1", "Camera", 3, 1)], MediaAccess.Full, 3, 1));
+        public int AlbumCalls { get; private set; }
+
+        public Task<MediaAlbumsReply> AlbumsAsync(string connectionId, MediaAlbumsRequest request, CancellationToken ct)
+        {
+            AlbumCalls++;
+            return Albums(request, ct);
+        }
+
         public Func<BrowseRequest, CancellationToken, Task<BrowseReply>> Answer { get; set; } =
             (r, _) => Task.FromResult(new BrowseReply(new BrowseListing(r.Path ?? "/home/me", "/home", [], [], 0, [])));
         public readonly List<(string Connection, BrowseRequest Request)> Calls = [];
@@ -27,7 +37,7 @@ public class DeviceBrowseServiceTests
         }
     }
 
-    private sealed class FakeWaker : IDeviceWaker
+    internal sealed class FakeWaker : IDeviceWaker
     {
         public bool Can { get; set; }
         public WakeOutcome Outcome { get; set; } = WakeOutcome.Delivered();

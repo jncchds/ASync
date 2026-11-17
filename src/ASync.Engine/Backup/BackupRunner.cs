@@ -115,7 +115,7 @@ public sealed class BackupRunner(Repository.Repository repository)
         async Task<TreeNode> BackupFileAsync(LocalEntry file, string relative, TreeNode? old)
         {
             if (old is { Type: NodeType.File, Content: not null } && old.Size == file.Size && old.Modified == file.Modified
-                && old.Content.All(repository.HasBlob))
+                && !root.AlwaysRead(relative) && old.Content.All(repository.HasBlob))
             {
                 stats.FilesUnmodified++;
                 return old with { Mode = file.Mode };
@@ -139,7 +139,9 @@ public sealed class BackupRunner(Repository.Repository repository)
                     }
                 }
             }
-            if (old is null) stats.FilesNew++; else stats.FilesChanged++;
+            if (old is null) stats.FilesNew++;
+            else if (root.AlwaysRead(relative) && old.Content is { } previous && previous.SequenceEqual(content)) stats.FilesUnmodified++; // read again, the same
+            else stats.FilesChanged++;
             return new TreeNode { Name = file.Name, Type = NodeType.File, Size = size, Modified = file.Modified, Mode = file.Mode, Content = content };
         }
 
