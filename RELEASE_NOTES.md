@@ -11,7 +11,13 @@
   backed up soon after you take them. The app asks for access to photos and explains why (and what Android 14's *Select
   photos* means), shows how many photos and videos the last backup holds, and puts a snapshot back into the phone's
   photos with *Restore into the library…*, skipping what is still there. Several phones can share one Photos folder.
-- fix: the *Devices* page's screenshot is back in the README (retaken after the table was made to fit narrower screens).
+  If an album is emptied on the phone, no empty snapshot replaces the last good one; *Restore into the library…* lets you
+  pick the snapshot (an older one brings back photos deleted since). Browsing folders and listing albums from the web
+  are one setting on the phone.
+- fix: a phone woken to be browsed from the web UI could miss a folder added or attached at that moment until its next
+  reconnect; it now reloads its folders when it opens the fresh connection.
+- fix: the *Devices* page fits a 1280 px window again (*Rename* and *Remove* stacked), and its screenshot is back in the
+  README.
 - feat: **Add folders from the apps.** The Android and desktop apps have *New folder…* (name; Two-way, Mirror or
   Backup; the Mirror direction; end-to-end encryption for backups; which of your storage back-ends; the directory on it,
   filled in from the name; how often it runs; and where it lives on the device, chosen with the phone's folder picker,

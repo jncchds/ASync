@@ -999,7 +999,7 @@ is one, and each makes the device read its disk).
   `browse` reason does not run folders: `BackgroundWork.Wake` enqueues the expedited `BrowseWakeWorker`, which starts the
   agent, opens a fresh hub connection (`AgentRuntime.WakeForBrowsingAsync` → `SyncAgent.RefreshLiveConnectionAsync`: a
   process thawed from the freezer still believes in its old socket and would notice only after the 30-second server
-  timeout and a reconnect delay; a connection opened in the last 10 seconds, i.e. a cold start, is kept), and keeps the
+  timeout and a reconnect delay; a connection opened in the last 10 seconds, i.e. a cold start, is kept; after opening the fresh one the agent reloads its folders, since events sent while the old one was dead are lost — task 19 found a folder attached at that moment arriving minutes late), and keeps the
   process online until 90 seconds pass without a listing request (`AgentRuntime.LastBrowseAt`), at most 5 minutes.
   Desktops and the CLI agent register no push endpoint: they are online or offline. The web UI says "Waking <device>…
   this can take up to 30 seconds" for a `Wakeable` device.
