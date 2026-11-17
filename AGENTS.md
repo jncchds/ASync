@@ -2247,10 +2247,10 @@ else; picked folders are not browsable from the web (they need the picker on the
 rename it in the form), `DeviceNoun` "iPhone"/"iPad", links in Safari, notifications through UserNotifications (permission asked
 when the first is due), the theme, no start at login, no self-update (a newer .ipa from the releases).
 
-**Automation (tests only):** a Unix socket at `<container>/tmp/automation.sock`, only when the app is launched with
-`ASYNC_APP_AUTOMATION=1` (`SIMCTL_CHILD_ASYNC_APP_AUTOMATION=1 xcrun simctl launch`: only `simctl` or a debugger sets an app's
-environment; an app opened from the home screen never has it). Bound by a relative name: a simulator container's path is
-longer than a socket path's 104 bytes; the test links a short path to it. One line per command, one line of answer (state,
+**Automation (tests only):** a TCP socket on 127.0.0.1, only when the app is launched with `ASYNC_APP_AUTOMATION=<port>`
+(`SIMCTL_CHILD_ASYNC_APP_AUTOMATION=47821 xcrun simctl launch`: only `simctl` or a debugger sets an app's environment; an app
+opened from the home screen never has it). Not a Unix socket as on the desktop: .NET throws PlatformNotSupportedException
+for `UnixDomainSocketEndPoint` on iOS (found in the first simulator run); a simulator app shares the Mac's loopback. One line per command, one line of answer (state,
 enroll, link, devicecode, sync/run tickets, choose (the real picker), pick (what the next picker returns), bookmark (made by
 NSURL as the picker does), add-folder…, setup/unlock, signout, keyinfo, haskey, files, selftest, theme, show…: see the file).
 

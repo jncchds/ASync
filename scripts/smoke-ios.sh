@@ -4,7 +4,7 @@
 # The server runs natively here, with PostgreSQL from Homebrew: GitHub's macOS runners have no Docker. This is the one
 # exception to "the server only in Docker", for CI on macOS; everywhere else the server runs with docker compose.
 #
-# The app is driven through its automation socket (src/ASync.App.iOS/Automation.cs, only on with ASYNC_APP_AUTOMATION=1,
+# The app is driven through its automation socket (src/ASync.App.iOS/Automation.cs, only on with ASYNC_APP_AUTOMATION=<port>,
 # which only `simctl launch` can set), the simulator through `xcrun simctl` (no paid account, no XCUITest). It checks:
 #   the app installs and starts; an opened async://pair link (simctl openurl) fills the enrollment form; the device-code
 #   flow (the code shown, approved through the web UI's API, enrolled); signing out deletes the device key from the
@@ -38,7 +38,7 @@ bundle=ua.pp.chds.async
 shots="${SCREENSHOTS:-}"
 [[ -n "$shots" ]] && { mkdir -p "$shots"; shots=$(cd "$shots" && pwd); }
 failures=0
-sock="/tmp/async-ios-smoke-$$.sock"
+auto_port="${ASYNC_SMOKE_AUTOMATION_PORT:-47821}"
 
 pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 fail() { printf '  \033[31m✗\033[0m %s\n' "$1"; [[ -n "${2:-}" ]] && printf '%s\n' "$2" | sed 's/^/      /'; failures=$((failures + 1)); }
@@ -58,7 +58,6 @@ cleanup() {
     [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
     [[ -d "$work/pg" ]] && "$PG_BIN/pg_ctl" -D "$work/pg" -m fast stop >/dev/null 2>&1 || true
     if [[ -n "$udid" ]]; then xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true; xcrun simctl delete "$udid" >/dev/null 2>&1 || true; fi
-    rm -f "$sock"
   fi
   exit $status
 }
@@ -85,11 +84,9 @@ api() {
 
 # ctl COMMAND: one automation command; prints the app's one-line answer.
 ctl() {
-  python3 - "$sock" "$1" <<'EOF'
+  python3 - "$auto_port" "$1" <<'EOF'
 import socket, sys
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.settimeout(120)
-s.connect(sys.argv[1])
+s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=120)
 s.sendall((sys.argv[2] + "\n").encode())
 data = b""
 while not data.endswith(b"\n"):
@@ -208,15 +205,13 @@ xcrun simctl install "$udid" "$APP"
 pass "installed $(basename "$APP") ($(du -sh "$APP" | cut -f1))"
 
 launch() {
-  SIMCTL_CHILD_ASYNC_APP_AUTOMATION=1 xcrun simctl launch --terminate-running-process \
+  SIMCTL_CHILD_ASYNC_APP_AUTOMATION="$auto_port" xcrun simctl launch --terminate-running-process \
     --stdout="$logs/app-stdout-$1.log" --stderr="$logs/app-stderr-$1.log" "$udid" "$bundle" >/dev/null
   container=$(xcrun simctl get_app_container "$udid" "$bundle" data)
-  rm -f "$sock"
-  ln -s "$container/tmp/automation.sock" "$sock"
   wait_for 60 ctl state || { tail -40 "$logs/app-stdout-$1.log" "$logs/app-stderr-$1.log"; echo "the app's automation did not answer" >&2; exit 1; }
 }
 launch 1
-pass "the app runs (automation on $container/tmp/automation.sock)"
+pass "the app runs (automation on 127.0.0.1:$auto_port, container $container)"
 docs="$container/Documents"
 
 section "enrolling"

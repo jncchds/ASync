@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -12,10 +13,10 @@ using Avalonia.VisualTree;
 namespace ASync.App.iOS;
 
 /// <summary>
-/// Tests only (<c>scripts/smoke-ios.sh</c> on the simulator): line commands on a Unix socket, one line of answer each, the
-/// iOS form of the desktop's automation socket, at <c>&lt;container&gt;/tmp/automation.sock</c>. Only when the app is started
-/// with <c>ASYNC_APP_AUTOMATION=1</c> (<c>SIMCTL_CHILD_ASYNC_APP_AUTOMATION=1 xcrun simctl launch</c>; a simulator app runs on
-/// the Mac, which reaches the socket in the app's data container). An app opened from the home screen never has the
+/// Tests only (<c>scripts/smoke-ios.sh</c> on the simulator): line commands on a TCP socket on 127.0.0.1, one line of answer
+/// each, the iOS form of the desktop's automation socket (.NET has no Unix domain sockets on iOS; a simulator app shares the
+/// Mac's loopback). Only when the app is started with <c>ASYNC_APP_AUTOMATION=&lt;port&gt;</c>
+/// (<c>SIMCTL_CHILD_ASYNC_APP_AUTOMATION=47821 xcrun simctl launch</c>). An app opened from the home screen never has the
 /// variable, so this is never on in normal use.
 /// <para>Commands: <c>state</c>, <c>enroll &lt;server&gt; &lt;code&gt;</c>, <c>link &lt;async://…&gt;</c> (as if opened),
 /// <c>devicecode &lt;server&gt;</c>, <c>sync &lt;folder&gt;</c> (answers a ticket) and <c>run &lt;ticket&gt;</c>, <c>syncall</c>,
@@ -38,20 +39,21 @@ internal static class Automation
 
     public static void StartIfRequested(ShellViewModel shell, IosPlatform platform)
     {
-        if (_started || Environment.GetEnvironmentVariable(EnvironmentVariable) is not ("1" or "true")) return;
+        if (_started || !int.TryParse(Environment.GetEnvironmentVariable(EnvironmentVariable), out var port) || port is <= 0 or > 65535) return;
         _started = true;
-        // <container>/tmp/automation.sock, bound by a relative name: a simulator container's path is longer than a Unix
-        // socket's 104 characters. The test links a short path to it (macOS follows the link on connect).
-        var directory = Path.Combine(IosAgent.Home, "tmp");
-        Directory.CreateDirectory(directory);
-        Directory.SetCurrentDirectory(directory);
-        const string name = "automation.sock";
-        var path = Path.Combine(directory, name);
-        if (File.Exists(path)) File.Delete(path);
-        var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-        socket.Bind(new UnixDomainSocketEndPoint(name));
-        socket.Listen(4);
-        Console.WriteLine($"ASync: automation on {path}");
+        Socket socket;
+        try
+        {
+            socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            socket.Bind(new IPEndPoint(IPAddress.Loopback, port));
+            socket.Listen(4);
+        }
+        catch (SocketException e)
+        {
+            Console.Error.WriteLine($"ASync: automation: {e.Message}");
+            return;
+        }
+        Console.WriteLine($"ASync: automation on 127.0.0.1:{port}");
         _ = Task.Run(async () =>
         {
             while (true)
