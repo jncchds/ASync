@@ -389,8 +389,7 @@ answer=$(ctl "bg-wake test")
 # after the app went to the background; a change made on the server meanwhile arrives.
 answer=$(ctl "bg-simulate refresh")
 note "iOS's own simulated task launch: $answer (it needs a pending request, which the simulator refuses)"
-ctl "bg-due $sync_id" >/dev/null
-ctl "bg-run refresh 12" >/dev/null
+ctl "bg-run refresh 12 $sync_id" >/dev/null
 to_back
 echo "made on the server while the iPhone app was in the background" >"$work/cli-docs/from-background.txt"
 cli_sync "$sync_id"

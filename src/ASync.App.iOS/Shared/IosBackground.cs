@@ -439,6 +439,18 @@ public sealed class IosBackgroundCoordinator(IIosTaskScheduler tasks, IIosRemind
         }
     }
 
+    /// <summary>Every folder's reminder again from its last success (after iOS allowed notifications: before, it drops them).</summary>
+    public void RefreshReminders()
+    {
+        lock (_gate)
+        {
+            var state = store.Load();
+            foreach (var p in BackgroundPlanner.Plan(_folders))
+                if (_folders.FirstOrDefault(f => f.FolderId == p.FolderId) is { } folder)
+                    ScheduleReminder(folder, state.LastSuccess.TryGetValue(p.FolderId, out var last) ? last : null, state.ReminderDays);
+        }
+    }
+
     /// <summary>The folders a task of this kind runs now (<see cref="IosBackgroundPlan.FoldersFor"/>).</summary>
     public IReadOnlyList<int> FoldersFor(IosTaskKind kind, bool? charging = null) =>
         IosBackgroundPlan.FoldersFor(kind, BackgroundPlanner.Plan(_folders), store.Load().LastSuccess, clock.GetUtcNow(), charging);

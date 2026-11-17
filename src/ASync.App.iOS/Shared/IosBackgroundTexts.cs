@@ -5,8 +5,11 @@ namespace ASync.App.iOS;
 /// <summary>UIApplication.backgroundRefreshStatus: Settings › General › Background App Refresh, or restricted (Screen Time, MDM).</summary>
 public enum IosRefreshStatus { Available, Denied, Restricted }
 
-/// <summary>UNUserNotificationCenter's authorization (provisional and ephemeral count as allowed).</summary>
-public enum IosNotificationStatus { NotDetermined, Denied, Allowed }
+/// <summary>
+/// UNUserNotificationCenter's authorization. Provisional: granted without asking (the app asks for it at start), notifications
+/// arrive quietly in Notification Center; without any authorization iOS does not even keep the reminders' pending requests.
+/// </summary>
+public enum IosNotificationStatus { NotDetermined, Denied, Allowed, Provisional }
 
 /// <summary>
 /// What the shared background card and the dashboard prompt say on an iPhone (<see cref="IBackgroundServices.Texts"/>): iOS has no
@@ -37,7 +40,11 @@ public static class IosBackgroundTexts
 
     /// <summary>Nothing to ask for: Background App Refresh is available and the notification question was answered (no nagging after a no).</summary>
     public static bool Unrestricted(IosRefreshStatus refresh, IosNotificationStatus notifications) =>
-        refresh == IosRefreshStatus.Available && notifications != IosNotificationStatus.NotDetermined;
+        refresh == IosRefreshStatus.Available && notifications is IosNotificationStatus.Allowed or IosNotificationStatus.Denied;
+
+    /// <summary>Whether the system's notification question is still to be asked (never asked, or only provisional so far).</summary>
+    public static bool MayAsk(IosNotificationStatus notifications) =>
+        notifications is IosNotificationStatus.NotDetermined or IosNotificationStatus.Provisional;
 
     /// <summary>What holds background work back now, or null (the card then says <see cref="BackgroundTexts.Unrestricted"/>).</summary>
     public static string? Restriction(IosRefreshStatus refresh, bool lowPowerMode, IosNotificationStatus notifications) => refresh switch
@@ -48,6 +55,7 @@ public static class IosBackgroundTexts
         _ => notifications switch
         {
             IosNotificationStatus.NotDetermined => "Notifications are not allowed yet: the iPhone cannot remind you when a folder has not synced for days.",
+            IosNotificationStatus.Provisional => "Reminders arrive quietly in Notification Center. Allow notifications to see them on the Lock Screen too.",
             IosNotificationStatus.Denied => "Notifications are off for ASync (Settings › Notifications): reminders and overdue alerts are not shown.",
             _ => null,
         },

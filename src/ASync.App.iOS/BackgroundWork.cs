@@ -459,10 +459,26 @@ public sealed class IosBackgroundServices : IBackgroundServices
         {
             UNAuthorizationStatus.NotDetermined => IosNotificationStatus.NotDetermined,
             UNAuthorizationStatus.Denied => IosNotificationStatus.Denied,
+            UNAuthorizationStatus.Provisional => IosNotificationStatus.Provisional,
             _ => IosNotificationStatus.Allowed,
         };
+        if (_notifications == IosNotificationStatus.NotDetermined && !_provisionalAsked)
+        {
+            // Provisional: granted without a question, notifications arrive quietly. Without any authorization iOS drops the
+            // reminders' pending requests; the full question stays for the card's Allow.
+            _provisionalAsked = true;
+            UNUserNotificationCenter.Current.RequestAuthorization(UNAuthorizationOptions.Provisional | UNAuthorizationOptions.Alert |
+                UNAuthorizationOptions.Sound | UNAuthorizationOptions.Badge, (granted, _) =>
+                {
+                    Console.WriteLine($"ASync: notifications provisional: {granted}.");
+                    ReadNotifications();
+                });
+        }
+        else if (_notifications is IosNotificationStatus.Provisional or IosNotificationStatus.Allowed) IosBackground.Coordinator?.RefreshReminders();
         RaiseChanged();
     });
+
+    private volatile bool _provisionalAsked;
 
     internal void RaiseChanged() => Changed?.Invoke();
 
@@ -471,7 +487,7 @@ public sealed class IosBackgroundServices : IBackgroundServices
     /// <summary>The prompt's Allow: the notification question while it is open, else iOS's Settings page of the app.</summary>
     public void RequestIgnoreBatteryOptimizations()
     {
-        if (_refresh == IosRefreshStatus.Available && _notifications == IosNotificationStatus.NotDetermined) AskForNotifications();
+        if (_refresh == IosRefreshStatus.Available && IosBackgroundTexts.MayAsk(_notifications)) AskForNotifications();
         else OpenBatterySettings();
     }
 
@@ -504,7 +520,7 @@ public sealed class IosBackgroundServices : IBackgroundServices
             if (IosBackground.Coordinator is null) return;
             IosBackground.Coordinator.ReminderDays = value;
             // Chosen just now: the moment to ask whether the iPhone may show it.
-            if (value > 0 && _notifications == IosNotificationStatus.NotDetermined) AskForNotifications();
+            if (value > 0 && IosBackgroundTexts.MayAsk(_notifications)) AskForNotifications();
         }
     }
 

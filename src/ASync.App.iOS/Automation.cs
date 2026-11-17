@@ -29,7 +29,7 @@ namespace ASync.App.iOS;
 /// <c>signout</c>, <c>keyinfo</c>, <c>haskey &lt;reference&gt;</c>, <c>files</c> (the store's files: names, prefixes, sizes), <c>selftest</c> (the local tree contract on
 /// bookmarked directories), <c>home</c> (the container's path).</para>
 /// <para>Background work (task 22): <c>bg</c> (pending BGTask requests, reminders, conditions, permissions, push, the store),
-/// <c>bg-simulate refresh|processing</c> (iOS's own launch of a pending task; private API), <c>bg-run refresh|processing [seconds]</c>
+/// <c>bg-simulate refresh|processing</c> (iOS's own launch of a pending task; private API), <c>bg-run refresh|processing [seconds [folder due]]</c>
 /// (the task's code path after a delay, so the app can be sent to the background first), <c>bg-due &lt;folder&gt;</c> (counts as never run),
 /// <c>bg-wake &lt;reason&gt;</c> (a silent
 /// push handled in the app), <c>bg-reminder &lt;days&gt;</c>, <c>notify-permission</c> (the system's question), <c>editconditions
@@ -283,7 +283,10 @@ internal static class Automation
                 // and the time running out stands for the task's expiration.
                 var a = arg.Split(' ', 2);
                 var kind = ParseKind(a[0]);
-                var delay = a.Length > 1 ? int.Parse(a[1], CultureInfo.InvariantCulture) : 0;
+                var rest = a.Length > 1 ? a[1].Split(' ', 2) : [];
+                var delay = rest.Length > 0 ? int.Parse(rest[0], CultureInfo.InvariantCulture) : 0;
+                // A folder to count as due right before the run (a hub event may have run it in the meantime).
+                int? due = rest.Length > 1 ? int.Parse(rest[1], CultureInfo.InvariantCulture) : null;
                 var expired = new CancellationTokenSource();
                 var ended = 0;
                 nint assertion = 0;
@@ -301,6 +304,7 @@ internal static class Automation
                     try
                     {
                         await Task.Delay(TimeSpan.FromSeconds(delay));
+                        if (due is { } id) IosBackground.Coordinator.Store.Update(s => s.LastSuccess.Remove(id));
                         var ok = await IosBackground.RunTaskAsync(kind, expired.Token);
                         Console.WriteLine($"ASync: automation bg-run {kind}: {(ok ? "done" : "not done")}");
                     }

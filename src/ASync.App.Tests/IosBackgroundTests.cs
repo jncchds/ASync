@@ -360,6 +360,33 @@ public sealed class IosBackgroundTests : IDisposable
         Assert.Equal("0aff10", ApnsEntitlement.Hex([0x0a, 0xff, 0x10]));
     }
 
+    [Fact]
+    public void ProvisionalNotifications_KeepTheQuestionOpen_UntilAnswered()
+    {
+        // Provisional (granted at start without a question): reminders work quietly, and the card still offers Allow.
+        Assert.False(IosBackgroundTexts.Unrestricted(IosRefreshStatus.Available, IosNotificationStatus.Provisional));
+        Assert.True(IosBackgroundTexts.MayAsk(IosNotificationStatus.Provisional));
+        Assert.StartsWith("Reminders arrive quietly", IosBackgroundTexts.Restriction(IosRefreshStatus.Available, false, IosNotificationStatus.Provisional));
+        // Answered either way: nothing more to ask.
+        Assert.True(IosBackgroundTexts.Unrestricted(IosRefreshStatus.Available, IosNotificationStatus.Denied));
+        Assert.False(IosBackgroundTexts.MayAsk(IosNotificationStatus.Allowed));
+        Assert.Null(IosBackgroundTexts.Restriction(IosRefreshStatus.Available, false, IosNotificationStatus.Allowed));
+        Assert.False(IosBackgroundTexts.Unrestricted(IosRefreshStatus.Denied, IosNotificationStatus.Allowed));
+    }
+
+    [Fact]
+    public void RemindersAreScheduledAgain_FromEachFoldersLastSuccess()
+    {
+        var h = new Harness(_dir);
+        h.Coordinator.FoldersChanged([Folder(1)], loaded: true, signedOut: false);
+        h.Clock.Now = T0.AddDays(1);
+        h.Coordinator.FolderRan(new FolderRunResult(1, "folder1", true, "ok"));
+        h.Reminders.Pending.Clear(); // iOS dropped them (no authorization yet)
+        h.Clock.Now = T0.AddDays(2);
+        h.Coordinator.RefreshReminders();
+        Assert.Equal(TimeSpan.FromDays(2), h.Reminders.Pending["reminder-1"].Delay); // three days after the success a day ago
+    }
+
     // ── Background time around runs ─────────────────────────────────────────────
 
     private sealed class FakeAssertion : IBackgroundAssertion
