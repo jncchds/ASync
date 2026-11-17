@@ -23,7 +23,7 @@ public sealed class PhotoKitBridge : IPhotoKit
     /// <summary>Images and videos only; hidden assets and a burst's other photos are not listed (PhotoKit's defaults).</summary>
     private static PHFetchOptions Visual() => new()
     {
-        Predicate = NSPredicate.FromFormat("mediaType == %d || mediaType == %d",
+        Predicate = NSPredicate.FromFormat("mediaType == %@ || mediaType == %@",
             [NSNumber.FromInt32((int)PHAssetMediaType.Image), NSNumber.FromInt32((int)PHAssetMediaType.Video)]),
         IncludeHiddenAssets = false,
         IncludeAllBurstAssets = false,

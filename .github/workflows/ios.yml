@@ -84,8 +84,8 @@ jobs:
       - name: Compile the iOS head (scripts/check-ios.sh)
         run: scripts/check-ios.sh
 
-      - name: The iOS head's shared code (IosTests, IosBackgroundTests)
-        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests'
+      - name: The iOS head's shared code (IosTests, IosBackgroundTests, IosPhotosTests)
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests|FullyQualifiedName~IosPhotosTests'
 
   ios:
     needs: [decide, check]
@@ -138,8 +138,8 @@ jobs:
         run: dotnet workload install ios --version "$IOS_WORKLOAD_SET"
 
       # The shared iOS code on macOS itself (/var and /private/var, the real container layout of paths).
-      - name: Unit tests (IosTests, IosBackgroundTests)
-        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests'
+      - name: Unit tests (IosTests, IosBackgroundTests, IosPhotosTests)
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests|FullyQualifiedName~IosPhotosTests'
 
       - name: Build for the simulator
         run: scripts/package-ios.sh --simulator

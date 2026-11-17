@@ -15,7 +15,7 @@ namespace ASync.App.iOS;
 /// real permission), <c>photos-restore-choose|photos-restore-cancel &lt;folder&gt;</c>. The agent: <c>photos</c> (access, albums, the
 /// restore's progress, the Photos folders, the change observer's runs), <c>photos-set &lt;folder&gt; all|&lt;album id&gt;,…</c>,
 /// <c>photos-restore &lt;folder&gt; [snapshot]</c>, <c>photos-assets</c> (what the library lists). The library, as a person changes it
-/// in the Photos app: <c>photos-album-make &lt;title&gt; &lt;file&gt;,…</c>, <c>photos-album-remove &lt;title&gt; &lt;file&gt;</c>,
+/// in the Photos app: <c>photos-album-make &lt;title&gt; &lt;file&gt;,…</c>, <c>photos-album-add &lt;title&gt; &lt;file&gt;,…</c>, <c>photos-album-remove &lt;title&gt; &lt;file&gt;</c>,
 /// <c>photos-favourite &lt;file&gt;</c> (album and favourite changes need no confirmation; deleting a photo does, which simctl cannot
 /// answer).
 /// </summary>
@@ -109,6 +109,12 @@ internal static class PhotosAutomation
                     var request = PHAssetCollectionChangeRequest.CreateAssetCollection(a[0]);
                     request.AddAssets(Assets(a.Length > 1 ? a[1].Split(',') : []));
                 });
+            }
+            case "photos-album-add":
+            {
+                var a = arg.Split(' ', 2);
+                var album = Album(a[0]) ?? throw new InvalidOperationException($"No album \"{a[0]}\".");
+                return await ChangeAsync(() => PHAssetCollectionChangeRequest.ChangeRequest(album)?.AddAssets(Assets(a[1].Split(','))));
             }
             case "photos-album-remove":
             {

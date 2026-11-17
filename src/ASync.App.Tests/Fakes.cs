@@ -217,6 +217,13 @@ internal sealed class FakePhotos : IPhotoAccess
     }
 
     public void OpenSettings() => Calls.Add("settings");
+
+    /// <summary>iOS's words, its limited-library picker and the iCloud switch when set (task 23).</summary>
+    public PhotoTexts Texts { get; set; } = PhotoTexts.Android;
+    public bool CanChooseMore { get; set; }
+    public void ChooseMore() => Calls.Add("choose-more");
+    public bool OffersCloudDownloads { get; set; }
+    public bool CloudDownloads { get; set; }
 }
 
 /// <summary>A phone's contacts or calendar permission: <see cref="RequestRead"/> and <see cref="RequestWrite"/> grant and say so.</summary>

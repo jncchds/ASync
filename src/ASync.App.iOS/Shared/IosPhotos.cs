@@ -440,11 +440,22 @@ public sealed class IosMediaLibrary : IMediaLibrary
                 files.Add((type, await SpoolAsync(stream, extra.FileName, ct), extra.FileName));
             }
             var plan = IosRestorePlan.Albums(insert.Albums ?? [], UserAlbums(), [], _madeAlbums);
-            var created = await _kit.CreateAsync(new PhotoKitCreation(files,
-                insert.Taken is { } taken ? DateTimeOffset.FromUnixTimeMilliseconds(taken) : DateTimeOffset.FromUnixTimeMilliseconds(insert.Modified),
-                insert.Latitude, insert.Longitude, insert.Favourite, plan.Existing, plan.Create), ct);
-            foreach (var (title, id) in created.NewAlbums) _madeAlbums[title] = id;
-            return created.AssetId;
+            var when = DateTimeOffset.FromUnixTimeMilliseconds(insert.Taken ?? insert.Modified);
+            IOException? refused = null;
+            foreach (var attempt in IosRestorePlan.Attempts(files))
+            {
+                // PhotoKit moves the files in on success; a refused combination leaves them for the next, smaller attempt.
+                if (!attempt.All(f => File.Exists(f.Path))) break;
+                try
+                {
+                    var created = await _kit.CreateAsync(new PhotoKitCreation(attempt, when, insert.Latitude, insert.Longitude, insert.Favourite,
+                        plan.Existing, plan.Create), ct);
+                    foreach (var (title, id) in created.NewAlbums) _madeAlbums[title] = id;
+                    return created.AssetId;
+                }
+                catch (IOException e) { refused ??= e; }
+            }
+            throw refused ?? new IOException($"{insert.FileName} could not be added to the photo library.");
         }
         finally
         {
@@ -475,9 +486,25 @@ public sealed class IosMediaLibrary : IMediaLibrary
     }
 }
 
-/// <summary>Which albums a restored asset goes into (AGENTS.md "iOS photos": restore).</summary>
+/// <summary>Which albums a restored asset goes into, and which resources (AGENTS.md "iOS photos": restore).</summary>
 public static class IosRestorePlan
 {
+    /// <summary>
+    /// The resource sets to try, largest first: PhotoKit refuses some combinations (it says which only by failing), so a RAW is
+    /// dropped first, then a Live Photo's video; the original alone is the last try.
+    /// </summary>
+    public static IReadOnlyList<IReadOnlyList<(PhotoKitResourceType Type, string Path, string FileName)>> Attempts(
+        IReadOnlyList<(PhotoKitResourceType Type, string Path, string FileName)> files)
+    {
+        var all = files.ToList();
+        var noRaw = all.Where(f => f.Type != PhotoKitResourceType.AlternatePhoto).ToList();
+        var original = all.Take(1).ToList();
+        var attempts = new List<IReadOnlyList<(PhotoKitResourceType, string, string)>> { all };
+        if (noRaw.Count < all.Count) attempts.Add(noRaw);
+        if (original.Count < attempts[^1].Count) attempts.Add(original);
+        return attempts;
+    }
+
     public sealed record AlbumPlan(IReadOnlyList<string> Existing, IReadOnlyList<string> Create);
 
     /// <summary>

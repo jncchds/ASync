@@ -19,7 +19,11 @@
 #   run with the app in the background, and a server change arrives), the reminders pending in the notification center
 #   (moved by the setting, off with Never), no APNs registration without the entitlement, the conditions from iOS and the
 #   web UI's (a charging-only folder makes the processing task need power), a silent push handled in the app, and an
-#   `xcrun simctl push` to the suspended app; the app restarted (identity and folders survive, it signs in again).
+#   `xcrun simctl push` to the suspended app; photos and videos (task 23, scripts/smoke-ios-photos.sh: test media added with
+#   `simctl addmedia`, the permission's explanation and iOS's question, limited access, the album list over the hub, a backup
+#   of one album checked offline with async-cli, a favourite reading nothing again, the change observer's own run, an older
+#   snapshot keeping a photo taken out of the album, restores into the library with and without the photos there); the app
+#   restarted (identity and folders survive, it signs in again).
 #
 # Needs: macOS with Xcode and a simulator runtime, the .NET SDK with the ios workload, jq, python3, Homebrew's PostgreSQL
 # (PG_BIN=…/bin, default: brew --prefix postgresql@16). From the repository root:
@@ -423,6 +427,10 @@ else
 fi
 in_front
 wait_for 30 test -f "$docs/Sync/pushed.txt" && pass "opening the app syncs (pushed.txt is there)" || fail "app opened sync" "$(ls "$docs/Sync")"
+
+# Photos and videos (task 23): its own file, sourced here (it uses these helpers and the enrolled iPhone).
+# shellcheck source=scripts/smoke-ios-photos.sh
+source "$root/scripts/smoke-ios-photos.sh"
 
 section "restart"
 launch 2

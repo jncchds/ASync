@@ -496,6 +496,26 @@ public sealed class IosPhotosTests : IDisposable
         Assert.Contains(_kit.AlbumAdds, a => a.AssetId == restoredLive && a.AlbumIds.SequenceEqual([trip.Id]) && a.NewAlbums.Count == 0);
     }
 
+    [Fact]
+    public async Task ARestorePhotoKitRefuses_TriesWithoutTheRaw_ThenTheOriginalAlone()
+    {
+        SeedLivePhoto();
+        var repo = await RepoAsync();
+        var (snapshot, _) = await BackUpAsync(repo, Library());
+        _kit.Wipe();
+        _kit.MaxFiles = 2; // PhotoKit refuses photo + Live Photo video + RAW in one request
+        var result = await new MediaRestorer(repo, Library()).RunAsync(snapshot, ct: TestContext.Current.CancellationToken);
+        Assert.Equal(1, result.Restored);
+        Assert.Equal([PhotoKitResourceType.Photo, PhotoKitResourceType.PairedVideo], _kit.Created.Single().Creation.Files.Select(f => f.Type));
+        Assert.Equal(1, _kit.Refused);
+
+        var attempts = IosRestorePlan.Attempts([(PhotoKitResourceType.Video, "a", "a.mov")]);
+        Assert.Single(attempts);
+        Assert.Equal([3, 2, 1], IosRestorePlan.Attempts([(PhotoKitResourceType.Photo, "a", "a"), (PhotoKitResourceType.PairedVideo, "b", "b"),
+            (PhotoKitResourceType.AlternatePhoto, "c", "c")]).Select(a => a.Count));
+        Assert.Equal([2, 1], IosRestorePlan.Attempts([(PhotoKitResourceType.Photo, "a", "a"), (PhotoKitResourceType.PairedVideo, "b", "b")]).Select(a => a.Count));
+    }
+
     // ── New photos ────────────────────────────────────────────────────────────
 
     [Fact]
@@ -702,10 +722,19 @@ internal sealed class FakePhotoKit : IPhotoKit
         return cancelled;
     }
 
+    /// <summary>More files in one creation request than this: refused, as PhotoKit refuses combinations it does not take.</summary>
+    public int? MaxFiles { get; set; }
+    public int Refused { get; private set; }
+
     public Task<PhotoKitCreated> CreateAsync(PhotoKitCreation creation, CancellationToken ct)
     {
         lock (_gate)
         {
+            if (creation.Files.Count > MaxFiles)
+            {
+                Refused++;
+                return Task.FromException<PhotoKitCreated>(new IOException("The operation couldn't be completed. (PHPhotosErrorDomain error -1.)"));
+            }
             var bytes = creation.Files.Select(f => File.ReadAllBytes(f.Path)).ToList();
             Created.Add((creation, bytes));
             var id = $"NEW{++_next}/L0/001";
