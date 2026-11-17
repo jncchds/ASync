@@ -49,6 +49,13 @@ public class Device
     public DateTime? MediaAlbumsAt { get; set; }
     public MediaAccess? MediaAccess { get; set; }
 
+    /// <summary>
+    /// The last contact accounts and calendars the device reported (task 20), for the web UI while it is offline: JSON of an object
+    /// keyed by folder kind (<c>Contacts</c>, <c>Calendars</c>), each <c>{collections, access, items, at}</c> (names and counts only).
+    /// Null = never reported.
+    /// </summary>
+    public string? CollectionListsJson { get; set; }
+
     public AppUser? User { get; set; }
 }
 

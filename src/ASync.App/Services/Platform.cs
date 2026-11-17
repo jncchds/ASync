@@ -71,6 +71,12 @@ public interface IPlatformServices
 
     /// <summary>The permission to read the photo library (phones: Photos folders, task 19); null where there is none.</summary>
     IPhotoAccess? Photos => null;
+
+    /// <summary>The permissions for contacts and calendars (phones: Contacts and Calendars folders, task 20); null where there are none.</summary>
+    ICollectionAccess? Contacts => null;
+    ICollectionAccess? Calendars => null;
+
+    ICollectionAccess? CollectionAccess(FolderKind kind) => kind == FolderKind.Contacts ? Contacts : kind == FolderKind.Calendars ? Calendars : null;
 }
 
 /// <summary>A UnifiedPush distributor installed on the phone (ntfy, say).</summary>

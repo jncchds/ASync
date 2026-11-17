@@ -1,5 +1,18 @@
 # Release notes
 
+## v0.1.6 — 2026-11-17
+
+- feat: **Back up contacts and calendars from your phone.** Two new kinds of folder, *Contacts* and *Calendars* (in the web UI and
+  in the phone's *New folder…*), back up the phone's address book and calendars: everything, or the accounts (Google, the phone,
+  the SIM, …) or calendars you choose from the phone's own list in the web UI (asked live, or the list it reported last), and for
+  calendars how far back (the last two years by default, or everything). Each contact is kept as a vCard 4.0 file with its photo,
+  each event as an iCalendar file with its repetitions, changed occurrences, reminders and guests, so `async-cli restore` and the web
+  snapshot browser give plain files any address book or calendar imports; the web UI also downloads a whole account as one .vcf and a
+  whole calendar as one .ics. Unchanged contacts are not read again and are stored once; changes are backed up soon after you make
+  them. The app asks to read contacts or calendars and explains why; it asks to add to them only for *Restore into the contacts… /
+  calendars…*, which imports a chosen snapshot into the original accounts or one you pick, skipping what is already there and never
+  deleting anything.
+
 ## v0.1.5 — 2026-11-17
 
 - feat: **Back up photos and videos from your phone.** A new kind of folder, *Photos & videos* (in the web UI and in the

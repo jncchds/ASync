@@ -117,11 +117,92 @@ public sealed class SnapshotBrowser(Repo repository)
     }
 }
 
+/// <summary>
+/// A Contacts or Calendars snapshot's account or calendar directory as one file (task 20): its vCards one after the other (a .vcf may
+/// hold many), or its events in one VCALENDAR (each zone's VTIMEZONE once, then every VEVENT, named after calendar.json). What an
+/// address book or calendar app imports in one go. The files are written as they are stored; nothing is re-encoded.
+/// </summary>
+public static class CollectionMerge
+{
+    public static async Task WriteAsync(SnapshotBrowser browser, TreeNode directory, bool calendars, Stream output, CancellationToken ct)
+    {
+        if (directory.Type != NodeType.Directory || directory.Subtree is not BlobId sub) throw new ArgumentException($"\"{directory.Name}\" is not a directory.");
+        var nodes = (await browser.Repository.LoadTreeAsync(sub, ct)).Nodes.Where(n => n.Type == NodeType.File).OrderBy(n => n.Name, StringComparer.Ordinal).ToList();
+        async Task<string> TextAsync(TreeNode node)
+        {
+            using var buffer = new MemoryStream();
+            await browser.CopyFileAsync(node, buffer, ct);
+            return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+        }
+        async Task WriteText(string s) => await output.WriteAsync(System.Text.Encoding.UTF8.GetBytes(s), ct);
+        if (!calendars)
+        {
+            foreach (var node in nodes.Where(n => n.Name.EndsWith(".vcf", StringComparison.OrdinalIgnoreCase)))
+            {
+                var text = await TextAsync(node);
+                await WriteText(text.EndsWith('\n') ? text : text + "\r\n");
+            }
+            return;
+        }
+        string? name = null;
+        if (nodes.FirstOrDefault(n => n.Name == "calendar.json") is { } info)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(await TextAsync(info));
+                name = doc.RootElement.TryGetProperty("name", out var v) ? v.GetString() : null;
+            }
+            catch (JsonException) { }
+        }
+        var zones = new Dictionary<string, string>(StringComparer.Ordinal);
+        var zoneOrder = new List<string>();
+        var events = new System.Text.StringBuilder();
+        foreach (var node in nodes.Where(n => n.Name.EndsWith(".ics", StringComparison.OrdinalIgnoreCase)))
+        {
+            var lines = (await TextAsync(node)).Replace("\r\n", "\n").Split('\n');
+            System.Text.StringBuilder? block = null;
+            string? kind = null, tzid = null;
+            foreach (var line in lines)
+            {
+                if (block is null)
+                {
+                    if (line is "BEGIN:VTIMEZONE" or "BEGIN:VEVENT" or "BEGIN:VTODO" or "BEGIN:VJOURNAL")
+                    {
+                        block = new System.Text.StringBuilder();
+                        kind = line[6..];
+                        tzid = null;
+                        block.Append(line).Append("\r\n");
+                    }
+                    continue;
+                }
+                block.Append(line).Append("\r\n");
+                if (kind == "VTIMEZONE" && tzid is null && line.StartsWith("TZID:", StringComparison.Ordinal)) tzid = line[5..];
+                if (line == $"END:{kind}")
+                {
+                    if (kind == "VTIMEZONE")
+                    {
+                        if (tzid is not null && zones.TryAdd(tzid, block.ToString())) zoneOrder.Add(tzid);
+                    }
+                    else events.Append(block);
+                    block = null;
+                }
+            }
+        }
+        var head = new System.Text.StringBuilder("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//ASync//Calendars 1//EN\r\nCALSCALE:GREGORIAN\r\n");
+        if (name is { Length: > 0 }) head.Append("X-WR-CALNAME:").Append(name.Replace("\\", "\\\\").Replace(",", "\\,").Replace(";", "\\;").Replace("\n", "\\n")).Append("\r\n");
+        await WriteText(head.ToString());
+        foreach (var z in zoneOrder) await WriteText(zones[z]);
+        await WriteText(events.ToString());
+        await WriteText("END:VCALENDAR\r\n");
+    }
+}
+
 /// <summary>Why a folder's snapshots cannot be browsed on the server, with the HTTP status to answer.</summary>
 public sealed record BrowseRefusal(int Status, string Message);
 
-/// <summary>What a download link grants: one file or directory of one snapshot, to the folder's owner.</summary>
-public sealed record SnapshotDownloadTicket(int UserId, int FolderId, string SnapshotId, string Path, bool Zip);
+/// <summary>What a download link grants: one file or directory of one snapshot, to the folder's owner.
+/// <paramref name="Merge"/>: a Contacts or Calendars directory as one .vcf or .ics (<see cref="CollectionMerge"/>).</summary>
+public sealed record SnapshotDownloadTicket(int UserId, int FolderId, string SnapshotId, string Path, bool Zip, bool Merge = false);
 
 /// <summary>
 /// Snapshot browsing for Transport-encrypted Backup folders, which the server can open with its own key

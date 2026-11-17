@@ -222,6 +222,9 @@ namespace ASync.Infrastructure.Migrations
                     b.Property<string>("AppVersion")
                         .HasColumnType("text");
 
+                    b.Property<string>("CollectionListsJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 

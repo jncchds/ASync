@@ -14,6 +14,10 @@ public interface IDeviceBrowseChannel
 
     /// <summary>Asks for the device's photo albums (task 19, <see cref="DeviceMediaService"/>).</summary>
     Task<MediaAlbumsReply> AlbumsAsync(string connectionId, MediaAlbumsRequest request, CancellationToken ct);
+
+    /// <summary>Asks for the device's contact accounts or calendars (task 20, <see cref="DeviceCollectionsService"/>).</summary>
+    Task<CollectionsReply> CollectionsAsync(string connectionId, CollectionsRequest request, CancellationToken ct) =>
+        throw new NotSupportedException("This channel cannot ask for contact accounts or calendars.");
 }
 
 public sealed class HubDeviceBrowseChannel(IHubContext<SyncHub> hub) : IDeviceBrowseChannel
@@ -23,6 +27,9 @@ public sealed class HubDeviceBrowseChannel(IHubContext<SyncHub> hub) : IDeviceBr
 
     public Task<MediaAlbumsReply> AlbumsAsync(string connectionId, MediaAlbumsRequest request, CancellationToken ct) =>
         hub.Clients.Client(connectionId).InvokeAsync<MediaAlbumsReply>("albums", request, ct);
+
+    public Task<CollectionsReply> CollectionsAsync(string connectionId, CollectionsRequest request, CancellationToken ct) =>
+        hub.Clients.Client(connectionId).InvokeAsync<CollectionsReply>("collections", request, ct);
 }
 
 /// <summary>Wakes a device that is offline (a phone the system put to sleep). Behind an interface for tests.</summary>

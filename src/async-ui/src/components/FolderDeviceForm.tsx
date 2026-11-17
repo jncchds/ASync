@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import {
-  attachFolderDevice, BROWSE_HINTS, errorMessage, EVERYTHING, isConflict, type Device, type Folder, type FolderDevice, type MediaSelection,
-  type MirrorDirection,
+  ALL_COLLECTIONS, attachFolderDevice, BROWSE_HINTS, errorMessage, EVERYTHING, isConflict, type CollectionSelection, type Device, type Folder,
+  type FolderDevice, type MediaSelection, type MirrorDirection,
 } from '../api'
+import CollectionSelectionFields from './CollectionSelectionFields'
 import DeviceFolderPicker from './DeviceFolderPicker'
 import MediaSelectionFields from './MediaSelectionFields'
 import { hasPhotoLibrary } from '../utils/folders'
@@ -21,8 +22,11 @@ interface Props {
 /** Adds a device to a folder, or changes where and how it syncs there. */
 export default function FolderDeviceForm({ folder, devices, existing, onSaved, onCancel, onReload }: Props) {
   const photos = folder.kind === 'Photos'
-  const available = devices.filter(d => !folder.devices.some(m => m.deviceId === d.id) && (!photos || hasPhotoLibrary(d)))
+  const pim = folder.kind === 'Contacts' || folder.kind === 'Calendars' ? folder.kind : null
+  const phonesOnly = photos || pim !== null
+  const available = devices.filter(d => !folder.devices.some(m => m.deviceId === d.id) && (!phonesOnly || hasPhotoLibrary(d)))
   const [media, setMedia] = useState<MediaSelection>(existing?.media ?? EVERYTHING)
+  const [collections, setCollections] = useState<CollectionSelection>(existing?.collections ?? ALL_COLLECTIONS)
   const [startRevision] = useState(folder.revision)
   const [deviceId, setDeviceId] = useState(existing?.deviceId ?? available[0]?.id ?? '')
   const [localPath, setLocalPath] = useState(existing?.localPath ?? '')
@@ -45,14 +49,19 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
     if (photos && !media.all && (media.albums ?? []).length === 0) { setError('Choose at least one album, or back up all photos and videos.'); return }
+    if (pim && !collections.all && (collections.collections ?? []).length === 0) {
+      setError(pim === 'Contacts' ? 'Choose at least one account, or back up all contacts.' : 'Choose at least one calendar, or back up all calendars.')
+      return
+    }
     setBusy(true)
     setError('')
     setConflict(false)
     try {
       await attachFolderDevice(folder.id, {
-        deviceId, localPath: photos ? '' : localPath.trim(), direction: folder.mode === 'Mirror' ? direction : null, paused,
+        deviceId, localPath: phonesOnly ? '' : localPath.trim(), direction: folder.mode === 'Mirror' ? direction : null, paused,
         expectedRevision: startRevision, conditions: { unmeteredOnly, chargingOnly, batteryNotLow },
         ...(photos ? { media: { ...media, albums: media.all ? [] : media.albums } } : {}),
+        ...(pim ? { collections: { ...collections, collections: collections.all ? [] : collections.collections, pastDays: pim === 'Calendars' ? collections.pastDays : null } } : {}),
       })
       onSaved()
     } catch (err) {
@@ -67,8 +76,8 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
     return (
       <div className="subform">
         <p className="hint">
-          {photos
-            ? 'All your phones are already in this folder (only phones back up their photos). Add a phone on the Devices page.'
+          {phonesOnly
+            ? `All your phones are already in this folder (only phones back up their ${photos ? 'photos' : pim === 'Contacts' ? 'contacts' : 'calendars'}). Add a phone on the Devices page.`
             : 'All your devices are already in this folder. Add more devices on the Devices page.'}
         </p>
         <button type="button" className="secondary small" onClick={onCancel}>Close</button>
@@ -86,7 +95,7 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
               : available.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </label>
-        {!photos && <label className="path-field">
+        {!phonesOnly && <label className="path-field">
           Folder on the device
           <span className="input-with-button">
             <input value={localPath} onChange={e => setLocalPath(e.target.value)} required maxLength={1000} placeholder={placeholder} />
@@ -114,7 +123,11 @@ export default function FolderDeviceForm({ folder, devices, existing, onSaved, o
         <MediaSelectionFields key={deviceId} deviceId={deviceId} deviceName={deviceName} value={media} onChange={setMedia}
           waking={browse === 'Wakeable'} />
       )}
-      {!photos && browsing && deviceId && (
+      {pim && deviceId && (
+        <CollectionSelectionFields key={`${deviceId}-${pim}`} kind={pim} deviceId={deviceId} deviceName={deviceName} value={collections}
+          onChange={setCollections} waking={browse === 'Wakeable'} />
+      )}
+      {!phonesOnly && browsing && deviceId && (
         <DeviceFolderPicker
           key={deviceId}
           deviceId={deviceId}

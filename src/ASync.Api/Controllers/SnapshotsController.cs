@@ -69,6 +69,14 @@ public class SnapshotsController : ControllerBase
         DownloadAsync(User.UserId(), id, snapshotId, path ?? "", zip: true, ct);
 
     /// <summary>
+    /// A Contacts or Calendars folder's account or calendar directory as one file (task 20): <c>&lt;name&gt;.vcf</c> with every contact, or
+    /// <c>&lt;name&gt;.ics</c> with every event, to import anywhere in one go.
+    /// </summary>
+    [HttpGet("{snapshotId}/merged")]
+    public Task<IActionResult> Merged(int id, string snapshotId, [FromQuery] string path, CancellationToken ct) =>
+        DownloadAsync(User.UserId(), id, snapshotId, path ?? "", zip: true, ct, merge: true);
+
+    /// <summary>
     /// A link valid for a few minutes that downloads without an Authorization header, so the browser streams the
     /// download to disk itself. It grants only that file or directory.
     /// </summary>
@@ -78,11 +86,11 @@ public class SnapshotsController : ControllerBase
         {
             if (!SnapshotBrowser.IsSnapshotId(snapshotId)) return Task.FromResult<IActionResult>(NotFound(new { message = "No such snapshot." }));
             var path = StoragePath.Normalize(req.Path ?? "");
-            var (ticket, expires) = _snapshots.IssueTicket(new SnapshotDownloadTicket(folder.UserId, folder.Id, snapshotId, path, req.Zip));
+            var (ticket, expires) = _snapshots.IssueTicket(new SnapshotDownloadTicket(folder.UserId, folder.Id, snapshotId, path, req.Zip || req.Merge, req.Merge));
             return Task.FromResult<IActionResult>(Ok(new SnapshotDownloadLinkDto($"/api/snapshot-downloads?t={Uri.EscapeDataString(ticket)}", expires)));
         }, ct);
 
-    public record DownloadLinkRequest(string? Path, bool Zip = false);
+    public record DownloadLinkRequest(string? Path, bool Zip = false, bool Merge = false);
 
     /// <summary>Where download links lead. The ticket is the authorization (see <see cref="DownloadLink"/>).</summary>
     [HttpGet("/api/snapshot-downloads")]
@@ -92,14 +100,16 @@ public class SnapshotsController : ControllerBase
         var grant = ticket is null ? null : _snapshots.ReadTicket(ticket);
         if (grant is null)
             return Task.FromResult<IActionResult>(StatusCode(StatusCodes.Status403Forbidden, new { message = "This download link has expired. Start the download again." }));
-        return DownloadAsync(grant.UserId, grant.FolderId, grant.SnapshotId, grant.Path, grant.Zip, ct);
+        return DownloadAsync(grant.UserId, grant.FolderId, grant.SnapshotId, grant.Path, grant.Zip, ct, grant.Merge);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private Task<IActionResult> DownloadAsync(int userId, int id, string snapshotId, string path, bool zip, CancellationToken ct) =>
+    private Task<IActionResult> DownloadAsync(int userId, int id, string snapshotId, string path, bool zip, CancellationToken ct, bool merge = false) =>
         WithFolderAsync(id, userId, snapshotId, async folder =>
         {
+            if (merge && folder.Kind is not (FolderKind.Contacts or FolderKind.Calendars))
+                return BadRequest(new { message = "Only a Contacts or Calendars folder's account or calendar downloads as one file." });
             var serverKey = () => _folderService.ServerKey(folder);
             var (browser, snapshot, node) = await _snapshots.ReadAsync(folder, serverKey, snapshotId, async b =>
             {
@@ -115,16 +125,20 @@ public class SnapshotsController : ControllerBase
             // A shared lock, so a prune does not delete the data while it is being sent.
             await using var repoLock = await browser.Repository.LockAsync(exclusive: false, $"download by user {userId} (web)", ct);
             var name = node.Name.Length > 0 ? node.Name : SafeFileName(folder.Name);
-            Response.ContentType = zip ? "application/zip" : "application/octet-stream";
+            var calendars = folder.Kind == FolderKind.Calendars;
+            // An account's or calendar's directory is "<name>~<id>": the file is named after the name.
+            var merged = merge ? $"{(name.LastIndexOf('~') is var tilde and > 0 ? name[..tilde] : name)}{(calendars ? ".ics" : ".vcf")}" : null;
+            Response.ContentType = merge ? calendars ? "text/calendar; charset=utf-8" : "text/vcard; charset=utf-8" : zip ? "application/zip" : "application/octet-stream";
             Response.Headers.ContentDisposition = new ContentDispositionHeaderValue("attachment")
             {
-                FileNameStar = zip ? $"{name}-{snapshot.Time.UtcDateTime:yyyyMMdd-HHmm}.zip" : name,
-                FileName = Ascii(zip ? $"{name}.zip" : name),
+                FileNameStar = merged ?? (zip ? $"{name}-{snapshot.Time.UtcDateTime:yyyyMMdd-HHmm}.zip" : name),
+                FileName = Ascii(merged ?? (zip ? $"{name}.zip" : name)),
             }.ToString();
             Response.Headers.CacheControl = "no-store";
             try
             {
-                if (zip)
+                if (merge) await CollectionMerge.WriteAsync(browser, node, calendars, Response.Body, ct);
+                else if (zip)
                 {
                     var lastRefresh = DateTime.UtcNow;
                     await browser.WriteZipAsync(node, Response.Body, async () =>

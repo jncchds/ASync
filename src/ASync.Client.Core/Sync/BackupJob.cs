@@ -76,6 +76,13 @@ public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid devi
             throw new SyncRefusedException(
                 "The photo library shows nothing of what this folder backs up now (were the photos deleted or moved, or ASync's access " +
                 "narrowed?). No snapshot was made: the last one keeps them. Restore it, or choose other albums.");
+        // The same for contacts and calendars (an account removed from the phone, a calendar wiped): the last snapshot keeps them.
+        if (tree is Collections.CollectionTree collection && parent is not null && collection.Counts() is { Items: 0 })
+            throw new SyncRefusedException(collection.Kind == FolderKind.Contacts
+                ? "The phone shows none of the contacts this folder backs up now (was the account removed, or the contacts deleted?). " +
+                  "No snapshot was made: the last one keeps them. Restore it, or choose other accounts."
+                : "The phone shows no events in the calendars this folder backs up now (was the calendar removed or emptied?). " +
+                  "No snapshot was made: the last one keeps them. Restore it, or choose other calendars.");
         var snapshot = await new BackupRunner(repository).RunAsync(tree, new BackupOptions
         {
             Source = Source,

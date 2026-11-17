@@ -115,6 +115,9 @@ public sealed class MainActivity : AvaloniaMainActivity
         AndroidStorage.Instance.NotifyChanged();
         // Back from the app's settings ("Allow all" photos, the location): the Photos screen and the cards look again.
         AndroidPhotoAccess.Instance.NotifyChanged();
+        // And from a contacts or calendar permission changed there (task 20).
+        AndroidCollectionAccess.Contacts.NotifyChanged();
+        AndroidCollectionAccess.Calendars.NotifyChanged();
     }
 
     public override void OnRequestPermissionsResult(int requestCode, string[] permissions, Permission[] grantResults)
@@ -122,6 +125,7 @@ public sealed class MainActivity : AvaloniaMainActivity
         base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == 2) AndroidStorage.Instance.NotifyChanged(); // the storage permission on Android 8–10
         if (requestCode == AndroidPhotoAccess.RequestCode) AndroidPhotoAccess.Instance.NotifyChanged(); // photos and videos (task 19)
+        AndroidCollectionAccess.OnResult(requestCode); // contacts and calendars (task 20)
     }
 
     /// <summary>A pairing link to fill in when the activity shows (from <see cref="LinkActivity"/>).</summary>

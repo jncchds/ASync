@@ -99,5 +99,12 @@
       <ContentControl Name="PhotosDialogHost" Content="{Binding PhotosDialog}" VerticalAlignment="Center" HorizontalAlignment="Stretch"
                       MaxWidth="560" Margin="12,24" />
     </Border>
+
+    <!-- A Contacts or Calendars folder: the permission, then what to back up. -->
+    <Border Grid.Row="0" Grid.RowSpan="4" Background="{DynamicResource Backdrop}"
+            IsVisible="{Binding CollectionsDialog, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <ContentControl Name="CollectionsDialogHost" Content="{Binding CollectionsDialog}" VerticalAlignment="Center" HorizontalAlignment="Stretch"
+                      MaxWidth="560" Margin="12,24" />
+    </Border>
   </Grid>
 </UserControl>

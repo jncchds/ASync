@@ -48,6 +48,8 @@
             <RadioButton GroupName="mode" Name="ModeMirror" Content="Mirror" IsChecked="{Binding IsMirror}" />
             <RadioButton GroupName="mode" Name="ModeBackup" Content="Backup" IsChecked="{Binding IsBackup}" />
             <RadioButton GroupName="mode" Name="ModePhotos" Content="Photos &amp; videos" IsChecked="{Binding IsPhotosMode}" IsVisible="{Binding OffersPhotos}" />
+            <RadioButton GroupName="mode" Name="ModeContacts" Content="Contacts" IsChecked="{Binding IsContactsMode}" IsVisible="{Binding OffersContacts}" />
+            <RadioButton GroupName="mode" Name="ModeCalendars" Content="Calendars" IsChecked="{Binding IsCalendarsMode}" IsVisible="{Binding OffersCalendars}" />
           </WrapPanel>
           <TextBlock Classes="muted small" Text="{Binding ModeHint}" TextWrapping="Wrap" />
         </StackPanel>
@@ -136,6 +138,10 @@
         <StackPanel Spacing="8" IsVisible="{Binding ForPhotos}">
           <TextBlock Name="MediaText" Text="{Binding MediaText}" TextWrapping="Wrap" />
           <Button Classes="secondary" Name="ChooseMedia" Content="Choose photos…" Command="{Binding ChoosePhotosCommand}" HorizontalAlignment="Left" />
+        </StackPanel>
+        <StackPanel Spacing="8" IsVisible="{Binding ForCollections}">
+          <TextBlock Name="CollectionsText" Text="{Binding CollectionsText}" TextWrapping="Wrap" />
+          <Button Classes="secondary" Name="ChooseCollections" Content="{Binding ChooseCollectionsText}" Command="{Binding ChooseCollectionsCommand}" HorizontalAlignment="Left" />
         </StackPanel>
       </StackPanel>
     </Border>

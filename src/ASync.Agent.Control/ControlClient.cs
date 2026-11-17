@@ -135,6 +135,22 @@ public sealed class ControlClient : IAsyncDisposable
     public async Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct = default) =>
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.RestoreMedia, FolderId = folderId, Snapshot = snapshot }, ct)).Message ?? "";
 
+    public async Task<CollectionListDto> CollectionListAsync(FolderKind kind, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.CollectionList, Kind = kind }, ct)).Collections
+        ?? throw new InvalidDataException("No list in the answer.");
+
+    public async Task<string> SetCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.SetCollections, FolderId = folderId, Collections = collections }, ct)).Message ?? "";
+
+    public async Task<FolderAddedDto> JoinCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct = default) =>
+        Added(await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.JoinFolder, FolderId = folderId, Collections = collections }, ct));
+
+    public async Task<List<MediaSnapshotDto>> CollectionSnapshotsAsync(int folderId, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.CollectionSnapshots, FolderId = folderId }, ct)).MediaSnapshots ?? [];
+
+    public async Task<string> RestoreCollectionsAsync(int folderId, string? snapshot, string? target, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.RestoreCollections, FolderId = folderId, Snapshot = snapshot, Target = target }, ct)).Message ?? "";
+
     private static FolderAddedDto Added(ControlResponse r) =>
         new(r.FolderId ?? throw new InvalidDataException("No folder in the answer."), r.Message ?? "", r.RecoveryKey);
 

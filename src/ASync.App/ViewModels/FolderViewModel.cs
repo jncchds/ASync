@@ -61,20 +61,66 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
     /// <summary>A request of this folder is running (sync now, pause, a new path).</summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SyncNowCommand), nameof(TogglePauseCommand), nameof(ChooseFolderCommand), nameof(ChooseSystemFolderCommand),
-        nameof(SwitchToRealPathCommand), nameof(SaveConditionsCommand), nameof(ChoosePhotosCommand), nameof(RestorePhotosCommand))]
+        nameof(SwitchToRealPathCommand), nameof(SaveConditionsCommand), nameof(ChoosePhotosCommand), nameof(RestorePhotosCommand),
+        nameof(ChooseCollectionsCommand))]
     public partial bool Working { get; private set; }
 
     public string PauseText => Paused ? "Resume" : "Pause";
 
-    public bool NeedsPath => !HasLocalPath && !IsPhotos;
+    public bool NeedsPath => !HasLocalPath && !IsPhotos && !IsCollection;
 
     /// <summary>The buttons of a folder on disk (open, change): not for a Photos folder, which has a selection instead.</summary>
-    public bool ShowFolderButtons => HasLocalPath && !IsPhotos;
+    public bool ShowFolderButtons => HasLocalPath && !IsPhotos && !IsCollection;
 
     /// <summary>Sync now / Back up now: a folder with a place on this device, or a Photos folder.</summary>
-    public bool CanRunHere => HasLocalPath || IsPhotos;
+    public bool CanRunHere => HasLocalPath || IsPhotos || IsCollection;
 
-    public string RunNowText => IsPhotos ? "Back up now" : "Sync now";
+    public string RunNowText => IsPhotos || IsCollection ? "Back up now" : "Sync now";
+
+    /// <summary>A Photos, Contacts or Calendars folder: restored by importing into the phone.</summary>
+    public bool CanImport => IsPhotos || IsCollection;
+
+    // ── Contacts and Calendars folders (task 20) ──────────────────────────────
+
+    /// <summary>A Contacts or Calendars folder: a selection of accounts or calendars instead of a local path.</summary>
+    [ObservableProperty] public partial bool IsCollection { get; private set; }
+
+    [ObservableProperty] public partial FolderKind Kind { get; private set; }
+
+    public string ChooseCollectionsText => Kind == FolderKind.Calendars ? "Calendars…" : "Contacts…";
+
+    public string RestoreButtonText => IsCollection ? $"Restore into the {CollectionTexts.Noun(Kind)}…" : "Restore into the library…";
+
+    public string RestoreQuestion => IsCollection ? "Restore which snapshot, and into which " + (Kind == FolderKind.Calendars ? "calendar?" : "account?")
+        : "Restore which snapshot into the library?";
+
+    public string RestoreHint => IsCollection
+        ? (Kind == FolderKind.Calendars ? "Events already in the calendar are skipped; nothing on the phone is changed or deleted."
+            : "Contacts already in the account are skipped; nothing on the phone is changed or deleted.")
+        : "Photos still on the phone are skipped. An older snapshot brings back what was deleted since.";
+
+    private ICollectionAccess? CollectionAccess => shell.Platform.CollectionAccess(Kind);
+
+    /// <summary>The Contacts or Calendars screen: the permission's explanation while it is missing, then everything or chosen ones.</summary>
+    [RelayCommand(CanExecute = nameof(CanChange))]
+    private async Task ChooseCollections()
+    {
+        var dialog = new CollectionsViewModel(shell, Kind, Name, _folder.Collections, async selection =>
+        {
+            Working = true;
+            try { return await shell.RunAsync((s, ct) => s.SetCollectionsAsync(Id, selection, ct)!); }
+            finally { Working = false; }
+        });
+        shell.CollectionsDialog = dialog;
+        await dialog.LoadAsync();
+    }
+
+    /// <summary>Where a restore imports to: the original accounts / calendars, or one of the phone's.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<RestoreTarget> RestoreTargets { get; } = [];
+
+    [ObservableProperty] public partial RestoreTarget? SelectedTarget { get; set; }
+
+    public bool ChoosesTarget => IsCollection && ChoosingRestore;
 
     // ── Photos folders (task 19) ──────────────────────────────────────────────
 
@@ -109,12 +155,14 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         await dialog.LoadAlbumsAsync();
     }
 
-    private bool CanRestorePhotos() => !Working && !RestoreRunning && IsPhotos && _folder.LastResult is not null;
+    private bool CanRestorePhotos() => !Working && !RestoreRunning && CanImport && (_folder.LastResult is not null || IsCollection);
 
     /// <summary>The snapshots to choose from (newest first), while <see cref="ChoosingRestore"/>.</summary>
     public System.Collections.ObjectModel.ObservableCollection<RestoreChoice> RestoreChoices { get; } = [];
 
-    [ObservableProperty] public partial bool ChoosingRestore { get; private set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ChoosesTarget))]
+    public partial bool ChoosingRestore { get; private set; }
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ConfirmRestoreCommand))]
@@ -128,7 +176,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         Working = true;
         try
         {
-            var snapshots = await session.MediaSnapshotsAsync(Id, CancellationToken.None);
+            var snapshots = IsCollection ? await session.CollectionSnapshotsAsync(Id, CancellationToken.None) : await session.MediaSnapshotsAsync(Id, CancellationToken.None);
             if (snapshots.Count == 0)
             {
                 shell.ShowMessage($"\"{Name}\" has no snapshots yet.");
@@ -138,6 +186,19 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             var now = shell.Time.GetUtcNow();
             foreach (var s in snapshots) RestoreChoices.Add(new RestoreChoice(s, now));
             SelectedRestore = RestoreChoices.FirstOrDefault(c => c.Snapshot.Mine) ?? RestoreChoices[0];
+            if (IsCollection)
+            {
+                RestoreTargets.Clear();
+                RestoreTargets.Add(new RestoreTarget(null, Kind == FolderKind.Calendars ? "The calendars they came from" : "The accounts they came from"));
+                try
+                {
+                    var list = await session.CollectionListAsync(Kind, CancellationToken.None);
+                    foreach (var c in list.Collections.Where(c => !c.ReadOnly))
+                        RestoreTargets.Add(new RestoreTarget(c.Id, c.Account is { Length: > 0 } a ? $"{c.Name} ({a})" : c.Name));
+                }
+                catch (Exception e) when (e is ControlException or IOException) { }
+                SelectedTarget = RestoreTargets[0];
+            }
             ChoosingRestore = true;
         }
         catch (Exception e) when (e is ControlException or IOException or InvalidDataException or ObjectDisposedException)
@@ -151,13 +212,42 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
     private async Task ConfirmRestore()
     {
         var chosen = SelectedRestore!.Snapshot.Id;
+        var target = SelectedTarget?.Id;
         ChoosingRestore = false;
         Working = true;
-        try { await shell.RunAsync((s, ct) => s.RestoreMediaAsync(Id, chosen, ct)!); }
+        try
+        {
+            if (IsCollection)
+            {
+                // Adding contacts or events is asked only now, for the restore.
+                if (CollectionAccess is { CanWrite: false } access && !await AskWriteAsync(access))
+                {
+                    shell.ShowMessage($"ASync may not add {CollectionTexts.Noun(Kind)}: allow it to restore (in the app's settings if the question no longer appears).", error: true);
+                    return;
+                }
+                await shell.RunAsync((s, ct) => s.RestoreCollectionsAsync(Id, chosen, target, ct)!);
+            }
+            else await shell.RunAsync((s, ct) => s.RestoreMediaAsync(Id, chosen, ct)!);
+        }
         finally { Working = false; }
     }
 
     private bool CanConfirmRestore() => SelectedRestore is not null;
+
+    /// <summary>Asks for the permission to add and waits for the answer (at most a minute).</summary>
+    private static async Task<bool> AskWriteAsync(ICollectionAccess access)
+    {
+        var answered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnChanged() => answered.TrySetResult();
+        access.Changed += OnChanged;
+        try
+        {
+            access.RequestWrite();
+            if (!access.CanWrite) await Task.WhenAny(answered.Task, Task.Delay(TimeSpan.FromMinutes(1)));
+            return access.CanWrite;
+        }
+        finally { access.Changed -= OnChanged; }
+    }
 
     [RelayCommand]
     private void CancelRestore() => ChoosingRestore = false;
@@ -174,8 +264,9 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         {
             // Progress and text first, the running flag last: whoever reacts to RestoreRunning sees the matching numbers.
             RestorePercent = restore.Total > 0 ? 100.0 * restore.Done / restore.Total : 0;
+            var into = IsCollection ? $"the {CollectionTexts.Noun(Kind)}" : "the photo library";
             RestoreText = restore.Running
-                ? $"Restoring snapshot {restore.Snapshot} into the photo library: {restore.Done} of {restore.Total} ({restore.Restored} restored, {restore.Skipped} already there)"
+                ? $"Restoring snapshot {restore.Snapshot} into {into}: {restore.Done} of {restore.Total} ({restore.Restored} restored, {restore.Skipped} already there)"
                 : $"Restore of snapshot {restore.Snapshot}: {restore.Message}";
             RestoreRunning = restore.Running;
         }
@@ -191,8 +282,12 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         ModeText = Format.Mode(f.Mode, f.Direction);
         IsEndToEnd = f.Encryption == FolderEncryption.EndToEnd;
         IsPhotos = f.Kind == FolderKind.Photos;
+        Kind = f.Kind;
+        IsCollection = f.Kind is FolderKind.Contacts or FolderKind.Calendars;
         MediaText = IsPhotos ? (f.Media ?? MediaSelectionDto.Everything).Describe() : null;
-        MediaCountsText = f.MediaCounts is { } counts ? $"{Format.MediaCounts(counts.Photos, counts.Videos)} · {Format.Bytes(counts.Bytes)}" : null;
+        MediaCountsText = f.MediaCounts is { } counts ? $"{Format.MediaCounts(counts.Photos, counts.Videos)} · {Format.Bytes(counts.Bytes)}"
+            : IsCollection && f.CollectionCounts is { } items ? $"{CollectionTexts.Counts(f.Kind, items.Items, items.Collections)} · {Format.Bytes(items.Bytes)}"
+            : null;
         PhotoAccessText = !IsPhotos ? null : PhotoAccess switch
         {
             MediaAccess.None => "ASync may not read the photos yet: open Photos… to allow it.",
@@ -200,7 +295,15 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             MediaAccess.Unsupported => $"This {shell.Platform.DeviceNoun} has no photo library: Photos folders are backed up by phones.",
             _ => null,
         };
+        if (IsCollection)
+            PhotoAccessText = (CollectionAccess?.Access ?? MediaAccess.Unsupported) switch
+            {
+                MediaAccess.None => $"ASync may not read the {CollectionTexts.Noun(f.Kind)} yet: open {ChooseCollectionsText} to allow it.",
+                MediaAccess.Unsupported => $"This {shell.Platform.DeviceNoun} has no {CollectionTexts.Noun(f.Kind)}: {f.Kind} folders are backed up by phones.",
+                _ => null,
+            };
         LocalPath = IsPhotos ? $"Photo library: {MediaText}"
+            : IsCollection ? (f.Collections ?? CollectionSelectionDto.Everything).Describe(f.Kind)
             : f.LocalPath is { Length: > 0 } path ? shell.Platform.DisplayPath(path) : $"No folder on this {shell.Platform.DeviceNoun} yet";
         HasLocalPath = f.LocalPath is { Length: > 0 };
         Paused = f.Paused;
@@ -245,7 +348,9 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             { NeedsSetup: true } => new Pill("Not set up", PillKind.Warning),
             { Locked: true } => new Pill("Locked", PillKind.Warning),
             { Kind: FolderKind.Photos } when PhotoAccess is MediaAccess.None or MediaAccess.Unsupported => new Pill("No access", PillKind.Warning),
-            { Kind: not FolderKind.Photos, LocalPath.Length: 0 } => new Pill("No local folder", PillKind.Warning),
+            { Kind: FolderKind.Contacts or FolderKind.Calendars } when (CollectionAccess?.Access ?? MediaAccess.Unsupported) is MediaAccess.None or MediaAccess.Unsupported
+                => new Pill("No access", PillKind.Warning),
+            { Kind: FolderKind.Files, LocalPath.Length: 0 } => new Pill("No local folder", PillKind.Warning),
             { LastResult: { Ok: false, Skipped: false } } => new Pill("Failed", PillKind.Danger),
             { Alerts: [{ Kind: AlertKind.Failing or AlertKind.CheckFailed or AlertKind.PruneFailed }, ..] } => new Pill("Problem", PillKind.Danger),
             { Alerts: [{ Kind: AlertKind.Overdue }, ..] } => new Pill("Overdue", PillKind.Warning),
@@ -260,6 +365,11 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         OnPropertyChanged(nameof(ShowFolderButtons));
         OnPropertyChanged(nameof(CanRunHere));
         OnPropertyChanged(nameof(RunNowText));
+        OnPropertyChanged(nameof(CanImport));
+        OnPropertyChanged(nameof(ChooseCollectionsText));
+        OnPropertyChanged(nameof(RestoreButtonText));
+        OnPropertyChanged(nameof(RestoreQuestion));
+        OnPropertyChanged(nameof(RestoreHint));
         RestorePhotosCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ChooseFolderText));
         RefreshStorage();
@@ -278,7 +388,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             { Paused: true } => "Paused",
             { NeedsSetup: true } => "Waits for its encryption to be set up",
             { Locked: true } => "Waits to be unlocked",
-            { Kind: not FolderKind.Photos, LocalPath.Length: 0 } => "Waits for a local folder",
+            { Kind: FolderKind.Files, LocalPath.Length: 0 } => "Waits for a local folder",
             { Waiting: { } waiting } => waiting,
             { NextRunAt: { } next } => $"Next run {Format.In(next, now)}",
             _ => $"Every {_folder.IntervalMinutes} min",
@@ -432,6 +542,12 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         }
         finally { Working = false; }
     }
+}
+
+/// <summary>Where a Contacts or Calendars restore imports to: <paramref name="Id"/> null = each into the one it came from.</summary>
+public sealed record RestoreTarget(string? Id, string Label)
+{
+    public override string ToString() => Label;
 }
 
 /// <summary>A snapshot in the restore's choice: "Today 06:53 · Pixel 8 · 22 files".</summary>

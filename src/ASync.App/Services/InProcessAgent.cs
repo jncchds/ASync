@@ -113,6 +113,14 @@ public sealed class InProcessAgentConnector(IControlHandler agent, ControlEventH
             Call(() => agent.JoinPhotosAsync(folderId, media ?? throw new ControlException("\"join-folder\" needs media."), ct), ct);
         public Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) => Call(() => agent.RestoreMediaAsync(folderId, snapshot, ct), ct);
         public Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct) => Call(() => agent.MediaSnapshotsAsync(folderId, ct), ct);
+        public Task<CollectionListDto> CollectionListAsync(FolderKind kind, CancellationToken ct) => Call(() => agent.CollectionListAsync(kind, ct), ct);
+        public Task<string> SetCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct) =>
+            Call(() => agent.SetCollectionsAsync(folderId, collections ?? throw new ControlException("\"set-collections\" needs collections."), ct), ct);
+        public Task<FolderAddedDto> JoinCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct) =>
+            Call(() => agent.JoinCollectionsAsync(folderId, collections ?? throw new ControlException("\"join-folder\" needs collections."), ct), ct);
+        public Task<List<MediaSnapshotDto>> CollectionSnapshotsAsync(int folderId, CancellationToken ct) => Call(() => agent.CollectionSnapshotsAsync(folderId, ct), ct);
+        public Task<string> RestoreCollectionsAsync(int folderId, string? snapshot, string? target, CancellationToken ct) =>
+            Call(() => agent.RestoreCollectionsAsync(folderId, snapshot, target, ct), ct);
 
         public ValueTask DisposeAsync()
         {

@@ -159,6 +159,9 @@ public sealed class AndroidPlatform(Func<MainActivity?> activity) : IPlatformSer
 
     public IPhotoAccess? Photos => AndroidPhotoAccess.Instance;
 
+    public ICollectionAccess? Contacts => AndroidCollectionAccess.Contacts;
+    public ICollectionAccess? Calendars => AndroidCollectionAccess.Calendars;
+
     public bool SupportsStartAtLogin => false;
     public bool IsStartAtLoginEnabled() => false;
     public void SetStartAtLogin(bool enabled) { }

@@ -83,8 +83,10 @@ public sealed record BrowseReply(BrowseListing? Listing = null, DeviceBrowseRefu
 /// <c>ReportBrowse</c>). <paramref name="Allowed"/>: the device's setting; <paramref name="NeedsAllFilesAccess"/>: a phone
 /// that could browse once All files access is on. <paramref name="Media"/> (task 19): what the device can read of its photo
 /// library (null: an agent from before, or none); its albums are listed under the same <paramref name="Allowed"/>.
+/// <paramref name="Contacts"/> and <paramref name="Calendars"/> (task 20): the same for its address book and calendars.
 /// </summary>
-public sealed record DeviceBrowseState(bool Allowed, bool NeedsAllFilesAccess = false, MediaAccess? Media = null);
+public sealed record DeviceBrowseState(bool Allowed, bool NeedsAllFilesAccess = false, MediaAccess? Media = null,
+    MediaAccess? Contacts = null, MediaAccess? Calendars = null);
 
 /// <summary>Whether the web UI can browse a device's folders now, and if not, why.</summary>
 public enum BrowseAvailability

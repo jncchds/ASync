@@ -26,6 +26,13 @@
   <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
   <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
   <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+  <!-- Contacts and Calendars folders (task 20): reading to back up; writing asked only when a restore imports a snapshot. -->
+  <uses-permission android:name="android.permission.READ_CONTACTS" />
+  <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+  <uses-permission android:name="android.permission.READ_CALENDAR" />
+  <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+  <!-- The Google accounts on the phone, which take restored contacts even while they hold none. -->
+  <uses-permission android:name="android.permission.GET_ACCOUNTS" android:maxSdkVersion="22" />
   <!-- Android 11+ package visibility: find installed UnifiedPush distributors (ntfy, …). -->
   <queries>
     <intent>

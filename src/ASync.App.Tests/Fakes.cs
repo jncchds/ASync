@@ -163,6 +163,38 @@ internal sealed class FakeAgent : IAgentConnector, IAgentSession
     public Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) =>
         Answer($"restore-media {folderId} {snapshot ?? "newest"}", "Restoring…");
 
+    // ── Contacts and calendars (task 20) ──────────────────────────────────────
+
+    public CollectionListDto Contacts { get; set; } = new(FolderKind.Contacts, MediaAccess.Full,
+        [new CollectionDto("com.google:alice@gmail.com", "alice@gmail.com", 300, "Google"), new CollectionDto("local", "Phone", 12, "Phone"),
+         new CollectionDto("sim", "SIM", 3, "SIM")], 315, CanWrite: false);
+
+    public CollectionListDto Calendars { get; set; } = new(FolderKind.Calendars, MediaAccess.Full,
+        [new CollectionDto("4", "Work", 120, "alice@gmail.com", "#3366cc"), new CollectionDto("5", "Family", 40, "alice@gmail.com", "#33aa55"),
+         new CollectionDto("6", "Holidays in Ukraine", 30, "alice@gmail.com", "#aa3355", ReadOnly: true)], 190, CanWrite: false);
+
+    public CollectionSelectionDto? LastCollections { get; private set; }
+
+    public Task<CollectionListDto> CollectionListAsync(FolderKind kind, CancellationToken ct) =>
+        Answer($"collection-list {kind}", kind == FolderKind.Contacts ? Contacts : Calendars);
+
+    public Task<string> SetCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct)
+    {
+        LastCollections = collections;
+        return Answer($"set-collections {folderId}", "saved");
+    }
+
+    public Task<FolderAddedDto> JoinCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct)
+    {
+        LastCollections = collections;
+        return Answer($"join-collections {folderId}", new FolderAddedDto(folderId, "joined"));
+    }
+
+    public Task<List<MediaSnapshotDto>> CollectionSnapshotsAsync(int folderId, CancellationToken ct) => Answer($"collection-snapshots {folderId}", MediaSnapshots);
+
+    public Task<string> RestoreCollectionsAsync(int folderId, string? snapshot, string? target, CancellationToken ct) =>
+        Answer($"restore-collections {folderId} {snapshot ?? "newest"} {target ?? "original"}", "Restoring…");
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
@@ -181,6 +213,34 @@ internal sealed class FakePhotos : IPhotoAccess
         Calls.Add("request");
         Access = Grants;
         HasLocation = Grants == MediaAccess.Full;
+        Changed?.Invoke();
+    }
+
+    public void OpenSettings() => Calls.Add("settings");
+}
+
+/// <summary>A phone's contacts or calendar permission: <see cref="RequestRead"/> and <see cref="RequestWrite"/> grant and say so.</summary>
+internal sealed class FakeCollectionAccess(FolderKind kind) : ICollectionAccess
+{
+    public CallLog<string> Calls { get; } = new();
+    public FolderKind Kind { get; } = kind;
+    public MediaAccess Access { get; set; } = MediaAccess.None;
+    public bool CanWrite { get; set; }
+    /// <summary>Whether <see cref="RequestWrite"/> grants (false: the person refuses).</summary>
+    public bool GrantsWrite { get; set; } = true;
+    public event Action? Changed;
+
+    public void RequestRead()
+    {
+        Calls.Add("read");
+        Access = MediaAccess.Full;
+        Changed?.Invoke();
+    }
+
+    public void RequestWrite()
+    {
+        Calls.Add("write");
+        CanWrite = GrantsWrite;
         Changed?.Invoke();
     }
 
@@ -267,6 +327,12 @@ internal sealed class FakePlatform : IPlatformServices
     /// <summary>Set for a phone with a photo library (task 19).</summary>
     public FakePhotos? PhotoAccess { get; set; }
     public IPhotoAccess? Photos => PhotoAccess;
+
+    /// <summary>Set for a phone with contacts and calendars (task 20).</summary>
+    public FakeCollectionAccess? ContactsAccess { get; set; }
+    public FakeCollectionAccess? CalendarsAccess { get; set; }
+    public ICollectionAccess? Contacts => ContactsAccess;
+    public ICollectionAccess? Calendars => CalendarsAccess;
 }
 
 /// <summary>A phone's shared storage: volumes are directories of a test's temporary directory.</summary>
@@ -327,6 +393,14 @@ internal static class Statuses
     {
         FolderId = id, Name = name, Mode = SyncMode.Backup, Encryption = FolderEncryption.Transport, Kind = FolderKind.Photos, LocalPath = "",
         Media = media ?? MediaSelectionDto.Everything, MediaCounts = counts, IntervalMinutes = 60, Activity = FolderActivity.Idle,
+        NextRunAt = DateTimeOffset.UtcNow.AddMinutes(30),
+    };
+
+    public static FolderStatusDto Collection(FolderKind kind, int id = 5, string? name = null, CollectionSelectionDto? selection = null,
+        CollectionCountsDto? counts = null) => new()
+    {
+        FolderId = id, Name = name ?? kind.ToString(), Mode = SyncMode.Backup, Encryption = FolderEncryption.Transport, Kind = kind, LocalPath = "",
+        Collections = selection ?? CollectionSelectionDto.Everything, CollectionCounts = counts, IntervalMinutes = 60, Activity = FolderActivity.Idle,
         NextRunAt = DateTimeOffset.UtcNow.AddMinutes(30),
     };
 

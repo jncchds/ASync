@@ -58,15 +58,24 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
   const chooseMode = (m: SyncMode) => {
     setMode(m)
     if (m !== 'Backup') { setEncryption('Transport'); setKind('Files') }
-    else if (kind === 'Photos') setKind('Files')
+    else if (kind !== 'Files') setKind('Files')
+  }
+
+  /** "Contacts" / "Calendars" (task 20): a Backup folder of a phone's address book or calendars. */
+  const chooseCollections = (k: 'Contacts' | 'Calendars') => {
+    setMode('Backup')
+    setKind(k)
+    const defaults = ['', 'Photos', 'Contacts', 'Calendars']
+    if (defaults.includes(name.trim())) setName(k)
+    if (['', 'photos', 'contacts', 'calendars'].includes(rootPath.trim())) setRootPath(k.toLowerCase())
   }
 
   /** "Photos & videos": a Backup folder of a phone's photo library. */
   const choosePhotos = () => {
     setMode('Backup')
     setKind('Photos')
-    if (!name.trim()) setName('Photos')
-    if (!rootPath.trim()) setRootPath('photos')
+    if (['', 'Contacts', 'Calendars'].includes(name.trim())) setName('Photos')
+    if (['', 'contacts', 'calendars'].includes(rootPath.trim())) setRootPath('photos')
   }
 
   const save = async (e: React.FormEvent) => {
@@ -103,7 +112,7 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
       {!fixed && (
         <div className="type-picker">
           {MODES.map(m => (
-            <button type="button" key={m.mode} className={`type-option${m.mode === mode && kind !== 'Photos' ? ' selected' : ''}`}
+            <button type="button" key={m.mode} className={`type-option${m.mode === mode && kind === 'Files' ? ' selected' : ''}`}
               onClick={() => chooseMode(m.mode)}>
               <strong>{m.label}</strong>
               <span className="muted">{m.blurb}</span>
@@ -112,6 +121,14 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
           <button type="button" className={`type-option${kind === 'Photos' ? ' selected' : ''}`} onClick={choosePhotos}>
             <strong>Photos &amp; videos</strong>
             <span className="muted">A phone's photo library, all of it or chosen albums, as snapshots</span>
+          </button>
+          <button type="button" className={`type-option${kind === 'Contacts' ? ' selected' : ''}`} onClick={() => chooseCollections('Contacts')}>
+            <strong>Contacts</strong>
+            <span className="muted">A phone's contacts, all accounts or chosen ones, as vCards</span>
+          </button>
+          <button type="button" className={`type-option${kind === 'Calendars' ? ' selected' : ''}`} onClick={() => chooseCollections('Calendars')}>
+            <strong>Calendars</strong>
+            <span className="muted">A phone's calendars, all or chosen ones, as iCalendar events</span>
           </button>
         </div>
       )}
@@ -161,6 +178,14 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
           Phones back up their photo library into this folder: after creating it, add each phone and choose all photos and videos
           or some albums. Several phones can share it; each keeps its own snapshots. Originals are stored as they are, beside a
           small file of their details, in year and month directories.
+        </p>
+      )}
+      {!fixed && (kind === 'Contacts' || kind === 'Calendars') && (
+        <p className="hint">
+          Phones back up their {kind === 'Contacts' ? 'contacts' : 'calendars'} into this folder: after creating it, add each phone and
+          choose {kind === 'Contacts' ? 'all accounts or some (Google, the phone, the SIM…)' : 'all calendars or some, and how far back'}.
+          {kind === 'Contacts' ? ' Each contact is a vCard file with its photo, by account.' : ' Each event is an iCalendar file, by calendar.'} A
+          restore imports them on the phone; the files can also be downloaded and imported anywhere.
         </p>
       )}
       {!fixed && mode === 'Backup' && encryption === 'EndToEnd' && (

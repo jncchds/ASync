@@ -398,6 +398,9 @@ export interface FolderDevice {
   media?: MediaSelection | null
   /** Photos folders: what the device's last backup holds. */
   mediaCounts?: MediaCounts | null
+  /** Contacts and Calendars folders: which accounts or calendars the device backs up, and what its last backup holds. */
+  collections?: CollectionSelection | null
+  collectionCounts?: CollectionCounts | null
 }
 
 // ── Photos and videos (task 19) ───────────────────────────────────────────────
@@ -434,6 +437,62 @@ export interface DeviceAlbums {
 }
 
 export const getDeviceAlbums = (id: string) => api.get<DeviceAlbums>(`/devices/${id}/albums`).then(r => r.data)
+
+// ── Contacts and calendars (task 20) ──────────────────────────────────────────
+
+export interface CollectionRef { id: string; name: string }
+
+/** Every account / calendar, or chosen ones; calendars also how far back (pastDays null = all events). */
+export interface CollectionSelection {
+  all: boolean
+  collections: CollectionRef[] | null
+  pastDays: number | null
+}
+
+export const DEFAULT_PAST_DAYS = 730
+
+export const ALL_COLLECTIONS: CollectionSelection = { all: true, collections: [], pastDays: DEFAULT_PAST_DAYS }
+
+export interface CollectionCounts { items: number; collections: number; bytes: number }
+
+/** A contact account (account = its type, "Google") or a calendar (account = its account, color #rrggbb). */
+export interface Collection { id: string; name: string; count: number; account: string | null; color: string | null; readOnly: boolean }
+
+export interface DeviceCollections {
+  live: boolean
+  collections: Collection[]
+  access: MediaAccess | null
+  reportedAt: string | null
+  message: string | null
+  items: number
+}
+
+export const getDeviceCollections = (id: string, kind: 'Contacts' | 'Calendars') =>
+  api.get<DeviceCollections>(`/devices/${id}/collections`, { params: { kind } }).then(r => r.data)
+
+/** "events of the last 2 years" (as the server's DescribePast). */
+export function describePast(days: number | null): string {
+  if (days === null) return 'all events'
+  const unit = (n: number, one: string) => n === 1 ? one : `${n} ${one}s`
+  if (days % 365 === 0) return `events of the last ${unit(days / 365, 'year')}`
+  if (days % 30 === 0) return `events of the last ${unit(days / 30, 'month')}`
+  return `events of the last ${days} days`
+}
+
+/** "All contacts", "2 calendars: Work, Family · events of the last 2 years" (as the server's Describe). */
+export function describeCollections(kind: FolderKind, s: CollectionSelection): string {
+  const list = s.collections ?? []
+  const noun = kind === 'Contacts' ? 'account' : 'calendar'
+  const what = s.all ? (kind === 'Contacts' ? 'All contacts' : 'All calendars')
+    : `${list.length} ${noun}${list.length === 1 ? '' : 's'}: ${list.map(c => c.name).join(', ')}`
+  return kind === 'Calendars' ? `${what} · ${describePast(s.pastDays)}` : what
+}
+
+/** "312 contacts in 2 accounts", "1,840 events in 3 calendars". */
+export function collectionCountText(kind: FolderKind, c: CollectionCounts): string {
+  const n = (v: number, one: string) => `${v.toLocaleString()} ${one}${v === 1 ? '' : 's'}`
+  return kind === 'Contacts' ? `${n(c.items, 'contact')} in ${n(c.collections, 'account')}` : `${n(c.items, 'event')} in ${n(c.collections, 'calendar')}`
+}
 
 /** "All photos and videos", "2 albums: Camera, Holidays · since 2024-01-01 · no screenshots" (as the server's Describe). */
 export function describeMedia(m: MediaSelection): string {
@@ -585,6 +644,8 @@ export interface AttachDevice {
   conditions?: RunConditions
   /** Photos folders: the selection instead of a local path. */
   media?: MediaSelection
+  /** Contacts and Calendars folders: the selection instead of a local path. */
+  collections?: CollectionSelection
 }
 
 export const getFolders = () => api.get<Folder[]>('/folders').then(r => r.data)
@@ -641,8 +702,8 @@ export const getSnapshotTree = (folderId: number, snapshotId: string, path: stri
  * Starts a browser download of a file (or a directory as a ZIP). The server hands out a link valid for a few
  * minutes, so the browser streams the download to disk instead of it being buffered here.
  */
-export async function downloadFromSnapshot(folderId: number, snapshotId: string, path: string, zip: boolean) {
-  const { data } = await api.post<{ url: string; expiresAt: string }>(`/folders/${folderId}/snapshots/${snapshotId}/download-link`, { path, zip })
+export async function downloadFromSnapshot(folderId: number, snapshotId: string, path: string, zip: boolean, merge = false) {
+  const { data } = await api.post<{ url: string; expiresAt: string }>(`/folders/${folderId}/snapshots/${snapshotId}/download-link`, { path, zip, merge })
   const a = document.createElement('a')
   a.href = data.url
   a.rel = 'noopener'

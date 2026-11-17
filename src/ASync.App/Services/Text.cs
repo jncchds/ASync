@@ -53,6 +53,9 @@ public static class Format
         $"{photos.ToString("N0", CultureInfo.CurrentCulture)} photo{(photos == 1 ? "" : "s")}" +
         (videos > 0 ? $", {videos.ToString("N0", CultureInfo.CurrentCulture)} video{(videos == 1 ? "" : "s")}" : "");
 
+    /// <summary>"1 contact", "1,204 events".</summary>
+    public static string Count(int n, string noun) => $"{n.ToString("N0", CultureInfo.CurrentCulture)} {noun}{(n == 1 ? "" : "s")}";
+
     /// <summary>"just now", "5 min ago", "3 h ago", "2 days ago".</summary>
     public static string Ago(DateTimeOffset at, DateTimeOffset now)
     {

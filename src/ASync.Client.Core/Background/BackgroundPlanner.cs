@@ -27,11 +27,14 @@ public static class BackgroundPlanner
     public const int MinimumIntervalMinutes = 15;
 
     /// <summary>Whether a folder has something to run on this device: a local folder, or (Photos) the photo library.</summary>
-    public static bool HasPlace(DeviceFolderDto f) => f.LocalPath.Length > 0 || f.Kind == FolderKind.Photos;
+    public static bool HasPlace(DeviceFolderDto f) => f.LocalPath.Length > 0 || f.Kind is FolderKind.Photos or FolderKind.Contacts or FolderKind.Calendars;
 
     /// <summary>The Photos folders that new photos and videos start (the media content trigger, task 19).</summary>
-    public static IReadOnlyList<int> PhotoFolders(IEnumerable<DeviceFolderDto> folders) =>
-        [.. folders.Where(f => !f.Paused && f.Kind == FolderKind.Photos).Select(f => f.FolderId).Order()];
+    public static IReadOnlyList<int> PhotoFolders(IEnumerable<DeviceFolderDto> folders) => FoldersOfKind(folders, FolderKind.Photos);
+
+    /// <summary>The unpaused folders of a kind (the contacts and calendar content triggers, task 20).</summary>
+    public static IReadOnlyList<int> FoldersOfKind(IEnumerable<DeviceFolderDto> folders, FolderKind kind) =>
+        [.. folders.Where(f => !f.Paused && f.Kind == kind).Select(f => f.FolderId).Order()];
 
     /// <summary>
     /// The folders to schedule: every unpaused folder with a local folder chosen (or a Photos folder), at <c>max(interval, 15 min)</c>.

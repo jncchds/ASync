@@ -202,6 +202,9 @@ public sealed class AsyncApiClient : IDisposable
     public Task ReportAlbumsAsync(ReportAlbumsRequest report, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Put, "api/sync/media/albums", report, ct);
 
+    public Task ReportCollectionsAsync(ReportCollectionsRequest report, CancellationToken ct = default) =>
+        SendAsync(HttpMethod.Put, "api/sync/collections", report, ct);
+
     public Task NotifyChangedAsync(int folderId, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Post, $"api/sync/folders/{folderId}/changed", null, ct);
 

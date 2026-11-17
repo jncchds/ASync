@@ -135,6 +135,7 @@ internal static class BackgroundWork
         var scheduled = BackgroundState.Load(_context).Scheduled;
         var changes = BackgroundPlanner.Diff(new Dictionary<int, string>(scheduled), plan);
         EnsureMediaTrigger();
+        EnsureCollectionTriggers();
         if (changes.IsEmpty) return;
         foreach (var folder in changes.Schedule) Schedule(folder);
         foreach (var id in changes.Cancel)
@@ -220,6 +221,34 @@ internal static class BackgroundWork
                 return;
             }
             Work.EnqueueUniqueWork(MediaTriggerWorker.Name, next ? ExistingWorkPolicy.AppendOrReplace! : ExistingWorkPolicy.Keep!, MediaTriggerWorker.Build());
+        });
+    }
+
+    /// <summary>The contacts and calendar content triggers (<see cref="CollectionTriggerWorker"/>, task 20).</summary>
+    public static void EnsureCollectionTriggers()
+    {
+        EnsureCollectionTrigger(FolderKind.Contacts);
+        EnsureCollectionTrigger(FolderKind.Calendars);
+    }
+
+    /// <summary>
+    /// One kind's trigger while there are folders of it and ASync may read it; cancelled otherwise. <paramref name="next"/>: the trigger
+    /// fired and schedules the next one (appended after itself).
+    /// </summary>
+    public static void EnsureCollectionTrigger(FolderKind kind, bool next = false)
+    {
+        if (_runtime is null || !_runtime.FoldersLoaded) return;
+        Safely(() =>
+        {
+            var folders = BackgroundPlanner.FoldersOfKind(_runtime.Folders.Select(f => f.Folder), kind);
+            var access = kind == FolderKind.Contacts ? AndroidCollectionAccess.Contacts : AndroidCollectionAccess.Calendars;
+            var name = CollectionTriggerWorker.Name(kind);
+            if (folders.Count == 0 || access.Access == MediaAccess.None)
+            {
+                if (!next) Work.CancelUniqueWork(name);
+                return;
+            }
+            Work.EnqueueUniqueWork(name, next ? ExistingWorkPolicy.AppendOrReplace! : ExistingWorkPolicy.Keep!, CollectionTriggerWorker.Build(kind));
         });
     }
 

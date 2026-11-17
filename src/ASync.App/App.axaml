@@ -61,6 +61,7 @@
     <DataTemplate DataType="vm:LocalFolderViewModel"><views:LocalFolderView /></DataTemplate>
     <DataTemplate DataType="vm:AddFolderViewModel"><views:AddFolderView /></DataTemplate>
     <DataTemplate DataType="vm:PhotosViewModel"><views:PhotosView /></DataTemplate>
+    <DataTemplate DataType="vm:CollectionsViewModel"><views:CollectionsView /></DataTemplate>
     <DataTemplate DataType="vm:ConnectingViewModel">
       <StackPanel Margin="24,64" Spacing="8" HorizontalAlignment="Center" MaxWidth="420">
         <ProgressBar IsIndeterminate="True" Width="160" HorizontalAlignment="Center" Margin="0,0,0,12" />

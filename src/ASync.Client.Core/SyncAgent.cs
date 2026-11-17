@@ -19,7 +19,7 @@ namespace ASync.Client.Core;
 /// they changed moments ago (<see cref="Sync.SyncOptions.SettleTime"/>).
 /// </summary>
 public sealed record FolderRunResult(int FolderId, string Name, bool Ok, string Message, bool Skipped = false, int Conflicts = 0,
-    bool Deferred = false, int Unsettled = 0, MediaCountsDto? Media = null);
+    bool Deferred = false, int Unsettled = 0, MediaCountsDto? Media = null, CollectionCountsDto? Collections = null);
 
 /// <summary>The agent's link to the server, for status displays.</summary>
 public enum AgentConnection { Connecting, Connected, Reconnecting, Offline, Revoked }
@@ -204,14 +204,72 @@ public sealed class SyncAgent : IAsyncDisposable
     /// <summary>Which library the sidecars name ("android-mediastore").</summary>
     public string MediaSource { get; init; } = "";
 
-    /// <summary>The browsing state with what the device can read of its photo library.</summary>
-    private DeviceBrowseState BrowseState(Browse.DeviceBrowser browser)
+    /// <summary>The device's address book (task 20): what its Contacts folders back up. Null: none (computers, the CLI agent).</summary>
+    public Collections.IContactsSource? Contacts { get; init; }
+
+    /// <summary>The device's calendars (task 20): what its Calendars folders back up. Null: none.</summary>
+    public Collections.ICalendarSource? Calendars { get; init; }
+
+    /// <summary>Which providers account.json and calendar.json name ("android-contacts", "android-calendar").</summary>
+    public string ContactsSource { get; init; } = "";
+    public string CalendarsSource { get; init; } = "";
+
+    /// <summary>The clock "events since" counts back from (tests set it).</summary>
+    public TimeProvider Clock { get; init; } = TimeProvider.System;
+
+    private static MediaAccess AccessOf(Func<MediaAccess>? read)
     {
-        MediaAccess access;
-        try { access = Media?.Access ?? MediaAccess.Unsupported; }
-        catch (Exception e) when (e is not OperationCanceledException) { access = MediaAccess.None; }
-        return browser.State with { Media = access };
+        try { return read?.Invoke() ?? MediaAccess.Unsupported; }
+        catch (Exception e) when (e is not OperationCanceledException) { return MediaAccess.None; }
     }
+
+    /// <summary>The browsing state with what the device can read of its photo library, contacts and calendars.</summary>
+    private DeviceBrowseState BrowseState(Browse.DeviceBrowser browser) => browser.State with
+    {
+        Media = AccessOf(Media is { } m ? () => m.Access : null),
+        Contacts = AccessOf(Contacts is { } c ? () => c.Access : null),
+        Calendars = AccessOf(Calendars is { } k ? () => k.Access : null),
+    };
+
+    /// <summary>The contact accounts or calendars for the web UI (the hub's "collections" client result), under the browsing setting.</summary>
+    public CollectionsReply ListCollections(CollectionsRequest request)
+    {
+        var contacts = request.Kind == FolderKind.Contacts;
+        if (Browser is not { } browser || !browser.State.Allowed)
+            return new CollectionsReply(Refusal: DeviceBrowseRefusal.TurnedOff, Message: "Browsing from the web is turned off on this device.");
+        if (request.Kind is not (FolderKind.Contacts or FolderKind.Calendars) || (contacts ? Contacts : (object?)Calendars) is null)
+            return new CollectionsReply(Access: MediaAccess.Unsupported, Refusal: DeviceBrowseRefusal.Failed,
+                Message: contacts ? "This device has no contacts ASync can read." : "This device has no calendars ASync can read.");
+        try
+        {
+            var access = contacts ? Contacts!.Access : Calendars!.Access;
+            if (access is MediaAccess.None or MediaAccess.Unsupported)
+                return new CollectionsReply(Access: access, Refusal: DeviceBrowseRefusal.Unreadable,
+                    Message: contacts ? "ASync may not read the contacts on this phone yet: allow it in the app."
+                        : "ASync may not read the calendars on this phone yet: allow it in the app.");
+            var list = contacts
+                ? Contacts!.Accounts().Select(a => new CollectionDto(a.Id, a.Name, a.Contacts, a.TypeLabel, null, a.ReadOnly)).ToList()
+                : Calendars!.Calendars().Select(c => new CollectionDto(c.Id, c.Name, c.Events, c.AccountName, c.Color, c.ReadOnly)).ToList();
+            return new CollectionsReply(
+                [.. list.OrderBy(c => c.Account ?? "", StringComparer.CurrentCultureIgnoreCase).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .Take(Math.Clamp(request.Max, 1, CollectionLimits.MaxCollections))],
+                access, list.Sum(c => c.Count));
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return new CollectionsReply(Refusal: DeviceBrowseRefusal.Failed, Message: $"Could not list them: {e.Message}");
+        }
+    }
+
+    /// <summary>The tree a Contacts or Calendars folder backs up on this device.</summary>
+    private Collections.CollectionTree CollectionTreeFor(DeviceFolderDto folder) => folder.Kind == FolderKind.Contacts
+        ? Collections.CollectionTree.Contacts(
+            Contacts ?? throw new SyncRefusedException("This device has no contacts ASync can back up: Contacts folders are for phones."),
+            folder.Collections, ContactsSource,
+            new Collections.GeneratedSizeCache(Path.Combine(_store.StateDirectory(folder.FolderId), Collections.GeneratedSizeCache.FileName("contacts"))))
+        : Collections.CollectionTree.Calendars(
+            Calendars ?? throw new SyncRefusedException("This device has no calendars ASync can back up: Calendars folders are for phones."),
+            folder.Collections, Clock.GetUtcNow().ToUnixTimeMilliseconds(), CalendarsSource);
 
     /// <summary>The albums for the web UI (the hub's "albums" client result): under the browsing setting, with what the permissions allow.</summary>
     public MediaAlbumsReply ListAlbums(MediaAlbumsRequest request)
@@ -310,21 +368,30 @@ public sealed class SyncAgent : IAsyncDisposable
                     ? new MediaTree(Media ?? throw new SyncRefusedException("This device has no photo library ASync can back up: Photos folders are for phones."),
                         folder.Media, MediaSource)
                     : null;
+                var collection = folder.Kind is FolderKind.Contacts or FolderKind.Calendars ? CollectionTreeFor(folder) : null;
                 var repo = await RepositoryAccess.OpenAsync(_api, _store, folder, backend, ct);
                 var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName,
-                    (ILocalTree?)photos ?? LocalTrees.Open(folder.LocalPath)).RunAsync(progress, ct);
+                    (ILocalTree?)photos ?? (ILocalTree?)collection ?? LocalTrees.Open(folder.LocalPath)).RunAsync(progress, ct);
                 var s = snapshot.Stats;
                 var counts = photos?.Counts();
+                var items = collection?.Counts();
                 var message = $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: " +
                               (counts is { } c
                                   ? $"{Plural(c.Photos, "photo")}, {Plural(c.Videos, "video")} ({Size(c.Bytes)}){(c.Access == MediaAccess.Partial ? " of those this phone lets ASync see" : "")}, "
                                   : "") +
+                              (items is { } i
+                                  ? folder.Kind == FolderKind.Contacts
+                                      ? $"{Plural(i.Items, "contact")} in {Plural(i.Collections, "account")} ({Size(i.Bytes)}), "
+                                      : $"{Plural(i.Items, "event")} in {Plural(i.Collections, "calendar")} ({Size(i.Bytes)}), "
+                                  : "") +
                               $"{s.FilesNew} new, {s.FilesChanged} changed, {s.FilesUnmodified} unchanged, " +
                               $"{Size(s.BytesAdded)} added{(forgotten > 0 ? $", {forgotten} old snapshots forgotten" : "")}" +
                               (s.Errors.Count > 0 ? $", {s.Errors.Count} unreadable: {s.Errors[0]}" : "");
-                outcome = new FolderRunResult(folder.FolderId, folder.Name, s.Errors.Count == 0, message, Media: counts);
-                report = new SyncReportRequest(s.Errors.Count == 0, message, Uploaded: s.FilesNew + s.FilesChanged, Bytes: s.BytesAdded, Media: counts);
+                outcome = new FolderRunResult(folder.FolderId, folder.Name, s.Errors.Count == 0, message, Media: counts, Collections: items);
+                report = new SyncReportRequest(s.Errors.Count == 0, message, Uploaded: s.FilesNew + s.FilesChanged, Bytes: s.BytesAdded, Media: counts,
+                    Collections: items);
                 if (photos is not null) await ReportAlbumsAsync(ct);
+                if (collection is not null) await ReportCollectionsAsync(folder.Kind, ct);
             }
             else
             {
@@ -399,6 +466,15 @@ public sealed class SyncAgent : IAsyncDisposable
         if (reply.Albums is not { } albums) return;
         try { await _api.ReportAlbumsAsync(new ReportAlbumsRequest(albums, reply.Access, reply.Photos, reply.Videos), ct); }
         catch (Exception e) when (e is ApiException or HttpRequestException) { _logger.LogDebug("Could not report the albums: {Message}", e.Message); }
+    }
+
+    /// <summary>After a Contacts or Calendars backup: the accounts or calendars for the web UI while this phone is offline.</summary>
+    private async Task ReportCollectionsAsync(FolderKind kind, CancellationToken ct)
+    {
+        var reply = ListCollections(new CollectionsRequest(kind));
+        if (reply.Collections is not { } list) return;
+        try { await _api.ReportCollectionsAsync(new ReportCollectionsRequest(kind, list, reply.Access, reply.Items), ct); }
+        catch (Exception e) when (e is ApiException or HttpRequestException) { _logger.LogDebug("Could not report the {Kind}: {Message}", kind, e.Message); }
     }
 
     // ── Maintenance (Backup folders) ──────────────────────────────────────────
@@ -553,6 +629,15 @@ public sealed class SyncAgent : IAsyncDisposable
                 catch (Exception e) { _logger.LogDebug("A browse listener failed: {Message}", e.Message); }
                 var reply = ListAlbums(request);
                 _logger.LogInformation("Albums for the web UI: {Result}", reply.Albums is { } a ? $"{a.Count} albums" : reply.Refusal.ToString());
+                return reply;
+            }));
+        if (Browser is not null)
+            _hub.On<CollectionsRequest, CollectionsReply>("collections", request => Task.Run(() =>
+            {
+                try { BrowseRequested?.Invoke(); }
+                catch (Exception e) { _logger.LogDebug("A browse listener failed: {Message}", e.Message); }
+                var reply = ListCollections(request);
+                _logger.LogInformation("{Kind} for the web UI: {Result}", request.Kind, reply.Collections is { } c ? $"{c.Count} listed" : reply.Refusal.ToString());
                 return reply;
             }));
         _hub.Reconnecting += e =>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  describeMedia, detachFolderDevice, errorMessage, EVERYTHING, getAlertIncidents, getDevices, getFolders, getStorageBackends, getUsage,
+  collectionCountText, describeCollections, describeMedia, detachFolderDevice, ALL_COLLECTIONS, errorMessage, EVERYTHING, getAlertIncidents, getDevices, getFolders, getStorageBackends, getUsage,
   type AlertIncident, type Device, type PurgeJob, type Folder, type FolderDevice, type FolderUsage, type MaintenanceStatus, type StorageBackend,
   type Usage,
 } from '../api'
@@ -274,7 +274,7 @@ export default function Folders() {
                   ) : (
                     <div className="table-wrap inset">
                       <table className="stack">
-                        <thead><tr><th>Device</th><th>{f.kind === 'Photos' ? 'Backs up' : 'Folder on the device'}</th>{f.mode === 'Mirror' && <th>Direction</th>}<th>Last sync</th><th></th></tr></thead>
+                        <thead><tr><th>Device</th><th>{f.kind !== 'Files' ? 'Backs up' : 'Folder on the device'}</th>{f.mode === 'Mirror' && <th>Direction</th>}<th>Last sync</th><th></th></tr></thead>
                         <tbody>
                           {f.devices.map(d => (
                             <tr key={d.deviceId}>
@@ -289,8 +289,17 @@ export default function Folders() {
                                   })()}
                                 </span>
                               </td>
-                              <td data-label={f.kind === 'Photos' ? 'Backs up' : 'Folder'} className="wrap">
-                                {f.kind === 'Photos'
+                              <td data-label={f.kind !== 'Files' ? 'Backs up' : 'Folder'} className="wrap">
+                                {f.kind === 'Contacts' || f.kind === 'Calendars'
+                                  ? <span>
+                                      {describeCollections(f.kind, d.collections ?? ALL_COLLECTIONS)}
+                                      {d.collectionCounts && (
+                                        <span className="status-msg">
+                                          {collectionCountText(f.kind, d.collectionCounts)} · {formatBytes(d.collectionCounts.bytes)} in the last snapshot
+                                        </span>
+                                      )}
+                                    </span>
+                                  : f.kind === 'Photos'
                                   ? <span>
                                       {describeMedia(d.media ?? EVERYTHING)}
                                       {d.mediaCounts && (
