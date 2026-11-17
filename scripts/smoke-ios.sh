@@ -14,8 +14,12 @@
 #   device (async-cli), an edit and a delete included; the web UI's browsing listing the app's Documents and refusing
 #   the rest; a folder chosen as a security-scoped bookmark (as the document picker makes one) synced, its location on the
 #   server a bookmark: path; the local tree contract on bookmarked directories (selftest); the real document picker shown
-#   (and cancelled); a new folder added from the app ("added from" the device on the server) synced up; the app restarted
-#   (identity and folders survive, it signs in again).
+#   (and cancelled); a new folder added from the app ("added from" the device on the server) synced up; background work
+#   (task 22): the folders' BGTask requests (the simulator refuses BGTaskScheduler requests, so the task's own code path is
+#   run with the app in the background, and a server change arrives), the reminders pending in the notification center
+#   (moved by the setting, off with Never), no APNs registration without the entitlement, the conditions from iOS and the
+#   web UI's (a charging-only folder makes the processing task need power), a silent push handled in the app, and an
+#   `xcrun simctl push` to the suspended app; the app restarted (identity and folders survive, it signs in again).
 #
 # Needs: macOS with Xcode and a simulator runtime, the .NET SDK with the ios workload, jq, python3, Homebrew's PostgreSQL
 # (PG_BIN=…/bin, default: brew --prefix postgresql@16). From the repository root:
@@ -335,6 +339,89 @@ last=$(sync_phone "$notes")
 server_has "$notes" note.txt >/dev/null && pass "synced up: note.txt is on the server" || fail "notes sync" "$last"
 shot folders
 
+section "background work (task 22)"
+note() { printf '  \033[33m·\033[0m %s\n' "$1"; }
+bg() { ctl bg; }
+in_front() { xcrun simctl launch "$udid" "$bundle" >/dev/null; wait_for 30 ctl state; } # the running app back to the front
+to_back() { xcrun simctl launch "$udid" com.apple.Preferences >/dev/null; } # Settings in front: ASync in the background
+b=$(bg)
+jq -e '(.requests | map(.id) == ["ua.pp.chds.async.refresh", "ua.pp.chds.async.processing"]) and all(.requests[]; .network and .delay >= 15)' <<<"$b" >/dev/null \
+  && pass "the folders ask for a refresh and a processing task (earliest begin $(jq -r '.requests[0].delay' <<<"$b") min)" || fail "BGTask requests" "$b"
+if jq -e '.tasks | length >= 1' <<<"$b" >/dev/null; then
+  pass "BGTaskScheduler holds them: $(jq -c '[.tasks[] | {id, earliest}]' <<<"$b")"
+else
+  note "BGTaskScheduler took no request here ($(jq -r '.submitError // "no error"' <<<"$b")): the simulator does not run background tasks; their code path is run below"
+fi
+jq -e --arg id "reminder-$sync_id" '.reminders | any(.id == $id and .title == "Phone docs: nothing synced for 3 days" and .inSeconds > 255000 and .inSeconds <= 259200)' <<<"$b" >/dev/null \
+  && pass "the reminder is pending: \"Phone docs: nothing synced for 3 days\", 3 days after its last successful run" || fail "reminder pending" "$(jq -c .reminders <<<"$b")"
+ctl "bg-reminder 1" >/dev/null
+jq -e --arg id "reminder-$sync_id" '.reminders | any(.id == $id and .title == "Phone docs: nothing synced for 1 day" and .inSeconds > 86000)' <<<"$(bg)" >/dev/null \
+  && pass "choosing 1 day reschedules every folder's reminder" || fail "reminder days" "$(bg | jq -c .reminders)"
+ctl "bg-reminder 0" >/dev/null
+jq -e '.reminders | length == 0' <<<"$(bg)" >/dev/null && pass "Never: no reminders pending" || fail "reminders off" "$(bg | jq -c .reminders)"
+ctl "bg-reminder 3" >/dev/null
+jq -e '.push.register == false and (.push.why | test("simulator"))' <<<"$(bg)" >/dev/null \
+  && pass "no APNs registration without the push entitlement: $(bg | jq -r .push.why)" || fail "push decision" "$(bg | jq -c .push)"
+jq -e '.conditions.metered == false' <<<"$(bg)" >/dev/null && pass "run conditions from iOS: $(bg | jq -c .conditions)" || fail "conditions" "$(bg | jq -c .conditions)"
+
+# Conditions set in the web UI: shown in the app, the processing task then needs external power.
+api PUT "/api/folders/$notes/devices" "{\"deviceId\":\"$device\",\"localPath\":\"~/Documents/Notes\",\"conditions\":{\"unmeteredOnly\":true,\"chargingOnly\":true,\"batteryNotLow\":false}}" >/dev/null
+wait_state ".folders[] | select(.name == \"Notes\") | .conditions == \"True|True|False\"" 30 && pass "the web UI's conditions reach the app (Wi-Fi only, while charging)" || fail "conditions in app" "$(folder_json Notes)"
+processing_needs_power() { bg | jq -e '.requests[] | select(.id == "ua.pp.chds.async.processing") | .power'; }
+wait_for 20 processing_needs_power \
+  && pass "a charging-only folder: the processing task requires external power" || fail "processing power" "$(bg | jq -c .requests)"
+ctl "show EditConditions" >/dev/null || true
+shot folder-conditions
+ctl "editconditions $notes" >/dev/null
+sleep 1
+shot conditions-editor
+ctl back >/dev/null
+ctl settings >/dev/null
+ctl "show BackgroundCard" >/dev/null
+shot background-settings
+ctl back >/dev/null
+
+# The silent push's code path in the app (didReceiveRemoteNotification hands the same dictionary over).
+answer=$(ctl "bg-wake test")
+[[ "$answer" == NewData || "$answer" == NoData ]] && pass "a silent push handled in the app answers its fetch completion ($answer) within 30 s" || fail "bg-wake" "$answer"
+
+# A background task's runs with the app in the background: the task's code path (what the BGTask handler calls), started
+# after the app went to the background; a change made on the server meanwhile arrives.
+answer=$(ctl "bg-simulate refresh")
+note "iOS's own simulated task launch: $answer (it needs a pending request, which the simulator refuses)"
+ctl "bg-due $sync_id" >/dev/null
+ctl "bg-run refresh 12" >/dev/null
+to_back
+echo "made on the server while the iPhone app was in the background" >"$work/cli-docs/from-background.txt"
+cli_sync "$sync_id"
+if wait_for 60 test -f "$docs/Sync/from-background.txt"; then
+  pass "with the app in the background, the refresh task's run brought from-background.txt down"
+else
+  fail "background run" "$(ls "$docs/Sync")"
+fi
+sleep 3
+in_front
+jq -e '.lastTask | test("^Refresh at .*: done .*Phone docs")' <<<"$(bg)" >/dev/null && pass "the task reported done: $(bg | jq -r .lastTask)" || fail "task result" "$(bg | jq -r .lastTask)"
+
+# A real (simulated) push to the suspended app: xcrun simctl push, a change waiting on the server.
+to_back
+sleep 15 # suspended: no hub connection any more
+echo "pushed" >"$work/cli-docs/pushed.txt"
+cli_sync "$sync_id"
+cat >"$work/push.json" <<EOF
+{"Simulator Target Bundle": "$bundle", "aps": {"content-available": 1}, "async": "wake", "reason": "changed"}
+EOF
+xcrun simctl push "$udid" "$bundle" "$work/push.json" >/dev/null 2>&1 || true
+if wait_for 45 test -f "$docs/Sync/pushed.txt"; then
+  pass "xcrun simctl push woke the suspended app: pushed.txt came down"
+elif grep -q "Push: woken" "$logs"/app-stdout-1.log 2>/dev/null; then
+  fail "the push reached the app but pushed.txt did not come down" "$(ls "$docs/Sync")"
+else
+  note "the simulator did not deliver the silent push to the suspended app (no \"Push: woken\" in its log); the push code path ran above (bg-wake)"
+fi
+in_front
+wait_for 30 test -f "$docs/Sync/pushed.txt" && pass "opening the app syncs (pushed.txt is there)" || fail "app opened sync" "$(ls "$docs/Sync")"
+
 section "restart"
 launch 2
 wait_state '.page == "DashboardViewModel" and .state == "Connected"' 60 && pass "after a restart: still enrolled, signed in again" || fail "restart" "$(state)"
@@ -352,6 +439,13 @@ if wait_state ".enrollCode == \"$code3\" and .enrollServer == \"$server\"" 20; t
 else
   xcrun simctl io "$udid" screenshot --type=png "$logs/openurl.png" >/dev/null 2>&1 || true
   fail "link opened through iOS (screen in logs/openurl.png)" "$(state)"
+fi
+
+# The very last: iOS's notification question (the dashboard prompt's Allow asks it); simctl cannot answer it.
+if [[ -n "$shots" ]]; then
+  ctl notify-permission >/dev/null
+  sleep 2
+  shot_system notification-permission
 fi
 
 echo

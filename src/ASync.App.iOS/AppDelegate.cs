@@ -16,11 +16,32 @@ public static class Program
     private static void Main(string[] args) => UIApplication.Main(args, null, typeof(AppDelegate));
 }
 
-/// <summary>The application delegate: Avalonia's (one scene, one view), with the Inter font.</summary>
+/// <summary>
+/// The application delegate: Avalonia's (one scene, one view), with the Inter font, plus what background work needs from the
+/// app delegate (task 22): the background tasks registered before launch ends, the APNs token, silent pushes.
+/// </summary>
 [Register("AppDelegate")]
 public sealed class AppDelegate : AvaloniaAppDelegate<IosShellApp>
 {
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder) => base.CustomizeAppBuilder(builder).WithInterFont();
+
+    /// <summary>Before Avalonia's didFinishLaunching: iOS wants the BGTask handlers registered by the end of launch.</summary>
+    [Export("application:willFinishLaunchingWithOptions:")]
+    public bool WillFinishLaunching(UIApplication application, NSDictionary? launchOptions)
+    {
+        IosBackground.RegisterTasks();
+        return true;
+    }
+
+    [Export("application:didRegisterForRemoteNotificationsWithDeviceToken:")]
+    public void RegisteredForRemoteNotifications(UIApplication application, NSData deviceToken) => IosBackground.PushToken(deviceToken.ToArray());
+
+    [Export("application:didFailToRegisterForRemoteNotificationsWithError:")]
+    public void FailedToRegisterForRemoteNotifications(UIApplication application, NSError error) => IosBackground.PushFailed(error.LocalizedDescription);
+
+    [Export("application:didReceiveRemoteNotification:fetchCompletionHandler:")]
+    public void DidReceiveRemoteNotification(UIApplication application, NSDictionary userInfo, Action<UIBackgroundFetchResult> completionHandler) =>
+        IosBackground.RemoteNotification(userInfo, completionHandler);
 }
 
 /// <summary>
@@ -48,9 +69,11 @@ public sealed class IosShellApp : App
                 if (e is ProtocolActivatedEventArgs { Uri: var uri })
                 {
                     Console.WriteLine($"ASync: opened {uri.Scheme}://{uri.Host}");
-                    OpenLink(uri.OriginalString);
+                    // async://sync: "Back up now" from Shortcuts (Open URL, also in automations) or another app.
+                    if (uri.Scheme == "async" && uri.Host == "sync") IosBackground.RunAllNow("async://sync");
+                    else OpenLink(uri.OriginalString);
                 }
-                else if (e.Kind == ActivationKind.Background) IosAgent.AppOpened(); // back to the foreground
+                // Coming to the front (also at launch) is IosAgent's: UIApplication.didBecomeActive.
             };
         }
         if (ApplicationLifetime is ISingleViewApplicationLifetime single)

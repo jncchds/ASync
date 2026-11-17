@@ -39,6 +39,7 @@ cat > "$work/IosCheck.csproj" <<EOF
     <RootNamespace>ASync.App.iOS</RootNamespace>
     <DefineConstants>\$(DefineConstants);IOS;__IOS__;__MOBILE__;__UNIFIED__</DefineConstants>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <!-- Microsoft.iOS.dll is a reference assembly of its own platform. -->
     <NoWarn>\$(NoWarn);MSB3270;CS1701;CS1702</NoWarn>

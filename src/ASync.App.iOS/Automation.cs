@@ -28,6 +28,11 @@ namespace ASync.App.iOS;
 /// <c>secret &lt;text&gt;</c>, <c>settings</c>, <c>notifications on|off</c>, <c>back</c>, <c>theme light|dark|system</c>, <c>show &lt;control&gt;</c>,
 /// <c>signout</c>, <c>keyinfo</c>, <c>haskey &lt;reference&gt;</c>, <c>files</c> (the store's files: names, prefixes, sizes), <c>selftest</c> (the local tree contract on
 /// bookmarked directories), <c>home</c> (the container's path).</para>
+/// <para>Background work (task 22): <c>bg</c> (pending BGTask requests, reminders, conditions, permissions, push, the store),
+/// <c>bg-simulate refresh|processing</c> (iOS's own launch of a pending task; private API), <c>bg-run refresh|processing [seconds]</c>
+/// (the task's code path after a delay, so the app can be sent to the background first), <c>bg-wake &lt;reason&gt;</c> (a silent
+/// push handled in the app), <c>bg-reminder &lt;days&gt;</c>, <c>notify-permission</c> (the system's question), <c>editconditions
+/// &lt;folder&gt;</c>.</para>
 /// </summary>
 internal static class Automation
 {
@@ -264,6 +269,59 @@ internal static class Automation
                 return await Task.Run(StoreFiles);
             case "selftest":
                 return await Task.Run(SelfTest);
+            // ── Background work (task 22) ──
+            case "bg":
+                return await BackgroundState();
+            case "bg-simulate":
+                // What iOS does for a pending task: works only where iOS took the request (not on the simulator, which refuses them).
+                return IosBackground.SimulateLaunch(ParseKind(arg));
+            case "bg-run":
+            {
+                // The task's own code path (IosBackground.RunTaskAsync, what the BGTask handler calls), started after a delay so the
+                // test can send the app to the background first; it holds background time like a run started in the foreground.
+                var a = arg.Split(' ', 2);
+                var kind = ParseKind(a[0]);
+                var delay = a.Length > 1 ? int.Parse(a[1], CultureInfo.InvariantCulture) : 0;
+                var assertion = UIApplication.SharedApplication.BeginBackgroundTask("async-automation", null);
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(delay));
+                        var ok = await IosBackground.RunTaskAsync(kind, CancellationToken.None);
+                        Console.WriteLine($"ASync: automation bg-run {kind}: {(ok ? "done" : "not done")}");
+                    }
+                    finally { UIApplication.SharedApplication.EndBackgroundTask(assertion); }
+                });
+                return "started";
+            }
+            case "bg-wake":
+            {
+                // A silent push handled in the app (as didReceiveRemoteNotification does), for runs without `simctl push`.
+                var fetched = new TaskCompletionSource<UIBackgroundFetchResult>();
+                using var info = NSDictionary.FromObjectsAndKeys(new NSObject[] { new NSString("wake"), new NSString(arg.Length > 0 ? arg : "changed") },
+                    new NSObject[] { new NSString("async"), new NSString("reason") });
+                IosBackground.RemoteNotification(info, r => fetched.TrySetResult(r));
+                return (await fetched.Task).ToString();
+            }
+            case "bg-reminder":
+                // The setting, without the notification question the Settings choice asks (simctl cannot answer it).
+                IosBackground.Coordinator.ReminderDays = int.Parse(arg, CultureInfo.InvariantCulture);
+                return "ok";
+            case "bg-due":
+            {
+                // The folder counts as never run here, so the next background task runs it.
+                var id = int.Parse(arg, CultureInfo.InvariantCulture);
+                IosBackground.Coordinator.Store.Update(s => s.LastSuccess.Remove(id));
+                return "ok";
+            }
+            case "notify-permission":
+                // The system's question (for a screenshot; simctl cannot answer it).
+                IosBackground.Services.AskForNotifications();
+                return "asked";
+            case "editconditions":
+                Folder(shell, arg).EditConditionsCommand.Execute(null);
+                return "ok";
             default:
                 return $"unknown command \"{op}\"";
         }
@@ -281,6 +339,61 @@ internal static class Automation
             ["reference"] = identity?.PrivateKey is { } k && k.StartsWith(SecureEnclaveDeviceKeys.Prefix, StringComparison.Ordinal) ? k : identity is null ? null : "software",
             ["where"] = identity is null ? null : SecureEnclaveDeviceKeys.Describe(identity.PrivateKey),
             ["simulator"] = SecureEnclaveDeviceKeys.IsSimulator,
+        }.ToJsonString();
+    }
+
+    private static IosTaskKind ParseKind(string text) =>
+        Enum.TryParse<IosTaskKind>(text, ignoreCase: true, out var kind) ? kind : throw new InvalidOperationException($"No task kind \"{text}\" (refresh, processing).");
+
+    /// <summary>
+    /// The background side as iOS has it: BGTaskScheduler's pending requests, the pending notification requests (the reminders),
+    /// the conditions now, Background App Refresh, the notification permission, push, and what the store keeps.
+    /// </summary>
+    private static async Task<string> BackgroundState()
+    {
+        var pending = await BackgroundTasks.BGTaskScheduler.Shared.GetPendingAsync();
+        var notifications = await UserNotifications.UNUserNotificationCenter.Current.GetPendingNotificationRequestsAsync();
+        var state = IosBackground.Coordinator.Store.Load();
+        var conditions = IosDeviceConditions.Instance.Read();
+        var now = DateTime.UtcNow;
+        return new JsonObject
+        {
+            ["tasks"] = new JsonArray([.. pending.Select(p => (JsonNode?)new JsonObject
+            {
+                ["id"] = p.Identifier,
+                ["earliest"] = p.EarliestBeginDate is { } d ? ((DateTime)d).ToString("O", CultureInfo.InvariantCulture) : null,
+                ["power"] = (p as BackgroundTasks.BGProcessingTaskRequest)?.RequiresExternalPower,
+                ["network"] = (p as BackgroundTasks.BGProcessingTaskRequest)?.RequiresNetworkConnectivity,
+            })]),
+            ["requests"] = new JsonArray([.. IosBackground.Coordinator.Requests.Select(r => (JsonNode?)new JsonObject
+            {
+                ["id"] = r.Identifier, ["delay"] = r.DelayMinutes, ["power"] = r.RequiresExternalPower, ["network"] = r.RequiresNetwork,
+            })]),
+            ["applied"] = new JsonObject(state.Applied.Select(a => KeyValuePair.Create(a.Key.ToString(), (JsonNode?)a.Value))),
+            ["submitError"] = IosBackground.Tasks.LastError,
+            ["lastTask"] = state.LastTask,
+            ["reminders"] = new JsonArray([.. notifications.Select(n => (JsonNode?)new JsonObject
+            {
+                ["id"] = n.Identifier,
+                ["title"] = n.Content.Title,
+                ["body"] = n.Content.Body,
+                ["inSeconds"] = (n.Trigger as UserNotifications.UNTimeIntervalNotificationTrigger)?.NextTriggerDate is { } next
+                    ? Math.Round(((DateTime)next - now).TotalSeconds) : null,
+            })]),
+            ["reminderDays"] = state.ReminderDays,
+            ["conditions"] = new JsonObject
+            {
+                ["metered"] = conditions.Metered, ["charging"] = conditions.Charging, ["batteryLow"] = conditions.BatteryLow, ["lowPower"] = conditions.LowPowerMode,
+            },
+            ["refresh"] = IosBackground.Services.Refresh.ToString(),
+            ["notifications"] = IosBackground.Services.Notifications.ToString(),
+            ["push"] = new JsonObject
+            {
+                ["register"] = IosBackground.Push.Register, ["why"] = IosBackground.Push.Why, ["token"] = state.ApnsToken is not null,
+                ["registered"] = state.ApnsRegistered, ["problem"] = state.ApnsProblem, ["text"] = IosBackground.Services.PushStatusText,
+            },
+            ["lastSuccess"] = new JsonObject(state.LastSuccess.Select(a => KeyValuePair.Create(a.Key.ToString(CultureInfo.InvariantCulture),
+                (JsonNode?)a.Value.ToString("O", CultureInfo.InvariantCulture)))),
         }.ToJsonString();
     }
 
@@ -387,6 +500,8 @@ internal static class Automation
                 ["lastMessage"] = s.LastResult?.Message,
                 ["lastAt"] = s.LastResult?.At.ToUnixTimeMilliseconds(),
                 ["needsSetup"] = s.NeedsSetup,
+                ["waiting"] = s.Waiting,
+                ["conditions"] = s.Conditions is { } c ? $"{c.UnmeteredOnly}|{c.ChargingOnly}|{c.BatteryNotLow}" : null,
             });
         }
         o["folders"] = folders;

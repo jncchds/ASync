@@ -60,5 +60,29 @@
 	</dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+		<string>remote-notification</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>ua.pp.chds.async.refresh</string>
+		<string>ua.pp.chds.async.processing</string>
+	</array>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>ua.pp.chds.async.backup-now</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Back up now</string>
+			<key>UIApplicationShortcutItemSubtitle</key>
+			<string>Sync every folder</string>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypeUpdate</string>
+		</dict>
+	</array>
 </dict>
 </plist>

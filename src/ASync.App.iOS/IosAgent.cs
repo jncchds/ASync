@@ -10,10 +10,12 @@ namespace ASync.App.iOS;
 /// <summary>
 /// The sync agent of this app, once per process, as on Android (<c>AndroidAgent</c>): the same <see cref="AgentRuntime"/>
 /// as the desktop's service without a control channel, with the Secure Enclave key, the Keychain-sealed store and the
-/// iPhone's folder trees. Process-wide on purpose: the UI now, background tasks (task 22) and the File Provider (task 25)
-/// later reach the one agent through <see cref="Connector"/> or <see cref="Runtime"/>; none of them owns it.
-/// While the app is in the foreground the agent runs folders as the desktop's does (at start, on their interval, on the
-/// server's events); iOS suspends the app soon after it leaves the screen, and the background work of task 22 takes over.
+/// iPhone's folder trees. Process-wide on purpose: the UI, the background tasks and pushes (task 22), and the File Provider
+/// (task 25) later reach the one agent through <see cref="Connector"/> or <see cref="Runtime"/>; none of them owns it.
+/// As on Android, the agent does not run folders on its own interval or at start (iOS suspends the app soon after it leaves
+/// the screen, so a timer would mean nothing): <see cref="IosBackground"/> schedules BGTaskScheduler tasks from the folders,
+/// and folders run on requests, on the server's events while connected, on a reconnect, when the app comes to the front
+/// (<see cref="AppOpened"/>) and, while it stays open, when they are due (<see cref="ForegroundCheck"/>).
 /// </summary>
 public static class IosAgent
 {
@@ -21,6 +23,8 @@ public static class IosAgent
     private static AgentRuntime? _runtime;
     private static readonly CancellationTokenSource Stop = new();
     private static long _lastOpened;
+    private static Timer? _foreground;
+    private static readonly TimeSpan ForegroundCheck = TimeSpan.FromMinutes(5);
 
     public static AgentRuntime Runtime => _runtime ?? throw new InvalidOperationException("The agent has not been started.");
 
@@ -44,15 +48,45 @@ public static class IosAgent
     public static string DeviceNoun =>
         UIKit.UIDevice.CurrentDevice.UserInterfaceIdiom == UIKit.UIUserInterfaceIdiom.Pad ? "iPad" : "iPhone";
 
-    /// <summary>The app came to the front: run every folder (at most once a minute).</summary>
+    private static volatile bool _openPending;
+
+    /// <summary>
+    /// The app came to the front (also at launch): run every folder (at most once a minute). At a cold start the folder list
+    /// is not loaded yet: the folders run as soon as it is.
+    /// </summary>
     public static void AppOpened()
     {
         if (_runtime is not { } runtime) return;
+        if (!runtime.FoldersLoaded)
+        {
+            _openPending = true;
+            return;
+        }
         var now = Environment.TickCount64;
         var last = Interlocked.Read(ref _lastOpened);
         if (last != 0 && now - last < 60_000) return;
         Interlocked.Exchange(ref _lastOpened, now);
         runtime.TriggerAll("app opened");
+    }
+
+    /// <summary>
+    /// The app is open: every few minutes the folders whose interval is over run (as the interval did before task 22). Background
+    /// tasks do not run while the app is in the foreground, so this keeps a long-open app syncing.
+    /// </summary>
+    private static void OnActive()
+    {
+        AppOpened();
+        _foreground ??= new Timer(_ =>
+        {
+            if (_runtime is not { FoldersLoaded: true } runtime) return;
+            foreach (var id in IosBackground.Coordinator.FoldersFor(IosTaskKind.Processing)) runtime.Trigger(id, "due");
+        }, null, ForegroundCheck, ForegroundCheck);
+    }
+
+    private static void OnBackground()
+    {
+        _foreground?.Dispose();
+        _foreground = null;
     }
 
     /// <summary>Starts the agent unless it runs already (idempotent).</summary>
@@ -79,16 +113,28 @@ public static class IosAgent
                 Protector = new SealedStoreProtector(new KeychainSealingKey()),
                 DeviceKeys = new SecureEnclaveDeviceKeys(),
                 LocalTrees = Trees,
-                // Run conditions (Wi-Fi, charging, battery) come with the background work of task 22; until then nothing blocks.
-                Conditions = null,
+                // Background work (task 22): BGTaskScheduler schedules the runs (IosBackground); the agent checks the run conditions
+                // (NWPathMonitor, the battery, Low Power Mode) before each automatic run.
+                Conditions = IosDeviceConditions.Instance,
+                RunAtStart = false,
+                RunOnInterval = false,
                 // The web UI may browse the app's Documents (task 17); picked folders are chosen on the phone.
                 Browse = new IosBrowseScope(Home, DeviceNoun),
             }, loggers);
+            IosDeviceConditions.Instance.Start();
             runtime.Start();
             _runtime = runtime;
+            IosBackground.Attach(runtime, ConfigDirectory);
+            NSNotificationCenter.DefaultCenter.AddObserver(UIKit.UIApplication.DidBecomeActiveNotification, _ => OnActive());
+            NSNotificationCenter.DefaultCenter.AddObserver(UIKit.UIApplication.DidEnterBackgroundNotification, _ => OnBackground());
             // Bookmarks of folders that moved elsewhere or went away (after an hour: a form may still be using a new one).
             runtime.FoldersChanged += () =>
             {
+                if (_openPending && runtime.FoldersLoaded)
+                {
+                    _openPending = false;
+                    AppOpened();
+                }
                 if (!runtime.DeviceRunning || !runtime.FoldersLoaded) return;
                 try { Trees.Prune(runtime.Folders.Select(f => f.Folder.LocalPath ?? ""), TimeSpan.FromHours(1)); }
                 catch (Exception e) { Console.Error.WriteLine($"ASync: bookmarks: {e.Message}"); }

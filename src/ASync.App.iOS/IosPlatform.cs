@@ -140,8 +140,22 @@ public sealed class IosPlatform(IosTreeFactory trees) : IPlatformServices
 
     public void ApplyTheme(ThemeChoice theme) => App.ApplyTheme(theme);
 
-    public string? ConditionsNote =>
-        $"This {DeviceNoun} does not check the conditions yet (they come with background syncing): folders run whenever the app is open.";
+    /// <summary>
+    /// The rules are checked before every automatic run (NWPathMonitor, the battery, Low Power Mode); only the simulator cannot
+    /// tell the battery. iOS decides when background runs happen at all.
+    /// </summary>
+    public string? ConditionsNote
+    {
+        get
+        {
+            var (_, charging, battery) = ASync.Client.Core.RunConditions.Supported(IosDeviceConditions.Instance.Read());
+            var note = "iOS decides when background runs happen; these rules are checked when they do. Low Power Mode counts as a low battery.";
+            return charging && battery ? note : $"This {DeviceNoun} does not report its battery (the simulator): the charging and battery rules are ignored here. {note}";
+        }
+    }
+
+    /// <summary>Background App Refresh, the notification permission, Apple's push and the reminder (task 22).</summary>
+    public IBackgroundServices? Background => IosBackground.Services;
 
     public bool SupportsStartAtLogin => false;
     public bool IsStartAtLoginEnabled() => false;
