@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The iOS head (task 21): the shared ASync.App views and view models on one view, with the sync agent running in the
+    app's own process (AgentRuntime behind InProcessAgentConnector, no control socket), as on Android. Platform parts: the
+    device key in the Secure Enclave (a Keychain key on the simulator), the store sealed with a Keychain-held AES key,
+    folders in the app's Documents and folders picked with the document picker (security-scoped bookmarks), the QR
+    scanner (AVFoundation), async://pair links. See AGENTS.md "iOS app (task 21)".
+    Not in ASync.slnx: it needs the `ios` workload and Xcode, so it builds only on a Mac (GitHub's macOS runners:
+    .github/workflows/ios.yml, scripts/package-ios.sh). scripts/check-ios.sh compiles its C# on Linux against the iOS
+    reference assemblies, without building an app.
+    The files in Shared/ are plain C# and are also compiled into ASync.App.Tests.
+    Info.plist (no comments: the build's plist reader): the async:// URL scheme, UIFileSharingEnabled and
+    LSSupportsOpeningDocumentsInPlace (the app's Documents in the Files app as "On My iPhone › ASync"), the camera and local
+    network texts, an App Transport Security exception (self-hosted servers are often plain http on a LAN; the app's HTTP
+    stack is .NET's, which ATS does not cover anyway), UILaunchScreen (without one iOS runs the app letterboxed).
+    Entitlements.plist: only used when signed (simulator builds ad hoc, TestFlight); the Keychain group of the device key and
+    the store's key. APNs (task 22) and the app group shared with the File Provider extension (task 25) are added there.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>ASync.App.iOS</RootNamespace>
+    <AssemblyName>ASync</AssemblyName>
+    <ApplicationId>ua.pp.chds.async</ApplicationId>
+    <ApplicationTitle>ASync</ApplicationTitle>
+    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
+    <ApplicationVersion>$(Version)</ApplicationVersion>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Assets.xcassets/AppIcon.appiconset: the logo (packaging/icons/async-1024.png), one 1024 px image as Xcode 14+ takes it. -->
+    <AppIcon>AppIcon</AppIcon>
+    <!-- Devices run ahead-of-time compiled code only. The client library and the engine serialize some state by reflection
+         (as on Android): the interpreter is there for what AOT cannot compile ahead (-all: everything else is AOT). -->
+    <MtouchInterpreter>-all</MtouchInterpreter>
+    <TrimMode>partial</TrimMode>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- .NET's own HTTP stack, as on Android and the desktop (the engine's transfers are tested on it); the system's
+         NSURLSession comes with background transfers (task 22). -->
+    <UseNativeHttpHandler>false</UseNativeHttpHandler>
+    <!-- Entitlements only take effect when the app is signed (CI's TestFlight job, or SideStore/AltStore re-signing it): the
+         app group and the File Provider extension of task 25 go there. -->
+    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false'">Entitlements.plist</CodesignEntitlements>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The local tree contract of the unit tests, run against a bookmarked folder on the simulator (automation "selftest"). -->
+    <Compile Include="..\ASync.Tests\Local\LocalTreeContract.cs" Link="Tests\LocalTreeContract.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.iOS" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ASync.App\ASync.App.csproj" />
+    <ProjectReference Include="..\ASync.Agent\ASync.Agent.csproj" />
+  </ItemGroup>
+</Project>

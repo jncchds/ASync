@@ -2,6 +2,15 @@
 
 ## v0.1.6 — 2026-11-17
 
+- feat: **An iOS app, first version (sideloaded).** `ASync-<version>-unsigned.ipa` installs with SideStore or AltStore on iOS 15
+  and later. Add the iPhone with a scanned QR code (the app's scanner or the Camera app), an `async://pair` link, the server and
+  code, or a code approved on your computer; its key is made in the Secure Enclave and what the app stores is sealed with a
+  Keychain key. Folders live in the app's own *On My iPhone › ASync* folder or in any folder picked with the system's picker
+  (iCloud Drive and other apps' storage too), kept across restarts; *New folder…*, *Add to a folder…*, *Sync now*, end-to-end
+  setup and unlocking work as on Android, and the web UI's *Browse…* lists the app's folder. Syncing happens while the app is
+  open; background syncing, photos, contacts and calendars come next. Built and tested on GitHub's macOS runners (a simulator
+  run with a real server), only when the iOS app changes or someone asks for it (`ios-ci/*` branches), so other work never waits
+  on a Mac; the .ipa joins a version's release once it is built.
 - feat: **Back up contacts and calendars from your phone.** Two new kinds of folder, *Contacts* and *Calendars* (in the web UI and
   in the phone's *New folder…*), back up the phone's address book and calendars: everything, or the accounts (Google, the phone,
   the SIM, …) or calendars you choose from the phone's own list in the web UI (asked live, or the list it reported last), and for
