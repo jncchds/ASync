@@ -199,6 +199,12 @@ settings or passwords, other people's folders, or your account.
   <img src="docs/screenshots/android-photos-permission-light.png" alt="Why ASync asks to read photos" width="24%">
   <img src="docs/screenshots/android-photos-restore-dark.png" alt="Restoring a snapshot into the phone's photos, dark" width="24%">
 </p>
+<p>
+  <img src="docs/screenshots/ios-photos-dashboard-light.png" alt="A Photos folder on the iPhone" width="24%">
+  <img src="docs/screenshots/ios-photos-albums-dark.png" alt="Choosing albums on the iPhone, with the iCloud switch, dark" width="24%">
+  <img src="docs/screenshots/ios-photos-permission-light.png" alt="Why ASync asks to read photos, on the iPhone" width="24%">
+  <img src="docs/screenshots/ios-photos-limited-light.png" alt="Limited access on the iPhone" width="24%">
+</p>
 
 A **Photos** folder backs up a phone's photo library instead of a directory: every photo and video, or only the albums
 you choose.
@@ -209,10 +215,11 @@ you choose.
    *Chosen albums*. The album list comes from the phone itself (it is asked live, and woken if it is asleep and has
    UnifiedPush); when the phone is offline you see the list it reported last. You can also leave out videos or
    screenshots, or start from a date. Several phones can share one Photos folder; each keeps its own snapshots.
-3. On the phone, ASync asks once for access to photos and videos and says why. Choose *Allow all*: with Android 14's
-   *Select photos* only the photos you pick are backed up, and new ones are not seen until you pick them too (the app
-   says so and offers *Allow all photos…*). ASync also asks for the photos' location, or Android removes it from what
-   ASync reads.
+3. On the phone, ASync asks once for access to photos and videos and says why (on the Photos screen, never at start). Choose
+   *Allow all* on Android, *Allow Full Access* on an iPhone: with Android 14's *Select photos* or the iPhone's *Limit Access*
+   only the photos you pick are backed up, and new ones are not seen until you pick them too (the app says so and offers
+   *Allow all photos…* / *Allow full access…*, and on the iPhone *Choose photos…* to change the selection). On Android ASync
+   also asks for the photos' location, or Android removes it from what ASync reads; an iPhone always gives it.
 
 New photos and videos are backed up soon after you take them (within a minute or so, when the folder's conditions, such
 as Wi-Fi only, allow), and every folder also runs on its schedule. **Originals are stored as they are**, not re-encoded,
@@ -230,6 +237,27 @@ empty snapshot: the run says so and the last snapshot keeps the photos. On a com
 
 Browsing folders and listing albums from the web are one setting on the phone (*Settings → Allow browsing folders from the web*):
 with it off, the web UI shows the last album list the phone reported and you can still choose *All photos and videos*.
+
+**On an iPhone** it works the same way, with what iOS's Photos library has:
+- **Albums:** your own albums (also those in folders, and albums synced from a computer) and the useful system albums that have
+  something in them: *Favorites*, *Screenshots*, *Videos*, *Selfies*, *Live Photos*, *Portrait*, *Panoramas*, *Slo-mo*,
+  *Time-lapse*, *Bursts*, *RAW*, *Long Exposure*, *Animated*, *Cinematic*. A photo in several albums is stored once and its
+  `.json` lists them all. Not backed up: *Hidden* photos, *Shared Albums* (they are other people's, at reduced size), *Recently
+  Deleted*; of a burst only the photo you chose (or iOS's pick) is backed up.
+- **Everything of a photo, as it is:** the original (HEIC, JPEG, ProRAW, MOV…), a Live Photo's video (`IMG_1234~….live.mov`), your
+  edit as iOS renders it (`….edited.heic`, the original stays as it was taken) and a RAW kept beside a JPEG (`….raw.dng`).
+- **iCloud Photos with "Optimize iPhone Storage":** originals that are only in iCloud are downloaded for their first backup, never
+  again while they are unchanged (a favourite or an album change does not read a photo again). A folder that runs on *Wi-Fi only*
+  downloads only on Wi-Fi, also when you tap *Back up now*. *Download originals from iCloud* on the Photos screen (on by default,
+  for this iPhone) turns that off: such photos then wait until they are on the iPhone. A photo that cannot come down now is simply
+  backed up on a later run; the backup says how many wait, and nothing already backed up is lost or taken for deleted.
+- **New photos** start a backup within seconds while ASync is open; otherwise they are backed up in iOS's background slots and
+  whenever you open ASync (see [Background sync on iOS](#background-sync-on-ios)).
+- **Restore into the library** puts each photo back with its date, location and favourite mark, a Live Photo as a Live Photo again
+  (with its RAW, where iOS takes it), into the albums it was in (made when missing; the system albums fill by themselves). Photos
+  still there are skipped and put back into the albums they had left; restoring twice adds nothing. Edits come back as the
+  original (the edit's render stays in the snapshot). iOS gives albums new ids on a new or wiped iPhone, so choose the albums of a
+  *Chosen albums* selection again there (or back up *All photos and videos*).
 
 ### Backing up contacts and calendars
 
@@ -322,6 +350,9 @@ Listing accounts and calendars from the web is the same phone setting as browsin
 - The iOS app syncs in the background only when iOS gives it time (rarely in Low Power Mode, never after it is closed from
   the app switcher); opening it always syncs. It was tried on the iOS simulator only (in CI), is sideloaded (no App Store or
   TestFlight yet), and the sideloaded build cannot be woken by the server. See [Background sync on iOS](#background-sync-on-ios).
+- On an iPhone, *Hidden* photos, *Shared Albums* and a burst's other photos are not backed up, a restore brings edits back as the
+  original (their render stays in the snapshot), and a *Chosen albums* selection is chosen again on a new or wiped iPhone (iOS
+  gives its albums new ids). Photo backup was tried on the simulator, not yet with a real iCloud library.
 
 What comes next is listed in [AGENTS.md](AGENTS.md) under "Milestones and current stage" (the mobile apps).
 
@@ -731,7 +762,7 @@ To build it: `dotnet workload install android`, an Android SDK (`ANDROID_HOME`) 
 </p>
 
 **Early (v0.1.6).** The same pages as the Android app, on iOS 15 and later, syncing also in the background as far as iOS allows
-(below). Like on Android, the phone never needs its browser: the server is set up in the web UI on a computer.
+(below), and backing up the photo library. Like on Android, the phone never needs its browser: the server is set up in the web UI on a computer.
 - **Adding the iPhone:** scan the QR code of *Devices → Add device* with the app's *Scan the QR code* (or with the Camera
   app: it opens ASync), tap or paste its `async://pair` link, type the server address and the code, or *Approve on your
   computer* (a short code to enter in the web UI there). The device's key is made in the iPhone's **Secure Enclave** and
@@ -743,7 +774,9 @@ To build it: `dotnet workload install android`, an Android SDK (`ANDROID_HOME`) 
   says *Choose the folder again* and nothing is synced or deleted. *New folder…* and *Add to a folder…* work as on Android,
   and so do Two-way, Mirror and Backup folders, *Sync now*, pause, end-to-end setup and unlocking. From the web UI on a
   computer, *Browse…* lists the app's own folder (picked folders are chosen on the iPhone).
-- **Not yet:** photos, contacts and calendars; ASync's folders in the Files app. Files of iCloud Drive that are not
+- **Photos and videos** (*New folder… → Photos & videos*): see [Backing up photos and videos](#backing-up-photos-and-videos), with
+  Live Photos, edits, RAW and iCloud originals.
+- **Not yet:** contacts and calendars; ASync's folders in the Files app. Files of iCloud Drive that are not
   downloaded to the iPhone yet are not fetched. Tried on the iOS simulator only (in CI), not on an iPhone yet; the camera
   scanner and real background slots can only be tried on one.
 
