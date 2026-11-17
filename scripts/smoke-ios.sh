@@ -229,7 +229,7 @@ api POST /api/devices/approvals "{\"userCode\":\"$answer\",\"approve\":true}" >/
 wait_state '.page == "DashboardViewModel"' 60 && pass "approved in the web UI: enrolled" || fail "device-code enroll" "$(state)"
 wait_state '.state == "Connected"' 60 && pass "signed in with the new key" || fail "connected (device code)" "$(state)"
 first_key=$(ctl keyinfo | jq -r .reference)
-first_device=$(api GET /api/devices | jq -r --arg old "$first_device" '.[] | select(.revokedAt == null and .platform == "IOS" and .id != $old) | .id' | head -1)
+first_device=$(api GET /api/devices | jq -r '.[] | select(.revokedAt == null and .platform == "IOS") | .id' | head -1)
 answer=$(ctl signout)
 wait_state '.page == "EnrollViewModel"' 30 && pass "signed out ($answer)" || fail "sign out" "$answer $(state)"
 gone=$(ctl "haskey $first_key")
