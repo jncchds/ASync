@@ -1,0 +1,74 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ASync.App.ViewModels"
+             x:Class="ASync.App.Views.CollectionsView"
+             x:DataType="vm:CollectionsViewModel">
+  <Border Classes="card" Name="CollectionsCard" BoxShadow="0 8 32 0 #40000000" Padding="14">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Spacing="12">
+        <TextBlock Classes="h2" Text="{Binding Title}" TextWrapping="Wrap" />
+
+        <!-- Without the permission: why ASync asks, and the system's question. -->
+        <StackPanel Name="Permission" Spacing="10" IsVisible="{Binding NeedsPermission}">
+          <TextBlock FontWeight="SemiBold" Text="{Binding PermissionQuestion}" TextWrapping="Wrap" />
+          <TextBlock Name="Explanation" Text="{Binding Explanation}" TextWrapping="Wrap" />
+          <Button Name="AllowCollections" Content="{Binding AllowText}" Command="{Binding AllowCommand}"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <Button Classes="secondary" Content="Open the app's settings" Command="{Binding OpenSettingsCommand}"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        </StackPanel>
+
+        <!-- With it: what is backed up. -->
+        <StackPanel Name="Choose" Spacing="10" IsVisible="{Binding CanChoose}">
+          <TextBlock Classes="muted small" Name="AccessText" Text="{Binding AccessText}" TextWrapping="Wrap" />
+
+          <RadioButton Name="BackUpAll" GroupName="what" Content="{Binding AllText}" IsChecked="{Binding BackUpAll}" />
+          <RadioButton Name="ChooseSome" GroupName="what" Content="{Binding SomeText}" IsChecked="{Binding ChooseSome}" />
+
+          <StackPanel Spacing="6" IsVisible="{Binding ChooseSome}">
+            <TextBlock Classes="muted small" Text="{Binding ListText}" TextWrapping="Wrap"
+                       IsVisible="{Binding ListText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <TextBlock Classes="muted small" Text="Reading the list…" IsVisible="{Binding Loading}" />
+            <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="8" MaxHeight="320">
+              <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl Name="ChoiceList" ItemsSource="{Binding Choices}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:CollectionChoice">
+                      <CheckBox IsChecked="{Binding IsChecked}" Margin="8,4">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Ellipse Width="10" Height="10" Fill="{Binding Color}" IsVisible="{Binding HasColor}" VerticalAlignment="Center" />
+                          <StackPanel>
+                            <TextBlock Text="{Binding Name}" TextWrapping="Wrap" />
+                            <TextBlock Classes="muted small" Text="{Binding Details}" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </StackPanel>
+                      </CheckBox>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Border>
+          </StackPanel>
+
+          <StackPanel Spacing="4" IsVisible="{Binding IsCalendars}">
+            <TextBlock Classes="label" Text="Events since" />
+            <ComboBox Name="PastDays" ItemsSource="{Binding PastChoices}" SelectedItem="{Binding SelectedPast}" HorizontalAlignment="Stretch" />
+            <TextBlock Classes="muted small" TextWrapping="Wrap"
+                       Text="Events that ended before then are left out; repeating events are kept while they still repeat, and future events always." />
+          </StackPanel>
+
+          <TextBlock Classes="muted small" Text="{Binding Footnote}" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Border Classes="notice" IsVisible="{Binding HasError}">
+          <TextBlock Classes="small error" Text="{Binding Error}" TextWrapping="Wrap" />
+        </Border>
+
+        <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <Button Name="SaveCollections" Content="Save" Command="{Binding SaveCommand}" IsVisible="{Binding CanChoose}" />
+          <Button Classes="secondary" Name="CloseCollections" Content="Cancel" Command="{Binding CloseCommand}" />
+        </WrapPanel>
+      </StackPanel>
+    </ScrollViewer>
+  </Border>
+</UserControl>

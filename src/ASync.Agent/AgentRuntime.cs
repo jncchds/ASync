@@ -72,6 +72,14 @@ public sealed record AgentOptions
 
     /// <summary>Which library the sidecars name ("android-mediastore").</summary>
     public string MediaSource { get; init; } = "";
+
+    /// <summary>The device's contacts and calendars for Contacts and Calendars folders (task 20: Android's providers); null: none.</summary>
+    public ASync.Client.Core.Collections.IContactsSource? Contacts { get; init; }
+    public ASync.Client.Core.Collections.ICalendarSource? Calendars { get; init; }
+
+    /// <summary>Which providers account.json and calendar.json name ("android-contacts", "android-calendar").</summary>
+    public string ContactsSource { get; init; } = "";
+    public string CalendarsSource { get; init; } = "";
 }
 
 /// <summary>The agent's own settings in its config directory (<c>agent-settings.json</c>); everything about folders is on the server.</summary>
@@ -122,6 +130,9 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     private readonly ConcurrentDictionary<int, FolderRunResult?> _publishedResults = new();
     private readonly ConcurrentDictionary<int, ProgressSnapshot?> _publishedProgress = new();
     private readonly ConcurrentDictionary<int, MediaCountsDto> _mediaCounts = new();
+    private readonly ConcurrentDictionary<int, CollectionCountsDto> _collectionCounts = new();
+    private volatile MediaRestoreDto? _collectionRestore;
+    private Task? _collectionRestoring;
     private volatile MediaRestoreDto? _mediaRestore;
     private Task? _mediaRestoring;
     private AgentLock? _lock;
@@ -340,6 +351,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             AllowMassDeletion = _options.AllowMassDeletion, LocalTrees = _options.LocalTrees, Conditions = _options.Conditions,
             SettleTime = _options.SettleTime, RunAtStart = _options.RunAtStart, RunOnInterval = _options.RunOnInterval,
             Media = _options.Media, MediaSource = _options.MediaSource,
+            Contacts = _options.Contacts, Calendars = _options.Calendars, ContactsSource = _options.ContactsSource, CalendarsSource = _options.CalendarsSource,
             // The config directory (the device's key; the Docker image's /config volume) is never offered as a starting point.
             Browser = _options.Browse is { } scope
                 ? new DeviceBrowser(scope is DesktopBrowseScope desktop ? desktop.Hiding(_store.Root) : scope, () => BrowsingAllowed)
@@ -353,6 +365,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         agent.FolderRan += r =>
         {
             if (r.Media is { } counts) _mediaCounts[r.FolderId] = counts;
+            if (r.Collections is { } items) _collectionCounts[r.FolderId] = items;
             try { FolderRan?.Invoke(r); }
             catch (Exception e) { _logger.LogDebug("A run listener failed: {Message}", e.Message); }
         };
@@ -596,6 +609,9 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             Browsing = BrowsingStatus(),
             Media = MediaAccessNow(),
             MediaRestore = _mediaRestore,
+            Contacts = AccessNow(_options.Contacts is { } c ? () => c.Access : null),
+            Calendars = AccessNow(_options.Calendars is { } k ? () => k.Access : null),
+            CollectionRestore = _collectionRestore,
         };
     }
 
@@ -613,6 +629,8 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             Kind = f.Kind,
             Media = f.Media,
             MediaCounts = _mediaCounts.GetValueOrDefault(f.FolderId),
+            Collections = f.Collections,
+            CollectionCounts = _collectionCounts.GetValueOrDefault(f.FolderId),
             IntervalMinutes = f.IntervalMinutes,
             Paused = f.Paused,
             Locked = f.Encryption == FolderEncryption.EndToEnd && (!f.RepositoryReady || !_store.HasRepositoryKeys(f.FolderId)),
@@ -780,6 +798,18 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
 
     public async Task<FolderAddedDto> CreateFolderAsync(DeviceCreateFolderRequest request, CancellationToken ct)
     {
+        if (request.Folder?.Kind is FolderKind.Contacts or FolderKind.Calendars)
+        {
+            var kind = request.Folder.Kind;
+            if (Source(kind) is null) throw new ControlException(NoSource(kind));
+            request = request with { LocalPath = "", Collections = request.Collections ?? CollectionSelectionDto.Everything };
+            if (request.Collections.Problem(kind) is { } badSelection) throw new ControlException(badSelection);
+            var (pimAgent, pimApi) = Running();
+            var made = await AskServerAsync(() => pimApi.CreateFolderAsync(request, ct));
+            _logger.LogInformation("Created the {Kind} folder \"{Name}\" from this device ({Selection}).", kind, made.Folder.Name, request.Collections.Describe(kind));
+            await pimAgent.ReloadAsync(ct);
+            return new FolderAddedDto(made.Folder.FolderId, $"\"{made.Folder.Name}\" was created and backs up {Lower(request.Collections.Describe(kind))}.", made.RecoveryKey);
+        }
         if (request.Folder?.Kind == FolderKind.Photos)
         {
             if (_options.Media is null) throw new ControlException(NoPhotoLibrary);
@@ -945,6 +975,158 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             Publish(StatusEvent());
         });
         return $"Restoring snapshot {shortId} of \"{folder.Name}\" into the photo library…";
+    }
+
+    // ── Contacts and calendars (task 20) ─────────────────────────────────────────
+
+    private object? Source(FolderKind kind) => kind == FolderKind.Contacts ? _options.Contacts : kind == FolderKind.Calendars ? _options.Calendars : null;
+
+    private static string NoSource(FolderKind kind) => kind == FolderKind.Contacts
+        ? "This device has no contacts ASync can back up: Contacts folders are for phones."
+        : "This device has no calendars ASync can back up: Calendars folders are for phones.";
+
+    private static MediaAccess? AccessNow(Func<MediaAccess>? read)
+    {
+        try { return read?.Invoke(); }
+        catch (Exception e) when (e is not OperationCanceledException) { return MediaAccess.None; }
+    }
+
+    private static string What(FolderKind kind) => kind == FolderKind.Contacts ? "contacts" : "calendars";
+
+    public Task<CollectionListDto> CollectionListAsync(FolderKind kind, CancellationToken ct)
+    {
+        if (kind is not (FolderKind.Contacts or FolderKind.Calendars) || Source(kind) is null)
+            return Task.FromResult(new CollectionListDto(kind, MediaAccess.Unsupported, [], Problem: NoSource(kind)));
+        return Task.Run(() =>
+        {
+            if (kind == FolderKind.Contacts)
+            {
+                var contacts = _options.Contacts!;
+                var access = contacts.Access;
+                if (access is MediaAccess.None or MediaAccess.Unsupported)
+                    return new CollectionListDto(kind, access, [], Problem: "ASync may not read the contacts on this device yet.");
+                var accounts = contacts.Accounts();
+                return new CollectionListDto(kind, access,
+                    [.. accounts.OrderBy(a => a.TypeLabel, StringComparer.CurrentCultureIgnoreCase).ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
+                        .Select(a => new CollectionDto(a.Id, a.Name, a.Contacts, a.TypeLabel, null, a.ReadOnly))],
+                    accounts.Sum(a => a.Contacts), contacts.CanWrite);
+            }
+            var calendars = _options.Calendars!;
+            var calAccess = calendars.Access;
+            if (calAccess is MediaAccess.None or MediaAccess.Unsupported)
+                return new CollectionListDto(kind, calAccess, [], Problem: "ASync may not read the calendars on this device yet.");
+            var list = calendars.Calendars();
+            return new CollectionListDto(kind, calAccess,
+                [.. list.OrderBy(c => c.AccountName, StringComparer.CurrentCultureIgnoreCase).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .Select(c => new CollectionDto(c.Id, c.Name, c.Events, c.AccountName, c.Color, c.ReadOnly))],
+                list.Sum(c => c.Events), calendars.CanWrite);
+        }, ct);
+    }
+
+    public async Task<string> SetCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct)
+    {
+        var (agent, api) = Running();
+        var folder = await FolderAsync(api, folderId, ct);
+        if (folder.Kind is not (FolderKind.Contacts or FolderKind.Calendars)) throw new ControlException($"\"{folder.Name}\" is not a Contacts or Calendars folder.");
+        if (collections.Problem(folder.Kind) is { } bad) throw new ControlException(bad);
+        await AskServerAsync(() => api.UpdateOwnSettingsAsync(folder.FolderId, new UpdateDeviceFolderRequest(Collections: collections, ExpectedRevision: folder.Revision), ct));
+        await agent.ReloadAsync(ct);
+        return $"\"{folder.Name}\" now backs up {Lower(collections.Describe(folder.Kind))}.";
+    }
+
+    public async Task<FolderAddedDto> JoinCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct)
+    {
+        var (agent, api) = Running();
+        var joined = await AskServerAsync(() => api.JoinFolderAsync(folderId, new DeviceJoinFolderRequest("", Collections: collections), ct));
+        _logger.LogInformation("Joined the {Kind} folder \"{Name}\" ({Selection}).", joined.Kind, joined.Name, collections.Describe(joined.Kind));
+        await agent.ReloadAsync(ct);
+        return new FolderAddedDto(joined.FolderId, joined.Encryption == FolderEncryption.EndToEnd
+            ? joined.RepositoryReady ? $"This phone is now part of \"{joined.Name}\". Unlock it to back up." : $"This phone is now part of \"{joined.Name}\". Set up its encryption to start."
+            : $"This phone now backs up {Lower(collections.Describe(joined.Kind))} into \"{joined.Name}\".");
+    }
+
+    public async Task<List<MediaSnapshotDto>> CollectionSnapshotsAsync(int folderId, CancellationToken ct)
+    {
+        var (_, api) = Running();
+        var folder = await FolderAsync(api, folderId, ct);
+        if (folder.Kind is not (FolderKind.Contacts or FolderKind.Calendars)) throw new ControlException($"\"{folder.Name}\" is not a Contacts or Calendars folder.");
+        try
+        {
+            var repo = await RepositoryAccess.OpenAsync(api, _store, folder, new RemoteStorageBackend(api, folder.FolderId), ct);
+            var mine = api.Identity!.DeviceId.ToString("N");
+            return [.. (await repo.ListSnapshotsAsync(ct)).OrderByDescending(s => s.Time).Take(100)
+                .Select(s => new MediaSnapshotDto(s.Id, ASync.Engine.Repository.Repository.ShortSnapshotId(s.Id), s.Time, s.Hostname, s.Source == mine,
+                    s.Stats.FilesNew + s.Stats.FilesChanged + s.Stats.FilesUnmodified))];
+        }
+        catch (Exception e) when (e is ApiException or HttpRequestException or SyncRefusedException or IOException)
+        {
+            throw new ControlException(e.Message);
+        }
+    }
+
+    public async Task<string> RestoreCollectionsAsync(int folderId, string? snapshot, string? target, CancellationToken ct)
+    {
+        if (_collectionRestoring is { IsCompleted: false }) throw new ControlException("An import of contacts or calendars is already running.");
+        var (_, api) = Running();
+        var folder = await FolderAsync(api, folderId, ct);
+        var kind = folder.Kind;
+        if (kind is not (FolderKind.Contacts or FolderKind.Calendars)) throw new ControlException($"\"{folder.Name}\" is not a Contacts or Calendars folder.");
+        if (Source(kind) is null) throw new ControlException(NoSource(kind));
+        var (access, canWrite) = kind == FolderKind.Contacts ? (_options.Contacts!.Access, _options.Contacts.CanWrite) : (_options.Calendars!.Access, _options.Calendars.CanWrite);
+        if (access is not (MediaAccess.Full or MediaAccess.Partial) || !canWrite)
+            throw new ControlException($"Allow ASync to read and add {What(kind)} first: a restore adds to them, and needs to see what is already there.");
+        ASync.Engine.Repository.Repository repo;
+        ASync.Engine.Repository.Snapshot chosen;
+        try
+        {
+            repo = await RepositoryAccess.OpenAsync(api, _store, folder, new RemoteStorageBackend(api, folder.FolderId), ct);
+            var snapshots = await repo.ListSnapshotsAsync(ct);
+            var source = api.Identity!.DeviceId.ToString("N");
+            chosen = (snapshot is { Length: > 0 }
+                    ? ASync.Engine.Repository.Repository.FindSnapshots(snapshots, snapshot) is [var one] ? one
+                      : throw new ControlException($"No single snapshot matches \"{snapshot}\".")
+                    : snapshots.LastOrDefault(s => s.Source == source) ?? snapshots.LastOrDefault())
+                ?? throw new ControlException($"\"{folder.Name}\" has no snapshots yet.");
+        }
+        catch (Exception e) when (e is ApiException or HttpRequestException or SyncRefusedException or IOException)
+        {
+            throw new ControlException(e.Message);
+        }
+        var shortId = ASync.Engine.Repository.Repository.ShortSnapshotId(chosen.Id);
+        _collectionRestore = new MediaRestoreDto(folderId, shortId, true, 0, 0, 0, 0, null);
+        Publish(StatusEvent());
+        var last = DateTimeOffset.MinValue;
+        var progress = new Progress<ASync.Client.Core.Collections.CollectionRestoreProgress>(p =>
+        {
+            _collectionRestore = new MediaRestoreDto(folderId, shortId, true, p.Done, p.Total, p.Restored, p.Skipped, p.Current);
+            if (DateTimeOffset.UtcNow - last < TimeSpan.FromMilliseconds(500)) return;
+            last = DateTimeOffset.UtcNow;
+            Publish(StatusEvent());
+        });
+        _logger.LogInformation("Importing snapshot {Snapshot} of \"{Name}\" into the {What} ({Target}).", shortId, folder.Name, What(kind), target ?? "their own");
+        _collectionRestoring = Task.Run(async () =>
+        {
+            try
+            {
+                var restorer = new ASync.Client.Core.Collections.CollectionRestorer(repo);
+                var result = kind == FolderKind.Contacts
+                    ? await restorer.RestoreContactsAsync(chosen, _options.Contacts!, target, progress, CancellationToken.None)
+                    : await restorer.RestoreCalendarsAsync(chosen, _options.Calendars!, target, progress, CancellationToken.None);
+                _collectionRestore = new MediaRestoreDto(folderId, shortId, false, result.Total, result.Total, result.Restored, result.Skipped, null,
+                    result.Message, result.Errors.Count == 0);
+                _logger.LogInformation("Import into the {What}: {Message}", What(kind), result.Message);
+            }
+            catch (Exception e)
+            {
+                _collectionRestore = (_collectionRestore ?? new MediaRestoreDto(folderId, shortId, false, 0, 0, 0, 0, null)) with
+                {
+                    Running = false, Ok = false, Message = $"The restore stopped: {e.Message}",
+                };
+                _logger.LogWarning("Import into the {What} failed: {Message}", What(kind), e.Message);
+            }
+            Publish(StatusEvent());
+        });
+        return $"Restoring snapshot {shortId} of \"{folder.Name}\" into the {What(kind)}…";
     }
 
     public async Task<string> LeaveFolderAsync(int folderId, CancellationToken ct)

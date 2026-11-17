@@ -44,7 +44,8 @@ public record MaintenanceStatusDto(DateTime At, bool Ok, string? Message, string
 public record FolderDeviceDto(
     Guid DeviceId, string DeviceName, DevicePlatform Platform, string LocalPath, MirrorDirection? Direction, bool Paused,
     DateTime? LastSyncAt, bool? LastSyncOk, string? LastSyncMessage, RunConditionsDto? Conditions = null,
-    MediaSelectionDto? Media = null, MediaCountsDto? MediaCounts = null);
+    MediaSelectionDto? Media = null, MediaCountsDto? MediaCounts = null,
+    CollectionSelectionDto? Collections = null, CollectionCountsDto? CollectionCounts = null);
 
 /// <summary>
 /// When a device may run a folder by itself (its interval, file changes, wake-ups): only on unmetered networks, only
@@ -85,9 +86,9 @@ public record RecoveryKeyDto(string RecoveryKey, DateTime CreatedAt, string Stor
 
 /// <summary>Attach a device, or change its settings. <paramref name="Conditions"/>: null keeps them (none for a new device).
 /// <paramref name="Media"/>: Photos folders only, which photos and videos the device backs up (instead of a local path; null keeps it,
-/// everything for a new device).</summary>
+/// everything for a new device). <paramref name="Collections"/>: the same for Contacts and Calendars folders (accounts, calendars).</summary>
 public record AttachDeviceRequest(Guid DeviceId, string LocalPath, MirrorDirection? Direction = null, bool Paused = false, long? ExpectedRevision = null,
-    RunConditionsDto? Conditions = null, MediaSelectionDto? Media = null);
+    RunConditionsDto? Conditions = null, MediaSelectionDto? Media = null, CollectionSelectionDto? Collections = null);
 
 // ── What devices see ──────────────────────────────────────────────────────────
 
@@ -96,7 +97,7 @@ public record DeviceFolderDto(
     int FolderId, string Name, SyncMode Mode, FolderEncryption Encryption, FolderKind Kind,
     int IntervalMinutes, string[] Excludes, RetentionDto Retention, int VersionsKeepDays, int TrashKeepDays,
     long Revision, bool RepositoryReady, string LocalPath, MirrorDirection? Direction, bool Paused, RunConditionsDto? Conditions = null,
-    MediaSelectionDto? Media = null);
+    MediaSelectionDto? Media = null, CollectionSelectionDto? Collections = null);
 
 /// <summary>A device changing its own settings for a folder (from the device's UI or CLI). Null = unchanged.</summary>
 /// <summary>
@@ -106,11 +107,12 @@ public record DeviceFolderDto(
 public record DeviceFolderAlertDto(int FolderId, AlertKind Kind, string Detail, DateTime OpenedAt);
 
 public record UpdateDeviceFolderRequest(string? LocalPath = null, MirrorDirection? Direction = null, bool? Paused = null, long? ExpectedRevision = null,
-    RunConditionsDto? Conditions = null, MediaSelectionDto? Media = null);
+    RunConditionsDto? Conditions = null, MediaSelectionDto? Media = null, CollectionSelectionDto? Collections = null);
 
-/// <summary>A run's result. <paramref name="Media"/>: a Photos folder's backup, what its snapshot holds.</summary>
+/// <summary>A run's result. <paramref name="Media"/>: a Photos folder's backup, what its snapshot holds; <paramref name="Collections"/>: a
+/// Contacts or Calendars folder's.</summary>
 public record SyncReportRequest(bool Ok, string? Message, int Uploaded = 0, int Downloaded = 0, int Deleted = 0, int Conflicts = 0, long Bytes = 0,
-    MediaCountsDto? Media = null);
+    MediaCountsDto? Media = null, CollectionCountsDto? Collections = null);
 
 /// <summary>
 /// Which housekeeping this device should do now for an end-to-end Backup folder (the server cannot: it has no key).
@@ -151,13 +153,15 @@ public record DeviceFolderOptionsDto(bool MayAddFolders, string? Refusal, List<D
 /// (<paramref name="Direction"/> for Mirror). The folder follows exactly the rules of the web UI's.
 /// <paramref name="Media"/>: a Photos folder's selection (its local path is then empty).
 /// </summary>
-public record DeviceCreateFolderRequest(SaveFolderRequest Folder, string LocalPath, MirrorDirection? Direction = null, MediaSelectionDto? Media = null);
+public record DeviceCreateFolderRequest(SaveFolderRequest Folder, string LocalPath, MirrorDirection? Direction = null, MediaSelectionDto? Media = null,
+    CollectionSelectionDto? Collections = null);
 
 /// <summary>The folder a device created, as it sees it; <paramref name="RecoveryKey"/> (Transport Backup) is shown once.</summary>
 public record DeviceFolderCreatedDto(DeviceFolderDto Folder, string? RecoveryKey = null);
 
 /// <summary>A device joining one of its owner's folders (<c>POST /api/sync/folders/{id}/join</c>).</summary>
-public record DeviceJoinFolderRequest(string LocalPath, MirrorDirection? Direction = null, long? ExpectedRevision = null, MediaSelectionDto? Media = null);
+public record DeviceJoinFolderRequest(string LocalPath, MirrorDirection? Direction = null, long? ExpectedRevision = null, MediaSelectionDto? Media = null,
+    CollectionSelectionDto? Collections = null);
 
 // ── Storage gateway ───────────────────────────────────────────────────────────
 

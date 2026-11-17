@@ -1,5 +1,27 @@
 # Release notes
 
+## v0.1.6 — 2026-11-17
+
+- feat: **Back up contacts and calendars from your phone.** Two new kinds of folder, *Contacts* and *Calendars* (in the web UI and
+  in the phone's *New folder…*), back up the phone's address book and calendars: everything, or the accounts (Google, the phone,
+  the SIM, …) or calendars you choose from the phone's own list in the web UI (asked live, or the list it reported last), and for
+  calendars how far back (the last two years by default, or everything). Each contact is kept as a vCard 4.0 file with its photo,
+  each event as an iCalendar file with its repetitions, changed occurrences, reminders and guests, so `async-cli restore` and the web
+  snapshot browser give plain files any address book or calendar imports; the web UI also downloads a whole account as one .vcf and a
+  whole calendar as one .ics. Unchanged contacts are not read again and are stored once; changes are backed up soon after you make
+  them. The app asks to read contacts or calendars and explains why; it asks to add to them only for *Restore into the contacts… /
+  calendars…*, which imports a chosen snapshot into the original accounts or one you pick, skipping what is already there and never
+  deleting anything.
+- ci: **a version tag publishes the GitHub Release itself** (no draft to publish by hand): once every test and package job
+  has passed, the release goes out with every installer, archive and the APK, and installed apps offer the update at
+  once.
+- fix(android): **the app installs on phones that run Android in 32-bit mode.** Budget phones and Android Go editions (even
+  on Android 14) said the app was "not compatible": the APK had no 32-bit ARM (armeabi-v7a) code. It now covers 64-bit and
+  32-bit ARM and x86_64, on Android 8.0 and later.
+- fix(android): the background folder runs have a stable worker name again (task 17 had put it on the browse wake-up
+  worker by mistake). On the first start after this update the app re-enqueues the folders' scheduled work under the new
+  name, so phones that already have the app keep running their folders in the background.
+
 ## v0.1.5 — 2026-11-17
 
 - feat: **Back up photos and videos from your phone.** A new kind of folder, *Photos & videos* (in the web UI and in the

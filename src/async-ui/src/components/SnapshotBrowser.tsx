@@ -35,14 +35,17 @@ export default function SnapshotBrowser({ folder, refresh, onClose }: Props) {
     finally { setLoadingTree(false) }
   }, [folder.id])
 
-  const download = async (path: string, zip: boolean) => {
+  const download = async (path: string, zip: boolean, merge = false) => {
     if (!selected) return
     setError('')
-    try { await downloadFromSnapshot(folder.id, selected.id, path, zip) }
+    try { await downloadFromSnapshot(folder.id, selected.id, path, zip, merge) }
     catch (err) { setError(errorMessage(err, 'Could not start the download.')) }
   }
 
   const crumbs = tree ? tree.path.split('/').filter(Boolean) : []
+  // Contacts and Calendars folders (task 20): an account or calendar as one file to import anywhere.
+  const mergeLabel = folder.kind === 'Contacts' ? 'One .vcf' : folder.kind === 'Calendars' ? 'One .ics' : null
+  const mergeTitle = folder.kind === 'Contacts' ? 'Every contact of this account in one vCard file' : 'Every event of this calendar in one iCalendar file'
 
   return (
     <div className="card section">
@@ -113,6 +116,9 @@ export default function SnapshotBrowser({ folder, refresh, onClose }: Props) {
                               <div className="row-actions">
                                 {n.type === 'File' && <button type="button" className="secondary small" onClick={() => download(n.path, false)}>Download</button>}
                                 {n.type === 'Directory' && <button type="button" className="secondary small" onClick={() => download(n.path, true)}>ZIP</button>}
+                                {n.type === 'Directory' && mergeLabel && !n.path.includes('/') && (
+                                  <button type="button" className="secondary small" title={mergeTitle} onClick={() => download(n.path, false, true)}>{mergeLabel}</button>
+                                )}
                               </div>
                             </td>
                           </tr>

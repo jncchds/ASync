@@ -74,7 +74,7 @@ public sealed partial class DashboardViewModel(ShellViewModel shell) : Observabl
                 Folders.Move(Folders.IndexOf(existing), i);
             }
             existing.Update(wanted[i]);
-            existing.UpdateRestore(status.MediaRestore);
+            existing.UpdateRestore(wanted[i].Kind is ASync.Contracts.FolderKind.Contacts or ASync.Contracts.FolderKind.Calendars ? status.CollectionRestore : status.MediaRestore);
         }
         HasFolders = Folders.Count > 0;
     }

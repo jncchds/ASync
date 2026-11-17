@@ -31,6 +31,8 @@ namespace ASync.App.Android;
 /// Photos (task 19): <c>photos-dialog &lt;folder&gt;</c> (the Photos screen of a folder card), <c>photos-state</c>, <c>photos-allow</c>,
 /// <c>photos-albums all|&lt;name&gt;,…</c>, <c>photos-save</c>; without the UI <c>bg-photos</c> (access, location, albums, the restore),
 /// <c>bg-photos-set &lt;folder&gt; all|&lt;album id&gt;,…</c>, <c>bg-photos-restore &lt;folder&gt; [snapshot]</c>, <c>bg-photos-trigger</c>.
+/// Contacts and calendars (task 20): <c>pim-…</c> and <c>bg-pim…</c>, see <see cref="CollectionsAutomation"/>.
+/// <c>bg-worker-names &lt;n&gt;</c>: the queued work as an app with workers' names of version n left it, then planned again (the upgrade's migration).
 /// </summary>
 [BroadcastReceiver(Name = "ua.pp.chds.async.Automation", Exported = true, Permission = "android.permission.DUMP")]
 [IntentFilter(["ua.pp.chds.async.AUTOMATION"])]
@@ -80,6 +82,7 @@ public sealed class Automation : BroadcastReceiver
         var op = parts.Length > 0 ? parts[0] : "state";
         var arg = parts.Length > 1 ? parts[1].Trim() : "";
         var shell = Shell;
+        if (op.StartsWith("pim-", StringComparison.Ordinal) && await CollectionsAutomation.RunAsync(shell, Folder, op, arg) is { } pim) return pim;
         switch (op)
         {
             case "state":
@@ -177,6 +180,10 @@ public sealed class Automation : BroadcastReceiver
                     case "interval": page.SelectedInterval = AddFolderViewModel.Intervals.First(i => i.Minutes.ToString(System.Globalization.CultureInfo.InvariantCulture) == value); break;
                     case "folder": page.SelectedFolder = page.JoinableFolders.First(f => f.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) == value); break;
                     case "local": page.LocalPath = value; break;
+                    case "kind": // Photos | Contacts | Calendars (task 20): the type picker's last choices
+                        if (value == "Photos") page.IsPhotosMode = true;
+                        else page.CollectionKind = Enum.Parse<ASync.Contracts.FolderKind>(value);
+                        break;
                     default: return $"error: unknown field {kv[0]}";
                 }
                 return AddFolderState(shell);
@@ -371,6 +378,7 @@ public sealed class Automation : BroadcastReceiver
         AndroidAgent.EnsureStarted(context);
         if (parts[0] == "docs") return await DocumentsAutomation.RunAsync(context, line);
         var runtime = AndroidAgent.Runtime;
+        if (parts[0].StartsWith("bg-pim", StringComparison.Ordinal) && await CollectionsAutomation.BackgroundAsync(context, runtime, parts) is { } pim) return pim;
         switch (parts[0])
         {
             case "bg":
@@ -384,6 +392,8 @@ public sealed class Automation : BroadcastReceiver
                     {
                         ["id"] = w.Id.ToString(),
                         ["tags"] = string.Join(",", w.Tags.Where(t => !t.Contains('.', StringComparison.Ordinal) && t != BackgroundWork.Tag).Order()),
+                        // WorkManager tags each work with its worker's Java class name: the name the work is stored under.
+                        ["worker"] = w.Tags.FirstOrDefault(t => t.Contains('.', StringComparison.Ordinal)),
                         ["state"] = w.GetState().ToString(),
                         ["attempts"] = w.RunAttemptCount,
                         ["next"] = w.NextScheduleTimeMillis,
@@ -454,6 +464,12 @@ public sealed class Automation : BroadcastReceiver
                 Notifications.Reminder(context, folder.FolderId, title, message);
                 return title;
             }
+            case "bg-worker-names":
+                // bg-worker-names <n>: as if the queued work came from an app whose workers had names of version n (0 = before
+                // v0.1.6), then plans again: the upgrade's migration (BackgroundWork.MigrateWorkers) runs as it would on that phone.
+                BackgroundState.Update(context, s => { s.WorkerNames = int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture); return 0; });
+                BackgroundWork.Apply();
+                return $"worker names {BackgroundState.Load(context).WorkerNames}";
             case "bg-battery":
                 AndroidBackgroundServices.Instance.RequestIgnoreBatteryOptimizations();
                 return "asked";

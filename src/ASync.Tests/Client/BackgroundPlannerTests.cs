@@ -64,4 +64,22 @@ public class BackgroundPlannerTests
         Assert.Equal("Photos: nothing backed up for 3 days", BackgroundPlanner.ReminderText("Photos", SyncMode.Backup, 3).Title);
         Assert.Equal("Docs: nothing synced for 1 day", BackgroundPlanner.ReminderText("Docs", SyncMode.TwoWay, 1).Title);
     }
+
+    [Fact]
+    public void AnUpgradeThatRenamedWorkers_CancelsTheOldWork_AndSchedulesEveryFolderAgain_Once()
+    {
+        // A phone from before v0.1.6: two folders scheduled, their periodic work stored under the old worker names.
+        var old = BackgroundPlanner.MigrateWorkers(0, [7, 3]);
+        Assert.True(old.Reschedule);
+        Assert.Equal(["folder-3", "folder-7", "wake", "browse-wake"], old.Cancel);
+
+        // With the schedule forgotten, the next plan enqueues both folders again (under the new names).
+        var plan = BackgroundPlanner.Plan([Folder(3), Folder(7)]);
+        Assert.Equal([3, 7], BackgroundPlanner.Diff(new Dictionary<int, string>(), plan).Schedule.Select(f => f.FolderId));
+
+        // Once migrated (the version is stored), nothing happens again.
+        var current = BackgroundPlanner.MigrateWorkers(BackgroundPlanner.WorkerNamesVersion, [7, 3]);
+        Assert.False(current.Reschedule);
+        Assert.Empty(current.Cancel);
+    }
 }

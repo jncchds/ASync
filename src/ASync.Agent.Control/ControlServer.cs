@@ -72,6 +72,23 @@ public interface IControlHandler
 
     const string NoPhotos = "This agent cannot back up photos: update it.";
 
+    /// <summary>The device's contact accounts or calendars (task 20).</summary>
+    Task<CollectionListDto> CollectionListAsync(FolderKind kind, CancellationToken ct) => throw new ControlException(NoCollections);
+
+    /// <summary>Which accounts or calendars a Contacts or Calendars folder backs up here.</summary>
+    Task<string> SetCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct) => throw new ControlException(NoCollections);
+
+    /// <summary>Attaches this device to one of the owner's Contacts or Calendars folders.</summary>
+    Task<FolderAddedDto> JoinCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct) => throw new ControlException(NoCollections);
+
+    /// <summary>A Contacts or Calendars folder's snapshots, newest first.</summary>
+    Task<List<MediaSnapshotDto>> CollectionSnapshotsAsync(int folderId, CancellationToken ct) => throw new ControlException(NoCollections);
+
+    /// <summary>Starts importing a Contacts or Calendars snapshot into the phone.</summary>
+    Task<string> RestoreCollectionsAsync(int folderId, string? snapshot, string? target, CancellationToken ct) => throw new ControlException(NoCollections);
+
+    const string NoCollections = "This agent cannot back up contacts or calendars: update it.";
+
     const string NoFolders = "This agent cannot add folders: update it.";
 }
 
@@ -244,6 +261,20 @@ public sealed class ControlServer : IAsyncDisposable
                 ControlProtocol.Ops.CreateFolder => Added(r.Id,
                     await _handler.CreateFolderAsync(r.NewFolder ?? throw new ControlException("\"create-folder\" needs newFolder."), ct)),
                 ControlProtocol.Ops.JoinFolder when r.Media is { } media => Added(r.Id, await _handler.JoinPhotosAsync(Folder(), media, ct)),
+                ControlProtocol.Ops.JoinFolder when r.Collections is { } collections => Added(r.Id, await _handler.JoinCollectionsAsync(Folder(), collections, ct)),
+                ControlProtocol.Ops.CollectionList => new ControlResponse
+                {
+                    Id = r.Id, Ok = true,
+                    Collections = await _handler.CollectionListAsync(r.Kind ?? throw new ControlException("\"collection-list\" needs kind."), ct),
+                },
+                ControlProtocol.Ops.SetCollections => new ControlResponse
+                {
+                    Id = r.Id, Ok = true,
+                    Message = await _handler.SetCollectionsAsync(Folder(), r.Collections ?? throw new ControlException("\"set-collections\" needs collections."), ct),
+                },
+                ControlProtocol.Ops.CollectionSnapshots => new ControlResponse { Id = r.Id, Ok = true, MediaSnapshots = await _handler.CollectionSnapshotsAsync(Folder(), ct) },
+                ControlProtocol.Ops.RestoreCollections => new ControlResponse
+                    { Id = r.Id, Ok = true, Message = await _handler.RestoreCollectionsAsync(Folder(), r.Snapshot, r.Target, ct) },
                 ControlProtocol.Ops.JoinFolder => Added(r.Id,
                     await _handler.JoinFolderAsync(Folder(), Need(r.Path, "path"), r.Direction, ct)),
                 ControlProtocol.Ops.MediaLibrary => new ControlResponse { Id = r.Id, Ok = true, MediaLibrary = await _handler.MediaLibraryAsync(ct) },

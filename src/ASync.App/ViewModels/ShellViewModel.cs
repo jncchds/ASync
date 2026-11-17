@@ -106,6 +106,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     /// <summary>A Photos folder's screen (task 19): the permission's explanation, then what to back up.</summary>
     [ObservableProperty] public partial PhotosViewModel? PhotosDialog { get; set; }
 
+    /// <summary>A Contacts or Calendars folder's screen (task 20): the permission's explanation, then what to back up.</summary>
+    [ObservableProperty] public partial CollectionsViewModel? CollectionsDialog { get; set; }
+
     /// <summary>A short message at the top: what an action did, or why it failed.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasMessage))]
@@ -437,6 +440,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     public bool GoBack()
     {
+        if (CollectionsDialog is { } collections)
+        {
+            collections.Close();
+            CollectionsDialog = null;
+            return true;
+        }
         if (PhotosDialog is { } photos)
         {
             photos.Close();

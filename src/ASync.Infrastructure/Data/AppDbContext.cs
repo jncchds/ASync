@@ -56,6 +56,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(d => d.LastPushError).HasMaxLength(500);
             e.Property(d => d.MediaAccess).HasConversion<string>().HasMaxLength(20);
             e.Property(d => d.MediaAlbumsJson).HasColumnType("jsonb");
+            e.Property(d => d.CollectionListsJson).HasColumnType("jsonb");
             e.HasOne(d => d.User).WithMany(u => u.Devices).HasForeignKey(d => d.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

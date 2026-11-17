@@ -71,6 +71,20 @@ public class DevicesController : ControllerBase
     public async Task<ActionResult<DeviceAlbumsDto>> Albums(Guid id, [FromServices] DeviceMediaService media) =>
         await media.AlbumsAsync(User.UserId(), id, HttpContext.RequestAborted) is { } albums ? albums : NotFound(new { message = "Device not found." });
 
+    /// <summary>
+    /// The device's contact accounts or calendars with counts (task 20, a Contacts or Calendars folder's selection): live like the
+    /// albums, else the last list it reported. Someone else's device: 404.
+    /// </summary>
+    [HttpGet("{id:guid}/collections")]
+    [EnableRateLimiting(RateLimits.Browse)]
+    public async Task<ActionResult<DeviceCollectionsDto>> Collections(Guid id, [FromQuery] FolderKind kind, [FromServices] DeviceCollectionsService collections)
+    {
+        // Ownership first: someone else's device is not found, whatever the request says.
+        if (await _devices.GetAsync(id) is not { } device || device.UserId != User.UserId()) return NotFound(new { message = "Device not found." });
+        if (kind is not (FolderKind.Contacts or FolderKind.Calendars)) return BadRequest(new { message = "kind is Contacts or Calendars." });
+        return await collections.CollectionsAsync(User.UserId(), id, kind, HttpContext.RequestAborted) is { } list ? list : NotFound(new { message = "Device not found." });
+    }
+
     private ActionResult<BrowseListing> Answer(BrowseOutcome outcome) =>
         outcome.Listing is { } listing ? listing : StatusCode(outcome.Status, new { message = outcome.Message });
 

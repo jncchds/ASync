@@ -77,6 +77,11 @@ public static class AndroidAgent
                 // Photos folders back up MediaStore (task 19); its albums are listed for the web UI under the same browsing setting.
                 Media = new AndroidMediaLibrary(app),
                 MediaSource = AndroidMediaLibrary.Source,
+                // Contacts and Calendars folders back up the providers (task 20); their lists for the web UI under the same setting.
+                Contacts = new AndroidContactsSource(app),
+                Calendars = new AndroidCalendarSource(app),
+                ContactsSource = AndroidContactsSource.Source,
+                CalendarsSource = AndroidCalendarSource.Source,
             }, loggers);
             runtime.Start();
             _runtime = runtime;

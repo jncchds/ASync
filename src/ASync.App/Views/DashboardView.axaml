@@ -84,14 +84,15 @@
               </Border>
               <Border Classes="notice" Name="RestoreChoice" IsVisible="{Binding ChoosingRestore}">
                 <StackPanel Spacing="6">
-                  <TextBlock Classes="small" FontWeight="SemiBold" Text="Restore which snapshot into the library?" TextWrapping="Wrap" />
+                  <TextBlock Classes="small" FontWeight="SemiBold" Text="{Binding RestoreQuestion}" TextWrapping="Wrap" />
                   <ComboBox Name="RestoreSnapshots" ItemsSource="{Binding RestoreChoices}" SelectedItem="{Binding SelectedRestore}" HorizontalAlignment="Stretch">
                     <ComboBox.ItemTemplate>
                       <DataTemplate DataType="vm:RestoreChoice"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate>
                     </ComboBox.ItemTemplate>
                   </ComboBox>
-                  <TextBlock Classes="muted small" TextWrapping="Wrap"
-                             Text="Photos still on the phone are skipped. An older snapshot brings back what was deleted since." />
+                  <ComboBox Name="RestoreTargets" ItemsSource="{Binding RestoreTargets}" SelectedItem="{Binding SelectedTarget}" HorizontalAlignment="Stretch"
+                            IsVisible="{Binding ChoosesTarget}" />
+                  <TextBlock Classes="muted small" TextWrapping="Wrap" Text="{Binding RestoreHint}" />
                   <WrapPanel ItemSpacing="6" LineSpacing="6">
                     <Button Classes="small" Name="ConfirmRestore" Content="Restore" Command="{Binding ConfirmRestoreCommand}" />
                     <Button Classes="small secondary" Content="Cancel" Command="{Binding CancelRestoreCommand}" />
@@ -161,8 +162,10 @@
                 <Button Classes="small secondary" Content="Open folder" Command="{Binding OpenFolderCommand}" IsVisible="{Binding ShowFolderButtons}" />
                 <Button Classes="small secondary" Content="Change folder…" Command="{Binding ChooseFolderCommand}" IsVisible="{Binding ShowFolderButtons}" />
                 <Button Classes="small secondary" Name="ChoosePhotos" Content="Photos…" Command="{Binding ChoosePhotosCommand}" IsVisible="{Binding IsPhotos}" />
-                <Button Classes="small secondary" Name="RestorePhotos" Content="Restore into the library…" Command="{Binding RestorePhotosCommand}"
-                        IsVisible="{Binding IsPhotos}" />
+                <Button Classes="small secondary" Name="ChooseCollections" Content="{Binding ChooseCollectionsText}" Command="{Binding ChooseCollectionsCommand}"
+                        IsVisible="{Binding IsCollection}" />
+                <Button Classes="small secondary" Name="RestorePhotos" Content="{Binding RestoreButtonText}" Command="{Binding RestorePhotosCommand}"
+                        IsVisible="{Binding CanImport}" />
                 <Button Classes="small secondary" Name="EditConditions" Content="Conditions…" Command="{Binding EditConditionsCommand}"
                         IsVisible="{Binding !EditingConditions}" />
               </WrapPanel>

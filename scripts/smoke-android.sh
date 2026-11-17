@@ -26,6 +26,12 @@
 #   restored offline by async-cli from a copy of the repository with the recovery key, the sidecar's fields, the web snapshot
 #   browser's download; a new photo starting a backup through the MediaStore content trigger; a restore into the wiped album
 #   (byte for byte, back in MediaStore) and a second one skipping everything.
+#   Contacts and calendars (task 20, scripts/smoke-android-collections.sh): contacts in two accounts and events in two calendars seeded
+#   straight into the providers; the permission's explanation and the system's dialog (reading only); a Contacts and a Calendars folder
+#   with one account and one calendar chosen from the phone's live lists; backed up; the snapshots' .vcf / .ics files restored offline by
+#   async-cli and compared with the expected vCard 4.0 and iCalendar text; an account as one .vcf and a calendar as one .ics from the web
+#   snapshot browser; a changed contact starting a backup through the contacts content trigger; the account and calendar wiped and
+#   restored (WRITE asked only then), a second restore skipping everything, nothing else on the phone touched.
 #   Background work (M4-2): the foreground-service notification during the large transfer; the battery prompt and the
 #   system's exemption question; the folders' periodic WorkManager jobs; with the app in the background and its process
 #   killed (am kill), a file changed by async-cli arrives through the folder's periodic job, which the system runs in a
@@ -53,6 +59,8 @@
 #   NO_BUILD=1 IMAGE=async-desktop-smoke-async-server:latest …   # reuse a server image instead of building one
 #   KEEP=1 …                                                # leave the stack, the emulator and artifacts/android-smoke
 #   SKIP_BACKGROUND=1 …                                     # leave out the background-work sections (quicker)
+#   SKIP_PHOTOS=1 / SKIP_COLLECTIONS=1 …                    # leave out the photos / contacts and calendars sections
+#   WIPE=1 …                                                # start the emulator with its data wiped (a fresh phone)
 # The checks read `condition && pass … || fail …`: pass never fails, so fail runs only when the condition does.
 #   NTFY_APK=path/to/ntfy.apk …   # the ntfy app (F-Droid io.heckel.ntfy) for the UnifiedPush checks; skipped without it
 # shellcheck disable=SC2015
@@ -253,7 +261,7 @@ backend=$(api POST /api/storage-backends '{"name":"smoke","settings":{"type":"Lo
 pass "server on $server (the phone uses $phone_server), account admin, storage $backend"
 
 if ! adb get-state >/dev/null 2>&1; then
-  emulator -avd "$avd" -no-window -no-audio -no-boot-anim -no-snapshot -memory 2048 -partition-size 2048 -gpu swiftshader_indirect -camera-back emulated \
+  emulator -avd "$avd" ${WIPE:+-wipe-data} -no-window -no-audio -no-boot-anim -no-snapshot -memory 2048 -partition-size 2048 -gpu swiftshader_indirect -camera-back emulated \
     >"$work/emulator.log" 2>&1 &
   started_emulator=1
   adb wait-for-device
@@ -1016,7 +1024,11 @@ wait_state '(.folders | any(.name == "Phone new" or .name == "Shared")) | not' 3
 
 # Photo and video backups (task 19): its own file, sourced, with this script's helpers.
 # shellcheck source=scripts/smoke-android-photos.sh
-source scripts/smoke-android-photos.sh
+[[ -z "${SKIP_PHOTOS:-}" ]] && source scripts/smoke-android-photos.sh
+
+# Contacts and calendar backups (task 20): the same.
+# shellcheck source=scripts/smoke-android-collections.sh
+[[ -z "${SKIP_COLLECTIONS:-}" ]] && source scripts/smoke-android-collections.sh
 
 section "restart"
 adb shell am force-stop "$pkg"

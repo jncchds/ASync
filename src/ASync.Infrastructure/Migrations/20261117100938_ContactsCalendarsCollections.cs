@@ -1,0 +1,28 @@
+﻿using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace ASync.Infrastructure.Migrations
+{
+    /// <inheritdoc />
+    public partial class ContactsCalendarsCollections : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.AddColumn<string>(
+                name: "CollectionListsJson",
+                table: "Devices",
+                type: "jsonb",
+                nullable: true);
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropColumn(
+                name: "CollectionListsJson",
+                table: "Devices");
+        }
+    }
+}

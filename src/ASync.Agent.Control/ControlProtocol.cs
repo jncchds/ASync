@@ -104,6 +104,20 @@ public static class ControlProtocol
         public const string RestoreMedia = "restore-media";
         /// <summary>A Photos folder's snapshots to restore from (<c>folderId</c>): <see cref="ControlResponse.MediaSnapshots"/>, newest first.</summary>
         public const string MediaSnapshots = "media-snapshots";
+
+        // Added for contacts and calendars (task 20, still protocol 1). Their join-folder sends collections instead of path.
+
+        /// <summary>The device's contact accounts or calendars (<c>kind</c>): <see cref="ControlResponse.Collections"/>.</summary>
+        public const string CollectionList = "collection-list";
+        /// <summary>Change which accounts or calendars a Contacts or Calendars folder backs up here (<c>folderId</c>, <c>collections</c>).</summary>
+        public const string SetCollections = "set-collections";
+        /// <summary>A Contacts or Calendars folder's snapshots to restore from (<c>folderId</c>): <see cref="ControlResponse.MediaSnapshots"/>.</summary>
+        public const string CollectionSnapshots = "collection-snapshots";
+        /// <summary>
+        /// Start importing a Contacts or Calendars snapshot (<c>folderId</c>, <c>snapshot</c>, <c>target</c>: the account or calendar to
+        /// import into, absent = each into its own). <see cref="AgentStatusDto.CollectionRestore"/> follows it.
+        /// </summary>
+        public const string RestoreCollections = "restore-collections";
     }
 }
 
@@ -136,8 +150,14 @@ public sealed record ControlRequest
     public MirrorDirection? Direction { get; init; }
     /// <summary><c>set-media</c>, <c>join-folder</c> of a Photos folder: which photos and videos it backs up.</summary>
     public MediaSelectionDto? Media { get; init; }
-    /// <summary><c>restore-media</c>: the snapshot (id, or a prefix or suffix of one).</summary>
+    /// <summary><c>restore-media</c>, <c>restore-collections</c>: the snapshot (id, or a prefix or suffix of one).</summary>
     public string? Snapshot { get; init; }
+    /// <summary><c>set-collections</c>, <c>join-folder</c> of a Contacts or Calendars folder: which accounts or calendars it backs up.</summary>
+    public CollectionSelectionDto? Collections { get; init; }
+    /// <summary><c>collection-list</c>: Contacts or Calendars.</summary>
+    public FolderKind? Kind { get; init; }
+    /// <summary><c>restore-collections</c>: the account or calendar to import into (null: each into its own).</summary>
+    public string? Target { get; init; }
 }
 
 public sealed record ControlResponse
@@ -163,7 +183,16 @@ public sealed record ControlResponse
     public MediaLibraryDto? MediaLibrary { get; init; }
     /// <summary><c>media-snapshots</c>: the snapshots a restore can use.</summary>
     public List<MediaSnapshotDto>? MediaSnapshots { get; init; }
+    /// <summary><c>collection-list</c>: the accounts or calendars.</summary>
+    public CollectionListDto? Collections { get; init; }
 }
+
+/// <summary>
+/// The device's contact accounts or calendars as the agent sees them (task 20). <paramref name="CanWrite"/>: a restore may add to them
+/// now (WRITE_CONTACTS / WRITE_CALENDAR granted); <paramref name="Problem"/>: why they cannot be read, for people.
+/// </summary>
+public sealed record CollectionListDto(FolderKind Kind, MediaAccess Access, List<CollectionDto> Collections, int Items = 0, bool CanWrite = false,
+    string? Problem = null);
 
 /// <summary>A Photos folder's snapshot for the restore's choice: <paramref name="Mine"/> = made by this device; <paramref name="Files"/>: originals and sidecars.</summary>
 public sealed record MediaSnapshotDto(string Id, string ShortId, DateTimeOffset Time, string? Device, bool Mine, int Files);
@@ -256,6 +285,11 @@ public sealed record AgentStatusDto
     public MediaAccess? Media { get; init; }
     /// <summary>The last (or running) restore into the photo library.</summary>
     public MediaRestoreDto? MediaRestore { get; init; }
+    /// <summary>What the agent may read of the device's contacts and calendars (null: none here, or an older agent).</summary>
+    public MediaAccess? Contacts { get; init; }
+    public MediaAccess? Calendars { get; init; }
+    /// <summary>The last (or running) import of a Contacts or Calendars snapshot into the phone.</summary>
+    public MediaRestoreDto? CollectionRestore { get; init; }
 }
 
 /// <summary>
@@ -290,6 +324,9 @@ public sealed record FolderStatusDto
     public MediaSelectionDto? Media { get; init; }
     /// <summary>A Photos folder's last backup: what it holds.</summary>
     public MediaCountsDto? MediaCounts { get; init; }
+    /// <summary>A Contacts or Calendars folder's selection on this device (task 20), and what its last backup holds.</summary>
+    public CollectionSelectionDto? Collections { get; init; }
+    public CollectionCountsDto? CollectionCounts { get; init; }
     public int IntervalMinutes { get; init; }
     public bool Paused { get; init; }
     /// <summary>End-to-end and not unlocked on this device (or not set up yet): it cannot run.</summary>

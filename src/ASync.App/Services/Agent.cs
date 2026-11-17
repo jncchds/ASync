@@ -78,6 +78,20 @@ public interface IAgentSession : IAsyncDisposable
 
     const string NoFolders = "This agent cannot add folders: update it (async-cli or the agent service).";
     const string NoPhotos = "This agent cannot back up photos: update it.";
+
+    /// <summary>The device's contact accounts or calendars (task 20).</summary>
+    Task<CollectionListDto> CollectionListAsync(FolderKind kind, CancellationToken ct) => throw new ControlException(NoCollections);
+
+    Task<string> SetCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct) => throw new ControlException(NoCollections);
+
+    Task<FolderAddedDto> JoinCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct) => throw new ControlException(NoCollections);
+
+    Task<List<MediaSnapshotDto>> CollectionSnapshotsAsync(int folderId, CancellationToken ct) => throw new ControlException(NoCollections);
+
+    /// <summary>Starts importing a snapshot (null: this device's newest) into <paramref name="target"/> (null: each into its own).</summary>
+    Task<string> RestoreCollectionsAsync(int folderId, string? snapshot, string? target, CancellationToken ct) => throw new ControlException(NoCollections);
+
+    const string NoCollections = "This agent cannot back up contacts or calendars: update it.";
 }
 
 /// <summary>The agent of a config directory, over its Unix socket or named pipe.</summary>
@@ -114,6 +128,12 @@ public sealed class ControlAgentConnector(string configDirectory) : IAgentConnec
         public Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => client.JoinPhotosAsync(folderId, media, ct);
         public Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) => client.RestoreMediaAsync(folderId, snapshot, ct);
         public Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct) => client.MediaSnapshotsAsync(folderId, ct);
+        public Task<CollectionListDto> CollectionListAsync(FolderKind kind, CancellationToken ct) => client.CollectionListAsync(kind, ct);
+        public Task<string> SetCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct) => client.SetCollectionsAsync(folderId, collections, ct);
+        public Task<FolderAddedDto> JoinCollectionsAsync(int folderId, CollectionSelectionDto collections, CancellationToken ct) => client.JoinCollectionsAsync(folderId, collections, ct);
+        public Task<List<MediaSnapshotDto>> CollectionSnapshotsAsync(int folderId, CancellationToken ct) => client.CollectionSnapshotsAsync(folderId, ct);
+        public Task<string> RestoreCollectionsAsync(int folderId, string? snapshot, string? target, CancellationToken ct) =>
+            client.RestoreCollectionsAsync(folderId, snapshot, target, ct);
         public ValueTask DisposeAsync() => client.DisposeAsync();
     }
 }

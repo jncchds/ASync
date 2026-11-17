@@ -50,6 +50,8 @@ internal sealed class BackgroundState
     public string? PushEndpoint { get; set; }
     public bool PushRegistered { get; set; }
     public string? PushProblem { get; set; }
+    /// <summary>The workers' Java names the queued work refers to (<see cref="BackgroundPlanner.WorkerNamesVersion"/>); 0 = before v0.1.6.</summary>
+    public int WorkerNames { get; set; }
 
     private static readonly Lock Gate = new();
     private static BackgroundState? _current;
@@ -132,9 +134,11 @@ internal static class BackgroundWork
         UnifiedPush.SendPending(_context, _runtime);
         var folders = _runtime.Folders.Select(f => f.Folder).ToList();
         var plan = BackgroundPlanner.Plan(folders);
+        MigrateWorkers();
         var scheduled = BackgroundState.Load(_context).Scheduled;
         var changes = BackgroundPlanner.Diff(new Dictionary<int, string>(scheduled), plan);
         EnsureMediaTrigger();
+        EnsureCollectionTriggers();
         if (changes.IsEmpty) return;
         foreach (var folder in changes.Schedule) Schedule(folder);
         foreach (var id in changes.Cancel)
@@ -150,6 +154,27 @@ internal static class BackgroundWork
         });
         foreach (var folder in changes.Schedule)
             if (folders.FirstOrDefault(f => f.FolderId == folder.FolderId) is { } dto) Reminders.Ensure(_context, dto, null, replace: false);
+    }
+
+    /// <summary>
+    /// After an upgrade that renamed workers (v0.1.6: FolderRunWorker and BrowseWakeWorker got stable Java names), the work queued under
+    /// the old names is cancelled and the schedule forgotten, so <see cref="Apply"/> enqueues every folder's periodic work afresh.
+    /// WorkManager cannot recover it by itself: a stored worker class that no longer exists fails every run, and the UPDATE policy
+    /// refuses to change a work's class. Runs once (the version is stored). A fresh install has nothing scheduled: it only stores it.
+    /// </summary>
+    private static void MigrateWorkers()
+    {
+        var state = BackgroundState.Load(_context);
+        var migration = BackgroundPlanner.MigrateWorkers(state.WorkerNames, state.Scheduled.Keys);
+        if (!migration.Reschedule) return;
+        foreach (var name in migration.Cancel) Work.CancelUniqueWork(name);
+        BackgroundState.Update(_context, s =>
+        {
+            s.Scheduled = [];
+            s.WorkerNames = BackgroundPlanner.WorkerNamesVersion;
+            return 0;
+        });
+        Log.Info("ASync", $"Background: workers renamed; {migration.Cancel.Count} queued work(s) cancelled, the folders are scheduled again.");
     }
 
     /// <summary>
@@ -220,6 +245,34 @@ internal static class BackgroundWork
                 return;
             }
             Work.EnqueueUniqueWork(MediaTriggerWorker.Name, next ? ExistingWorkPolicy.AppendOrReplace! : ExistingWorkPolicy.Keep!, MediaTriggerWorker.Build());
+        });
+    }
+
+    /// <summary>The contacts and calendar content triggers (<see cref="CollectionTriggerWorker"/>, task 20).</summary>
+    public static void EnsureCollectionTriggers()
+    {
+        EnsureCollectionTrigger(FolderKind.Contacts);
+        EnsureCollectionTrigger(FolderKind.Calendars);
+    }
+
+    /// <summary>
+    /// One kind's trigger while there are folders of it and ASync may read it; cancelled otherwise. <paramref name="next"/>: the trigger
+    /// fired and schedules the next one (appended after itself).
+    /// </summary>
+    public static void EnsureCollectionTrigger(FolderKind kind, bool next = false)
+    {
+        if (_runtime is null || !_runtime.FoldersLoaded) return;
+        Safely(() =>
+        {
+            var folders = BackgroundPlanner.FoldersOfKind(_runtime.Folders.Select(f => f.Folder), kind);
+            var access = kind == FolderKind.Contacts ? AndroidCollectionAccess.Contacts : AndroidCollectionAccess.Calendars;
+            var name = CollectionTriggerWorker.Name(kind);
+            if (folders.Count == 0 || access.Access == MediaAccess.None)
+            {
+                if (!next) Work.CancelUniqueWork(name);
+                return;
+            }
+            Work.EnqueueUniqueWork(name, next ? ExistingWorkPolicy.AppendOrReplace! : ExistingWorkPolicy.Keep!, CollectionTriggerWorker.Build(kind));
         });
     }
 
@@ -296,17 +349,11 @@ internal static class Reminders
 }
 
 /// <summary>
-/// One background run: a folder's periodic job (<c>folder</c> = its id), or a wake-up (<c>folder</c> = -1, <c>reason</c>
-/// from the push). The process may have been started for it: the agent starts first. Automatic runs, so the folder's run
-/// conditions apply (WorkManager already waited for the constraints it can express). A run the system stops is stopped
-/// cleanly (interrupted transfers continue next time) and retried.
-/// </summary>
-[Register("ua.pp.chds.async.FolderRunWorker")]
-/// <summary>
 /// A "browse" wake-up (task 17): the person is choosing a folder of this phone in the web UI. Starts the agent, opens a
 /// fresh live connection (the server waits up to 30 s for it), and keeps the process online while the picker is used: until
 /// <see cref="Idle"/> passes without a listing request, at most <see cref="Longest"/>. Runs no folders.
 /// </summary>
+[Register("ua.pp.chds.async.BrowseWakeWorker")]
 public sealed class BrowseWakeWorker(Context context, WorkerParameters parameters) : Worker(context, parameters)
 {
     public const string Name = "browse-wake";
@@ -349,6 +396,13 @@ public sealed class BrowseWakeWorker(Context context, WorkerParameters parameter
     public override ForegroundInfo ForegroundInfo => Notifications.TransferInfo(ApplicationContext!, Notifications.Transfer(ApplicationContext!, null, null));
 }
 
+/// <summary>
+/// One background run: a folder's periodic job (<c>folder</c> = its id), or a wake-up (<c>folder</c> = -1, <c>reason</c>
+/// from the push). The process may have been started for it: the agent starts first. Automatic runs, so the folder's run
+/// conditions apply (WorkManager already waited for the constraints it can express). A run the system stops is stopped
+/// cleanly (interrupted transfers continue next time) and retried.
+/// </summary>
+[Register("ua.pp.chds.async.FolderRunWorker")]
 public sealed class FolderRunWorker(Context context, WorkerParameters parameters) : Worker(context, parameters)
 {
     public const string FolderKey = "folder";

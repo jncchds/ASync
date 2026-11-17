@@ -1,8 +1,8 @@
 name: Build, test and release
 
-# A version tag (git tag v0.1.1 && git push origin v0.1.1) publishes the Docker images and makes a DRAFT GitHub Release
-# with the desktop installers, the async-cli archives and packages, and the Velopack update feed; publishing that draft
-# is a person's step. Pull requests run the tests and build every package (nothing is published); a manual run
+# A version tag (git tag v0.1.1 && git push origin v0.1.1) publishes the Docker images and a published GitHub Release
+# with the desktop installers, the async-cli archives and packages, the Android APK and the Velopack update feed, once
+# every test job has passed: installed apps see it at once. Pull requests run the tests and build every package (nothing is published); a manual run
 # (workflow_dispatch) builds and publishes the images of the chosen ref, and builds the packages without a release.
 on:
   push:
@@ -314,8 +314,9 @@ jobs:
           path: artifacts/packages/android/
           if-no-files-found: error
 
-  # A draft GitHub Release for the tag with every package and the Velopack feed (releases.<channel>.json per target): the
-  # desktop app's update check reads the published releases, so nothing reaches anyone until a person publishes it.
+  # The GitHub Release for the tag, published, with every package and the Velopack feed (releases.<channel>.json per target):
+  # the desktop app's update check reads published releases, so installed apps offer it at once. It runs only after the
+  # tests, the end-to-end test and every package build have passed.
   release:
     needs: [test, e2e, agent-desktop, package, android]
     if: github.ref_type == 'tag'
@@ -371,15 +372,17 @@ jobs:
           EOF
           sed -i "s/<version>/$version/g" notes.md
 
-      - name: Create the draft release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version=$(tr -d '[:space:]' < VERSION)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # A re-run of the tag (or a draft made by hand): replace the files and publish it.
             gh release upload "$GITHUB_REF_NAME" release/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --draft=false
           else
-            gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag --title "ASync $version" --notes-file notes.md
+            gh release create "$GITHUB_REF_NAME" release/* --verify-tag --title "ASync $version" --notes-file notes.md
           fi
 
   # The real server stack (docker compose) with two async-cli agents plus one in the async-cli image: TwoWay, Mirror,

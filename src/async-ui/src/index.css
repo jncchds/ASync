@@ -385,6 +385,9 @@ pre.command {
 .album-list .small-text { flex: 0 1 auto; text-align: right; }
 .album-counts > span { white-space: nowrap; }
 .media-filters { margin-top: 0.25rem; }
+/* Contacts and calendars (task 20): a calendar's colour, an account under its name. */
+.calendar-dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; flex: 0 0 auto; border: 1px solid var(--border); }
+.collection-details { display: block; font-size: 0.82rem; color: var(--text-muted); overflow-wrap: anywhere; }
 
 /* ── Device folder picker (FolderDeviceForm's Browse…) ── */
 .path-field { min-width: 0; }
