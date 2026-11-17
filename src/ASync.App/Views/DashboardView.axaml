@@ -41,7 +41,14 @@
       </StackPanel>
     </Border>
 
-    <TextBlock Classes="h2" Text="Folders" Margin="2,6,0,0" />
+    <Grid ColumnDefinitions="*,Auto" Margin="2,6,0,0">
+      <TextBlock Classes="h2" Text="Folders" VerticalAlignment="Center" />
+      <WrapPanel Grid.Column="1" ItemSpacing="6" LineSpacing="6" HorizontalAlignment="Right">
+        <Button Classes="small" Name="NewFolder" Content="New folder…" Command="{Binding Shell.NewFolderCommand}" />
+        <Button Classes="small secondary" Name="JoinFolder" Content="Add to a folder…" Command="{Binding Shell.JoinFolderCommand}"
+                ToolTip.Tip="Add this device to one of your folders" />
+      </WrapPanel>
+    </Grid>
     <Border Classes="card" IsVisible="{Binding HasNoFolders}">
       <StackPanel Spacing="6">
         <TextBlock Text="No folders on this device yet." FontWeight="SemiBold" />

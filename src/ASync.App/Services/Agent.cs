@@ -48,6 +48,20 @@ public interface IAgentSession : IAsyncDisposable
 
     /// <summary>Allows or forbids browsing this device's folders from the web UI (the agent keeps it and tells the server).</summary>
     Task<string> SetBrowsingAsync(bool enabled, CancellationToken ct) => throw new ControlException("This agent cannot change browsing.");
+
+    /// <summary>The storage back-ends this device may create folders on, the folders it could join, or why it may not (task 18).</summary>
+    Task<DeviceFolderOptionsDto> FolderOptionsAsync(CancellationToken ct) => throw new ControlException(NoFolders);
+
+    /// <summary>Creates a folder of the owner with this device attached.</summary>
+    Task<FolderAddedDto> CreateFolderAsync(DeviceCreateFolderRequest request, CancellationToken ct) => throw new ControlException(NoFolders);
+
+    /// <summary>Attaches this device to one of the owner's folders.</summary>
+    Task<FolderAddedDto> JoinFolderAsync(int folderId, string path, MirrorDirection? direction, CancellationToken ct) =>
+        throw new ControlException(NoFolders);
+
+    Task<string> LeaveFolderAsync(int folderId, CancellationToken ct) => throw new ControlException(NoFolders);
+
+    const string NoFolders = "This agent cannot add folders: update it (async-cli or the agent service).";
 }
 
 /// <summary>The agent of a config directory, over its Unix socket or named pipe.</summary>
@@ -74,6 +88,11 @@ public sealed class ControlAgentConnector(string configDirectory) : IAgentConnec
         public Task<string> CancelAsync(int? folderId, CancellationToken ct) => client.CancelAsync(folderId, ct);
         public Task<string> SetBrowsingAsync(bool enabled, CancellationToken ct) => client.SetBrowsingAsync(enabled, ct);
         public Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct) => client.InitEncryptionAsync(folderId, passphrase, ct);
+        public Task<DeviceFolderOptionsDto> FolderOptionsAsync(CancellationToken ct) => client.FolderOptionsAsync(ct);
+        public Task<FolderAddedDto> CreateFolderAsync(DeviceCreateFolderRequest request, CancellationToken ct) => client.CreateFolderAsync(request, ct);
+        public Task<FolderAddedDto> JoinFolderAsync(int folderId, string path, MirrorDirection? direction, CancellationToken ct) =>
+            client.JoinFolderAsync(folderId, path, direction, ct);
+        public Task<string> LeaveFolderAsync(int folderId, CancellationToken ct) => client.LeaveFolderAsync(folderId, ct);
         public ValueTask DisposeAsync() => client.DisposeAsync();
     }
 }

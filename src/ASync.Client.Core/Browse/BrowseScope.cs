@@ -42,6 +42,15 @@ public sealed class DesktopBrowseScope : IBrowseScope
 {
     public static readonly DesktopBrowseScope Instance = new();
 
+    /// <summary>
+    /// Directories never offered as starting points, nor mounts inside them: the agent's own config directory (it holds the
+    /// device's key; in the Docker image it is the /config volume, which would otherwise look like a data volume).
+    /// </summary>
+    public IReadOnlyList<string> HiddenPlaces { get; init; } = [];
+
+    /// <summary>This scope without the agent's config directory among the starting points.</summary>
+    public DesktopBrowseScope Hiding(string directory) => new() { HiddenPlaces = [.. HiddenPlaces, directory] };
+
     public bool Windows => OperatingSystem.IsWindows();
 
     public (DeviceBrowseRefusal Refusal, string Message)? Unavailable => null;
@@ -51,9 +60,11 @@ public sealed class DesktopBrowseScope : IBrowseScope
         var places = new List<BrowsePlace>();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrEmpty(home)) home = Environment.GetEnvironmentVariable("HOME") ?? "";
+        var hidden = HiddenPlaces.Select(h => BrowsePaths.Normalize(h, Windows)).OfType<string>().ToList();
         void Add(string label, string? path, BrowsePlaceKind kind)
         {
             if (string.IsNullOrEmpty(path) || BrowsePaths.Normalize(path, Windows) is not { } p) return;
+            if (kind == BrowsePlaceKind.Volume && hidden.Any(h => BrowsePaths.IsUnder(p, h, Windows))) return;
             if (places.Any(x => string.Equals(x.Path, p, Windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))) return;
             try { if (!Directory.Exists(p)) return; }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; }

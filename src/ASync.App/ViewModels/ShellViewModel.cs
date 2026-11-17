@@ -94,6 +94,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The settings page, shown over <see cref="Page"/> while open.</summary>
     [ObservableProperty] public partial SettingsViewModel? SettingsPage { get; private set; }
 
+    /// <summary>New folder, or Add this device to a folder: shown over <see cref="Page"/> while open (task 18).</summary>
+    [ObservableProperty] public partial AddFolderViewModel? AddFolderPage { get; set; }
+
     /// <summary>A dialog over everything (unlocking an end-to-end folder).</summary>
     [ObservableProperty] public partial UnlockViewModel? Dialog { get; set; }
 
@@ -258,6 +261,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             Enroll.Update(status);
             Page = Enroll;
             SettingsPage = null;
+            AddFolderPage = null;
         }
         else
         {
@@ -409,6 +413,21 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     public void CloseSettings() => SettingsPage = null;
 
+    /// <summary>Opens New folder (or, with <paramref name="join"/>, Add this device to a folder) and asks the agent what this device may do.</summary>
+    public Task OpenAddFolderAsync(bool join)
+    {
+        var page = new AddFolderViewModel(this, join);
+        SettingsPage = null;
+        AddFolderPage = page;
+        return page.ReloadCommand.ExecuteAsync(null);
+    }
+
+    [RelayCommand]
+    private Task NewFolder() => OpenAddFolderAsync(join: false);
+
+    [RelayCommand]
+    private Task JoinFolder() => OpenAddFolderAsync(join: true);
+
     /// <summary>
     /// The system's back gesture (Android's back button): closes the dialog (cancelled, its secret cleared), else the
     /// settings, else the message. False when there is nothing to close: the head then lets the system go back.
@@ -425,6 +444,11 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             dialog.CancelCommand.Execute(null);
             Dialog = null;
+            return true;
+        }
+        if (AddFolderPage is { } addFolder)
+        {
+            addFolder.Close();
             return true;
         }
         if (SettingsPage is not null)

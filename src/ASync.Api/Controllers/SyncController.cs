@@ -57,6 +57,57 @@ public class SyncController : ControllerBase
             .ToList();
     }
 
+    // ── Adding folders from the device (task 18) ──────────────────────────────
+    // Only with the device's "May add folders" (the person switches it on the Devices page); 403 otherwise. Always for
+    // the device's owner and this device itself: never another device, a storage back-end's settings or the account.
+
+    /// <summary>The storage back-ends the owner may use (names and types only) and the owner's folders this device could join.</summary>
+    [HttpGet("options")]
+    public async Task<ActionResult<DeviceFolderOptionsDto>> Options() =>
+        await _service.OptionsAsync(await _devices.GetAsync(DeviceId));
+
+    /// <summary>Creates a folder of the device's owner, with this device attached (the rules of <c>POST /api/folders</c>).</summary>
+    [HttpPost]
+    public async Task<ActionResult<DeviceFolderCreatedDto>> Create([FromBody] DeviceCreateFolderRequest req, CancellationToken ct)
+    {
+        var device = await _devices.GetAsync(DeviceId);
+        if (FolderService.DeviceMayAddFolders(device) is { } refused) return StatusCode(StatusCodes.Status403Forbidden, new { message = refused });
+        if (req.Folder is null) return BadRequest(new { message = "Describe the folder to create." });
+        var result = await _service.CreateAsync(device!.UserId, req.Folder, ct, new FolderService.FirstDevice(device, req.LocalPath ?? "", req.Direction));
+        if (!result.Success) return BadRequest(new { message = result.Error });
+        var (folder, recoveryKey) = result.Value!;
+        if (recoveryKey is not null) Response.Headers.CacheControl = "no-store";
+        return new DeviceFolderCreatedDto(FolderService.ToDeviceDto(folder, folder.Devices.Single(d => d.DeviceId == device.Id)), recoveryKey);
+    }
+
+    /// <summary>Attaches this device to one of its owner's folders.</summary>
+    [HttpPost("{id:int}/join")]
+    public async Task<ActionResult<DeviceFolderDto>> Join(int id, [FromBody] DeviceJoinFolderRequest req)
+    {
+        var device = await _devices.GetAsync(DeviceId);
+        if (FolderService.DeviceMayAddFolders(device) is { } refused) return StatusCode(StatusCodes.Status403Forbidden, new { message = refused });
+        var folder = await _folders.GetAsync(id);
+        if (folder is null || folder.UserId != device!.UserId) return NotFound(new { message = "There is no such folder in this account." });
+        var result = await _service.JoinAsync(folder, device, req);
+        if (!result.Success)
+            return result.Error is FolderService.Conflict or FolderService.AlreadyMember
+                ? Conflict(new { message = result.Error })
+                : BadRequest(new { message = result.Error });
+        return FolderService.ToDeviceDto(folder, folder.Devices.Single(d => d.DeviceId == device.Id));
+    }
+
+    /// <summary>Detaches this device from a folder (the folder and its data stay).</summary>
+    [HttpPost("{id:int}/leave")]
+    public async Task<IActionResult> Leave(int id)
+    {
+        var device = await _devices.GetAsync(DeviceId);
+        if (FolderService.DeviceMayAddFolders(device) is { } refused) return StatusCode(StatusCodes.Status403Forbidden, new { message = refused });
+        if (await MembershipAsync(id) is null) return NotFound(new { message = "This device is not part of that folder." });
+        var folder = await _folders.GetAsync(id);
+        var result = await _service.DetachDeviceAsync(folder!, DeviceId);
+        return result.Success ? NoContent() : BadRequest(new { message = result.Error });
+    }
+
     [HttpPatch("{id:int}")]
     public async Task<ActionResult<DeviceFolderDto>> UpdateOwnSettings(int id, [FromBody] UpdateDeviceFolderRequest req)
     {

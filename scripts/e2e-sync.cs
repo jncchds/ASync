@@ -762,6 +762,59 @@ async Task<int> RunAsync()
     var shown = await Cli(b, ["browsing"]);
     Check(on.Exit == 0 && shown.Output.Contains("allowed"), "B: `browsing --on` turns it back on", shown.Output);
 
+    // ── A device adds folders itself (task 18) ────────────────────────────────
+    Section("a device adds folders (task 18)");
+    string? DeviceToken(Agent agent) => JsonNode.Parse(File.ReadAllText(Path.Combine(agent.Config, "token.json")))?["accessToken"]?.GetValue<string>();
+    var bToken = DeviceToken(b);
+    var addOptions = await Send(HttpMethod.Get, "/api/sync/folders/options", token: bToken);
+    var addStorage = addOptions.Body?["storages"]?.AsArray().FirstOrDefault()?["id"]?.GetValue<int>() ?? 0;
+    Check(addOptions.Status == HttpStatusCode.OK && addOptions.Body?["mayAddFolders"]?.GetValue<bool>() == true && addStorage > 0
+          && !addOptions.Raw.Contains("settings"),
+        "B (one-time code) may add folders and sees the storage by name only", addOptions.Raw);
+    var fromBDir = b.Path("from-b");
+    Directory.CreateDirectory(fromBDir);
+    Write(Path.Combine(fromBDir, "made-on-b.txt"), "B made this folder");
+    var createdFromB = await Send(HttpMethod.Post, "/api/sync/folders", new
+    {
+        folder = new { name = "from B", mode = "TwoWay", encryption = "Transport", kind = "Files", storageBackendId = addStorage, rootPath = "from-b", intervalMinutes = 60 },
+        localPath = fromBDir,
+    }, bToken);
+    var fromB = createdFromB.Body?["folder"]?["folderId"]?.GetValue<int>() ?? 0;
+    Check(createdFromB.Status == HttpStatusCode.OK && fromB > 0, "B creates a TwoWay folder of its owner, with itself attached", createdFromB.Raw);
+    var seenFromB = await Send(HttpMethod.Get, $"/api/folders/{fromB}", token: token);
+    Check(seenFromB.Body?["addedFromDevice"]?.GetValue<string>() == b.Name, "the web UI lists it, \"added from\" B", seenFromB.Raw);
+    var overlapping = await Send(HttpMethod.Post, "/api/sync/folders", new
+    {
+        folder = new { name = "inside", mode = "TwoWay", encryption = "Transport", kind = "Files", storageBackendId = addStorage, rootPath = "from-b/inner", intervalMinutes = 60 },
+        localPath = b.Path("inner"),
+    }, bToken);
+    Check(overlapping.Status == HttpStatusCode.BadRequest && overlapping.Raw.Contains("overlaps"), "a root inside it is refused, as in the web UI", overlapping.Raw);
+    // A joins it (as a device, with its own token) and gets B's file once B's running agent has uploaded it.
+    await Cli(a, ["status"]); // refreshes A's cached access token
+    var joined = await Send(HttpMethod.Post, $"/api/sync/folders/{fromB}/join", new { localPath = a.Path("from-b") }, DeviceToken(a));
+    Check(joined.Status == HttpStatusCode.OK, "A joins the folder B made", joined.Raw);
+    Directory.CreateDirectory(a.Path("from-b"));
+    var arrived = await WaitForAsync(async () => { await Cli(a, ["sync", "--folder", fromB.ToString()]); return Same(fromBDir, a.Path("from-b"), "made-on-b.txt"); }, 60, 2);
+    Check(arrived, "B's agent uploads it by itself, and A downloads it", runB.Log.ToString());
+    Write(a.Path("from-b", "back-from-a.txt"), "and back");
+    await Sync(a, fromB, "A uploads a file into it");
+    Check(await WaitFor(() => Same(fromBDir, a.Path("from-b"), "back-from-a.txt"), 30), "B's agent gets A's file", runB.Log.ToString());
+    var leftFromB = await Send(HttpMethod.Post, $"/api/sync/folders/{fromB}/leave", token: DeviceToken(a));
+    var afterLeave = await Send(HttpMethod.Get, $"/api/folders/{fromB}", token: token);
+    Check(leftFromB.Status == HttpStatusCode.NoContent && afterLeave.Body?["devices"]?.AsArray().Count == 1, "A leaves it again; B stays", afterLeave.Raw);
+    var flagOff = await Send(HttpMethod.Patch, $"/api/devices/{b.Id}", new { mayAddFolders = false }, token);
+    var refusedB = await Send(HttpMethod.Get, "/api/sync/folders/options", token: DeviceToken(b));
+    var refusedCreate = await Send(HttpMethod.Post, "/api/sync/folders", new
+    {
+        folder = new { name = "no", mode = "TwoWay", encryption = "Transport", kind = "Files", storageBackendId = addStorage, rootPath = "no", intervalMinutes = 60 },
+        localPath = b.Path("no"),
+    }, DeviceToken(b));
+    Check(flagOff.Status == HttpStatusCode.OK && refusedB.Body?["mayAddFolders"]?.GetValue<bool>() == false
+          && refusedCreate.Status == HttpStatusCode.Forbidden && refusedCreate.Raw.Contains("Allowed in the web UI under Devices"),
+        "with \"May add folders\" off in the web UI, B is refused with where to allow it", refusedCreate.Raw);
+    await Send(HttpMethod.Patch, $"/api/devices/{b.Id}", new { mayAddFolders = true }, token);
+    await Send(HttpMethod.Delete, $"/api/folders/{fromB}", token: token);
+
     // ── The Docker image ──────────────────────────────────────────────────────
     if (dockerImage is not null && dockerNetwork is not null)
     {
@@ -792,6 +845,15 @@ async Task<int> RunAsync()
             Check(await WaitFor(() => File.Exists(Path.Combine(dockerData, "two", "docs", "report.bin")), 60)
                   && Same(a.Path("two"), Path.Combine(dockerData, "two"), "docs/report.bin", "live.txt"),
                 "the container downloads the folder into its /data mount", (await Docker(["logs", name])).Output);
+            // Its /data volume is a starting point for the web UI's picker; /config (the device's key) never is.
+            var dockerHome = await Send(HttpMethod.Get, $"/api/devices/{dockerId}/browse", token: token);
+            var dockerPlaces = dockerHome.Body?["places"]?.AsArray().Select(p => p?["path"]?.GetValue<string>()).ToList() ?? [];
+            Check(dockerHome.Status == HttpStatusCode.OK && dockerPlaces.Contains("/data") && !dockerPlaces.Contains("/config"),
+                $"the container offers /data to browse from, not /config → {string.Join(", ", dockerPlaces)}", dockerHome.Raw);
+            var dockerRow = ((await Send(HttpMethod.Get, "/api/devices", token: token)).Body?.AsArray() ?? [])
+                .FirstOrDefault(d => d?["id"]?.GetValue<string>() == dockerId.ToString());
+            Check(dockerRow?["mayAddFolders"]?.GetValue<bool>() == false, "a device enrolled with a reusable code may not add folders by default",
+                dockerRow?.ToJsonString());
         }
         finally
         {

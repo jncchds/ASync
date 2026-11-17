@@ -173,6 +173,22 @@ public sealed class AsyncApiClient : IDisposable
     public Task<DeviceFolderDto> UpdateOwnSettingsAsync(int folderId, UpdateDeviceFolderRequest req, CancellationToken ct = default) =>
         SendAsync<DeviceFolderDto>(HttpMethod.Patch, $"api/sync/folders/{folderId}", req, true, ct);
 
+    // ── Adding folders from the device (task 18; the device's "May add folders") ──
+
+    /// <summary>The storage back-ends this device may create folders on and the owner's folders it could join.</summary>
+    public Task<DeviceFolderOptionsDto> GetFolderOptionsAsync(CancellationToken ct = default) =>
+        SendAsync<DeviceFolderOptionsDto>(HttpMethod.Get, "api/sync/folders/options", null, true, ct);
+
+    /// <summary>Creates a folder of the owner with this device attached. 403 when the device may not add folders.</summary>
+    public Task<DeviceFolderCreatedDto> CreateFolderAsync(DeviceCreateFolderRequest req, CancellationToken ct = default) =>
+        SendAsync<DeviceFolderCreatedDto>(HttpMethod.Post, "api/sync/folders", req, true, ct);
+
+    public Task<DeviceFolderDto> JoinFolderAsync(int folderId, DeviceJoinFolderRequest req, CancellationToken ct = default) =>
+        SendAsync<DeviceFolderDto>(HttpMethod.Post, $"api/sync/folders/{folderId}/join", req, true, ct);
+
+    public Task LeaveFolderAsync(int folderId, CancellationToken ct = default) =>
+        SendAsync(HttpMethod.Post, $"api/sync/folders/{folderId}/leave", null, ct);
+
     /// <summary>Where the server can wake this device (a UnifiedPush endpoint).</summary>
     public Task<DevicePushDto> RegisterPushAsync(PushTargetRequest req, CancellationToken ct = default) =>
         SendAsync<DevicePushDto>(HttpMethod.Put, "api/sync/push", req, true, ct);

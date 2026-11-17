@@ -131,6 +131,8 @@ export interface Device {
   push: DevicePush | null
   /** Whether the web UI can browse its folders now, and if not, why (null: an older server). */
   browse?: BrowseAvailability | null
+  /** May create folders of yours and add itself to them from its app (task 18); switched here. */
+  mayAddFolders?: boolean
 }
 
 // ── Browsing a device's folders (the folder form's picker) ──────────────────
@@ -234,6 +236,8 @@ export interface PendingDevice {
 
 export const getDevices = () => api.get<Device[]>('/devices').then(r => r.data)
 export const renameDevice = (id: string, name: string) => api.patch<Device>(`/devices/${id}`, { name }).then(r => r.data)
+export const setDeviceMayAddFolders = (id: string, mayAddFolders: boolean) =>
+  api.patch<Device>(`/devices/${id}`, { mayAddFolders }).then(r => r.data)
 export const revokeDevice = (id: string) => api.delete(`/devices/${id}`)
 
 export const getEnrollments = () => api.get<Enrollment[]>('/devices/enrollments').then(r => r.data)
@@ -431,6 +435,8 @@ export interface Folder {
   recoveryKey?: string | null
   /** What it takes on its storage, as last counted (null = not counted yet). */
   usage: FolderUsage | null
+  /** Set when a device created it from its app: that device's name then (null = made here). */
+  addedFromDevice?: string | null
 }
 
 /**

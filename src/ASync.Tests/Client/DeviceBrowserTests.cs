@@ -301,4 +301,14 @@ public class DeviceBrowserTests : IDisposable
         Assert.Equal(places.Count, places.Select(p => p.Path).Distinct().Count());
         Assert.All(places, p => Assert.True(Directory.Exists(p.Path), p.Path));
     }
+
+    [Fact]
+    public void TheAgentsConfigDirectory_IsNeverOfferedAsAVolume()
+    {
+        // The Docker image's /config volume holds the device's key: a mount under a hidden place is left out.
+        var hidden = DesktopBrowseScope.Instance.Hiding(OperatingSystem.IsWindows() ? @"C:\" : "/");
+        var places = hidden.Places();
+        Assert.DoesNotContain(places, p => p.Kind is BrowsePlaceKind.Volume);
+        Assert.Equal(BrowsePlaceKind.Home, places[0].Kind); // home and the computer's root are still there
+    }
 }

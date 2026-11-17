@@ -41,6 +41,21 @@ public interface IControlHandler
 
     /// <summary>Allows or forbids browsing this device's folders from the web UI.</summary>
     Task<string> SetBrowsingAsync(bool enabled, CancellationToken ct) => throw new ControlException("This agent cannot change browsing.");
+
+    /// <summary>What this device may do about folders (task 18).</summary>
+    Task<DeviceFolderOptionsDto> FolderOptionsAsync(CancellationToken ct) => throw new ControlException(NoFolders);
+
+    /// <summary>Creates a folder of the owner with this device attached.</summary>
+    Task<FolderAddedDto> CreateFolderAsync(DeviceCreateFolderRequest request, CancellationToken ct) => throw new ControlException(NoFolders);
+
+    /// <summary>Attaches this device to one of the owner's folders.</summary>
+    Task<FolderAddedDto> JoinFolderAsync(int folderId, string path, MirrorDirection? direction, CancellationToken ct) =>
+        throw new ControlException(NoFolders);
+
+    /// <summary>Detaches this device from a folder.</summary>
+    Task<string> LeaveFolderAsync(int folderId, CancellationToken ct) => throw new ControlException(NoFolders);
+
+    const string NoFolders = "This agent cannot add folders: update it.";
 }
 
 /// <summary>An error the agent reports to the client as it is (no stack trace).</summary>
@@ -208,6 +223,12 @@ public sealed class ControlServer : IAsyncDisposable
                     Id = r.Id, Ok = true,
                     Message = await _handler.SetBrowsingAsync(r.Enabled ?? throw new ControlException("\"set-browsing\" needs enabled."), ct),
                 },
+                ControlProtocol.Ops.FolderOptions => new ControlResponse { Id = r.Id, Ok = true, FolderOptions = await _handler.FolderOptionsAsync(ct) },
+                ControlProtocol.Ops.CreateFolder => Added(r.Id,
+                    await _handler.CreateFolderAsync(r.NewFolder ?? throw new ControlException("\"create-folder\" needs newFolder."), ct)),
+                ControlProtocol.Ops.JoinFolder => Added(r.Id,
+                    await _handler.JoinFolderAsync(Folder(), Need(r.Path, "path"), r.Direction, ct)),
+                ControlProtocol.Ops.LeaveFolder => new ControlResponse { Id = r.Id, Ok = true, Message = await _handler.LeaveFolderAsync(Folder(), ct) },
                 _ => new ControlResponse { Id = r.Id, Error = $"Unknown operation \"{r.Op}\" (this agent speaks control protocol {ControlProtocol.Version})." },
             };
         }
@@ -222,6 +243,9 @@ public sealed class ControlServer : IAsyncDisposable
             return new ControlResponse { Id = r.Id, Error = e.Message };
         }
     }
+
+    private static ControlResponse Added(int id, FolderAddedDto added) =>
+        new() { Id = id, Ok = true, FolderId = added.FolderId, Message = added.Message, RecoveryKey = added.RecoveryKey };
 
     private async Task StreamEventsAsync(ControlConnection connection, CancellationToken ct)
     {

@@ -189,6 +189,15 @@ Implemented (M4-2, background work and push; migration `PushTargetsAndRunConditi
   app, so people only see its host), PushType (`UnifiedPush`; relay/APNs/FCM tokens later), PushRegisteredAt, and the
   last wake-up: LastPushAt, LastPushOk, LastPushError.
 
+Implemented (task 18, adding folders from the apps; migration `DevicesAddFolders`):
+
+- **Device.MayAddFolders** (bool): the device may create folders of its owner with itself attached, and join and leave
+  the owner's folders. Set at enrollment: true for a one-time code and the device-code flow, false for a reusable code;
+  false for every device from before the migration (the person switches it on, see "Adding folders from the apps").
+- **Folder.CreatedByDeviceId** (Guid?, no foreign key: devices are revoked, not deleted, and the note outlives a removed
+  device) and **CreatedByDeviceName** (up to 100 characters, the name then): where a folder made by a device came from;
+  null for folders made in the web UI. `FolderDto.AddedFromDevice` carries the name.
+
 ## Auth
 
 - **People** (web UI): copied from abook. A 15-minute JWT access token is kept in page memory. An httpOnly
@@ -199,7 +208,10 @@ Implemented (M4-2, background work and push; migration `PushTargetsAndRunConditi
   a warning and the `secrets show` command).
 - **Roles:** `Admin` and `User` for people, `Device` for devices. People's endpoints use
   `[Authorize(Roles = Roles.Users)]`, so a device token can never manage the account (users, devices,
-  enrollment codes).
+  enrollment codes). The one widening of a device's rights so far: with its *May add folders* flag (task 18) a device
+  may create a folder of its owner with itself attached, and join and leave the owner's folders, on device endpoints
+  of their own (`/api/sync/folders`, `…/options`, `…/{id}/join`, `…/{id}/leave`); see "Adding folders from the apps"
+  for what it can and cannot reach.
 - **OIDC** (optional, `Oidc__Authority` + `Oidc__ClientId`):
   1. `/api/auth/oidc/login` challenges the provider using code flow with PKCE.
   2. `/api/auth/oidc/callback` is handled by the middleware, which keeps the answer in a 5-minute `External`
@@ -239,7 +251,8 @@ code lives in `Services/DeviceProvisioningService.cs` (API: `DevicesController` 
       `async://pair?s=<PublicUrl>&c=<code>`.
    3. The app sends `POST /api/device-auth/enroll {code, name, platform, publicKey}`.
    - Codes are single-use, last 10 minutes and are stored hashed.
-   - `Reusable` codes (validity up to 30 days, use counted) are meant for scripted installs of CLI agents.
+   - `Reusable` codes (validity up to 30 days, use counted) are meant for scripted installs of CLI agents. Devices
+     enrolled with one start with *May add folders* off; with a one-time code or the device-code flow, on (task 18).
    - Codes are matched ignoring case, spaces and dashes. The alphabet has no 0/O/1/I/L/U.
    - The code is claimed with a conditional `UPDATE` inside a transaction, so concurrent use of a one-time
      code yields one device.
@@ -507,6 +520,9 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
 - **FolderDevice:** LocalPath, Direction (Mirror only), Paused and the last result. A device edits its own row
   with `PATCH /api/sync/folders/{id}`, and both kinds of edit may send `ExpectedRevision`; a mismatch gives a
   409.
+- **Devices adding folders** (task 18, with the device's *May add folders*): `POST /api/sync/folders` creates a folder of
+  the owner with the device attached, `…/{id}/join` and `…/{id}/leave` attach and detach the device itself, through the
+  same `FolderService` methods as the web UI; see "Adding folders from the apps".
 - **Rules:**
   - Folder roots never overlap on one back-end.
   - End-to-end encryption, and the Photos, Contacts and Calendars kinds, are Backup-only for now.
@@ -1044,6 +1060,110 @@ emulator's storage root through the API with All files access on, and gets the 4
 (its UnifiedPush section) it also browses the phone with the app's process killed: the server wakes it, it connects, and
 answers (with its "no All files access" refusal at that point of the run).
 
+## Adding folders from the apps (task 18)
+
+Asked for: "add folders from the Android app too". Until now only the web UI made folders and attached devices; a phone
+had to wait for a computer. Now the shared app (`ASync.App`, so the Android and desktop apps) has *New folder…* and
+*Add to a folder…*, and devices have endpoints of their own for it, gated by a per-device flag the person controls.
+
+**Server** (`SyncController`, `Roles.Device`; the rules in `FolderService`):
+- `GET /api/sync/folders/options` → `DeviceFolderOptionsDto {mayAddFolders, refusal, storages[], folders[]}`: the storage
+  back-ends the owner may use (`DeviceStorageOptionDto {id, name, type, shared}`: no settings, no secrets, no usage) and
+  the owner's folders this device is not in (`DeviceJoinableFolderDto`: name, mode, encryption, kind, back-end name, root,
+  repository ready, the names of its active devices). With the flag off the lists are empty and `refusal` says where to
+  allow it.
+- `POST /api/sync/folders {folder: SaveFolderRequest, localPath, direction}` → `DeviceFolderCreatedDto {folder, recoveryKey}`
+  (no-store when it carries a key): `FolderService.CreateAsync(owner, folder, ct, FirstDevice(device, localPath,
+  direction))`, the very method `POST /api/folders` uses, so every rule is the same (the owner's back-ends or shared ones
+  only, no overlapping roots, no `.async`, end-to-end and the non-Files kinds Backup-only, a deleted folder's data still
+  being purged, a Transport Backup repository with its recovery key, taking over an existing repository with one). The
+  membership is validated before anything is made on the storage (a refused local path or a Mirror without a direction
+  leaves no repository behind) and saved with the folder in one `SaveChanges`. The folder notes `CreatedByDevice*`.
+- `POST /api/sync/folders/{id}/join {localPath, direction, expectedRevision}` → `DeviceFolderDto`: `FolderService.JoinAsync`
+  = `AttachDeviceAsync` (the web UI's) for the calling device only; a folder of someone else is 404, one it is already in
+  409 ("already syncs"), a stale revision 409.
+- `POST /api/sync/folders/{id}/leave` → 204: `DetachDeviceAsync` for itself (404 when it is not in the folder).
+- With `Device.MayAddFolders` off, create, join and leave answer **403** `{message: "Adding folders from this device is
+  turned off. Allowed in the web UI under Devices (\"May add folders\")."}` (`FolderService.DeviceMayAddFolders`). A revoked
+  device's token is refused before (401, `OnTokenValidated`).
+- **Live:** creating sends `config.changed` to the device (its agent loads the folder) and to the owner's pages (people's
+  creates now too); join and leave go through `SaveAndNotifyAsync` like the web UI's attach and detach (`config.changed` to
+  the folder's devices and the owner). Content changes then flow as always (`folder.changed`).
+- **The flag:** `PATCH /api/devices/{id} {name?, mayAddFolders?}` (people only; the rename endpoint, now
+  `UpdateDeviceRequest` with both fields optional). A change sends `config.changed` to the device and `device.status` to the
+  owner's pages. `DeviceDto.MayAddFolders` shows it, also to the device itself (`GET /api/device-auth/self`).
+
+**Why widening a device's rights is acceptable, and where it stops.** A device token could already read and change every
+file of every folder it is in (the gateway), so a stolen token was already serious; what it could not do was reach
+anything else. With the flag, a device can additionally (1) create folders for its own owner, (2) attach *itself* to the
+owner's other folders and so read their data, (3) detach itself. It still cannot: attach or detach another device
+(the request names no device; the caller's id comes from the token), see or use another person's folders or back-ends
+(ownership is checked as for people: someone else's folder is 404, someone else's back-end "Choose one of your storage
+back-ends"), see a back-end's settings or secrets (names and types only), change a back-end, a folder's settings after
+creation (edits and deletion stay in the web UI), devices, enrollment codes, users or the account. Point (2) is the real
+widening: a stolen phone token could join the owner's other folders. Hence the flag, controlled only by the person (a
+people's endpoint), shown on the Devices page, off where devices are provisioned in bulk (reusable codes: scripted CLI
+agents in CI or on servers, which never need it and whose tokens live in environment files and images) and off for every
+device from before the migration (nobody chose it for them). Phones and desktops enrolled one by one, by a person holding
+the phone or approving in the browser, get it on, because that person is exactly the one who wants to add folders from
+there. End-to-end folders keep their content safe from it anyway (a device that joins has no passphrase). Revoking the
+device stops all of it at once, as before. Every create is logged with the device id.
+
+**Agent** (`AgentRuntime`, control ops `folder-options`, `create-folder`, `join-folder`, `leave-folder`; `AsyncApiClient`
+`GetFolderOptionsAsync`, `CreateFolderAsync`, `JoinFolderAsync`, `LeaveFolderAsync`): the local path is checked with the
+platform's `ILocalTreeFactory.Validate` first (a relative path, a phone path without All files access, Android/data…); the
+server's refusals come back as the agent's message (`ControlException`), an unreachable server as "Cannot reach the
+server, so nothing was changed: …", an older server (a bare 404/405) as "The server cannot add folders from devices yet:
+update it."; then the agent reloads its folders, so the new one runs at once. The desktop app reaches these over the
+control channel, the Android app in process (`InProcessAgentConnector`); an older agent answers "Unknown operation".
+
+**App** (`AddFolderViewModel`, `Views/AddFolderView.axaml`, shown over the page like the settings: `ShellViewModel.
+AddFolderPage`, opened by the dashboard's *New folder…* and *Add to a folder…*, closed by Back after the folder picker):
+- It asks `folder-options` first. With the flag off it shows the refusal ("… Allowed in the web UI under Devices") with *Try
+  again*; a 403 arriving later (switched off while the form was open) turns into the same.
+- *New folder:* name; Two-way / Mirror / Backup (a hint each); Mirror direction ("Upload: this phone is the original",
+  "Download: this phone gets a copy"); end-to-end encryption (Backup only, cleared when switching away); storage (a combo of
+  the owner's back-ends: "NAS (SFTP)", "Server disk (server disk, shared)"); the directory on the storage, filled in from the
+  name ("Holiday Photos" → `holiday-photos`) until edited; how often (5 min … once a day, default an hour); where it lives
+  on this device. Retention, excludes and the rest keep the server's defaults and are edited in the web UI.
+- *Add to a folder:* the folders the device could join with what they are ("Mirror · NAS: music · laptop"), the
+  direction for a Mirror folder, where it lives here.
+- **Where it lives** comes from the platform's pickers: on a phone the All files access picker (`LocalFolderViewModel` with
+  an apply that fills the form instead of calling `set-path`) or, without the permission, its explanation and the system's
+  document-tree picker; on desktops the native folder picker or a typed path.
+- **Afterwards:** the page closes with the agent's message. A new end-to-end Backup folder opens the encryption setup
+  (`UnlockViewModel` setup mode, M4-2: passphrase twice, recovery key once); a new Transport Backup folder shows its
+  recovery key on the page until *I have written it down* (not kept); joining an end-to-end folder opens *Unlock* (or the
+  setup when its repository is not made yet). Refusals (overlapping roots, a changed folder, offline) stay on the form,
+  which keeps what was typed.
+- The dashboard's hint for an empty device names the two buttons.
+
+**Web UI:** the Devices page has an *Adds folders* column (a checkbox per device, "Allowed"/"Off", a tooltip) with one
+line of explanation above the table; the Folders page shows "added from <device>" among a folder's details (tooltip: when).
+
+**Also (task 17's open item):** the browsing starting points of an agent no longer include its own config directory
+(`DesktopBrowseScope.HiddenPlaces`, set by `AgentRuntime` to the store's root): the Docker image's `/config` volume (the
+device's key) looked like a data volume.
+
+**Tests:** `ASync.Tests`: `ApiAddFoldersTests` (PostgreSQL: the flag's defaults per enrollment kind, only the owner
+switches it, a device token cannot; options with names and types only and nothing of another person; create for the
+owner with only this device attached and "added from", the live `config.changed` to the owner's hub connection, the web
+UI's rules — overlap, another person's back-end, Mirror without a direction, end-to-end Mirror, no local path, nothing
+left on the storage —, a Transport Backup's recovery key with no-store, an end-to-end one not ready; editing and deleting
+it in the web UI; join for itself only (a smuggled `deviceId` ignored, the other device's row unchanged), twice and a
+stale revision 409, another person's device 404, leave; with the flag off 403 with the message on all three and empty
+options; revoked → 401), `ApiSecurityTests` (the new endpoints classified as device endpoints from the routing table:
+403 for people, 404 for another person's device), `DeviceBrowserTests` (a hidden place's mounts not offered).
+`ASync.App.Tests`: `AddFolderTests` (options asked, defaults, the root following the name, everything sent, end-to-end
+into the setup, the recovery key shown and dropped, the server's refusals and offline kept on the form, the flag off and
+*Try again*, a 403 later, an old agent, joining with a direction and an end-to-end folder's unlock, nothing to join, the
+phone's All files access picker and the system picker filling the form, Back, the view wired and fitting 360 px, the
+refusal in the view). `scripts/e2e-sync.cs`: B (one-time code) creates a TwoWay folder through the device endpoints,
+"added from B", an overlapping root refused, A joins it with its device token and both sync, A leaves, the flag off →
+403; the Docker agent (reusable code) has it off and offers `/data` but not `/config`. `scripts/smoke-android.sh`: New
+folder at a real path through the in-app picker, synced both ways with async-cli; Add to a folder made in the web UI;
+the flag off → the app's refusal.
+
 ## Web UI: files, versions and trash of plain folders
 
 Gap item 5. Code: `PlainFilesController`, `Services/PlainFileService.cs` (`PlainBrowser` + `PlainFileService`),
@@ -1254,6 +1374,10 @@ runs two agents of one user.
     first). The code is never logged;
   - `set-browsing` (`enabled`; task 17): whether the web UI may browse this device's folders, kept in
     `agent-settings.json`; the status's `browsing` shows it (see "Web UI: browsing a device's folders");
+  - `folder-options`, `create-folder` (`newFolder`: a `DeviceCreateFolderRequest`; answers `folderId`, `message` and a
+    Transport Backup folder's `recoveryKey`), `join-folder` (`folderId`, `path`, `direction`), `leave-folder` (`folderId`;
+    task 18): the device adding folders itself, through the server's device endpoints, then a reload (see "Adding folders
+    from the apps");
   - `subscribe`: the connection then carries only events: a full `status` first, then `folder` changes, `run-finished`
     with the result, progress twice a second while it moves, `status` on connection or folder-list changes. A
     subscriber that does not keep up loses its oldest events (bounded channel of 256) instead of slowing the agent.
@@ -1318,7 +1442,9 @@ window closed or the app ended, and the CLI and the app always see the same agen
   all; a card per folder (`FolderViewModel`): mode, end-to-end, local path, a state pill (Syncing, Backing up, Paused,
   Locked, Failed, Overdue, Up to date…), live progress (a bar with files and bytes when the totals are known,
   indeterminate for backups), the current file, the last result and how long ago, the next run, the server's alerts,
-  and Sync now, Pause/Resume, Open folder, Change folder… (native folder picker → `set-path`), Unlock….
+  and Sync now, Pause/Resume, Open folder, Change folder… (native folder picker → `set-path`), Unlock…. Since task 18
+  *New folder…* and *Add to a folder…* above the cards open `AddFolderViewModel` over the page (see "Adding folders from
+  the apps").
 - `UnlockViewModel` (a dialog): passphrase or recovery key in a masked text box; the secret goes only to the agent's
   `unlock`, the field is cleared as soon as it is sent, and nothing logs it.
 - `UpdatesViewModel` (M3-3): the update banner over the page and the Updates card of the settings.
@@ -2349,6 +2475,11 @@ wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without
      8–10's storage permission and legacy storage, real USB drives and SD cards (the emulator's virtual SD card stands in),
      an OEM Settings without the per-app page (the fallback page).
      Next: the VFS on the desktops (Cloud Files, File Provider, FUSE), photos/contacts/calendars, iOS.
+   - **M4-6 Adding folders from the apps (task 18, done):** *New folder…* and *Add to a folder…* in the shared app
+     (Android and desktop), device endpoints gated by the per-device *May add folders* (Devices page; on for one-time
+     codes and the device-code flow, off for reusable codes and older devices), "added from <device>" in the web UI; the
+     Docker agent's `/config` no longer a browsing starting point. See "Adding folders from the apps" (verification there
+     and in the task's report).
    - **M4-5 Browsing a device's folders from the web (task 17, done):** the device-folder form's *Browse…* asks the
      device itself, over the hub (SignalR client results), to list a directory; starting points per platform, symlinks
      shown not followed, unreadable directories marked, 2000 entries, new folders; owner only, rate-limited, nothing

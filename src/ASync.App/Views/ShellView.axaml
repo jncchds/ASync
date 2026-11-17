@@ -73,6 +73,13 @@
       </ScrollViewer>
     </Border>
 
+    <!-- New folder / Add this device to a folder cover the page while open. -->
+    <Border Grid.Row="3" Background="{DynamicResource Bg}" IsVisible="{Binding AddFolderPage, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+        <ContentControl Name="AddFolderHost" Content="{Binding AddFolderPage}" MaxWidth="860" Padding="16" />
+      </ScrollViewer>
+    </Border>
+
     <!-- Dialogs (unlock) over everything. -->
     <Border Grid.Row="0" Grid.RowSpan="4" Background="{DynamicResource Backdrop}"
             IsVisible="{Binding Dialog, Converter={x:Static ObjectConverters.IsNotNull}}">
