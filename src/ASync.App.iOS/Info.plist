@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- CFBundleIdentifier, CFBundleShortVersionString and CFBundleVersion come from the project (ApplicationId, VERSION). -->
+	<key>CFBundleDisplayName</key>
+	<string>ASync</string>
+	<key>CFBundleName</key>
+	<string>ASync</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+		<integer>2</integer>
+	</array>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>XSAppIconAssets</key>
+	<string>Assets.xcassets/AppIcon.appiconset</string>
+	<!-- A launch screen of the system background (without one, iOS runs the app letterboxed in compatibility mode). -->
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<!-- async://pair?s=<server>&c=<code>: the web UI's pairing link and QR code, opened from another app or the camera. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>ua.pp.chds.async.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>async</string>
+			</array>
+		</dict>
+	</array>
+	<!-- The app's Documents in the Files app ("On My iPhone › ASync"), its files opened in place by other apps. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>ASync uses the camera only to scan the pairing QR code shown in the web UI under Devices → Add device.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>ASync connects to your ASync server, which may be on your local network.</string>
+	<!-- Self-hosted servers are often plain http on a LAN (as the desktop and Android apps allow). The app's own HTTP stack is
+	     .NET's (UseNativeHttpHandler=false), which App Transport Security does not cover; this covers the system's parts. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Used only when the app is signed (simulator builds are signed ad hoc; the unsigned .ipa carries none, SideStore/AltStore
+  give it their own). Nothing yet: the app's Keychain items and Secure Enclave key need no entitlement beyond the app id
+  that signing adds. Later tasks add here, once the app is signed with a team:
+    aps-environment (APNs wake-ups, task 22), com.apple.security.application-groups = group.ua.pp.chds.async (shared with the
+    File Provider extension of task 25), keychain-access-groups = $(AppIdentifierPrefix)ua.pp.chds.async (the same).
+-->
+<plist version="1.0">
+<dict/>
+</plist>
