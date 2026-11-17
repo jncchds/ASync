@@ -1523,7 +1523,7 @@ and dark (`desktop-*.png`).
 ## Installers and updates (M3-3)
 
 Every version tag builds the desktop app (`async-desktop`, which is also the agent service) and `async-cli` for
-Windows x64/ARM64, macOS ARM64 and Linux x64/ARM64 into a draft GitHub Release. One script does a target:
+Windows x64/ARM64, macOS ARM64 and Linux x64/ARM64 into a published GitHub Release. One script does a target:
 `scripts/package.sh <rid>` (bash; Git Bash on Windows), driven by CI's `package` matrix (see "Packaging and CI").
 
 **Publishing:** self-contained, ReadyToRun, not trimmed. ReadyToRun precompiles: an `async-cli` command starts in
@@ -2673,8 +2673,8 @@ contacts and calendars part is `scripts/smoke-android-collections.sh`): see its 
 - **Docker** `async-server` and `async-cli` (`Dockerfile.cli`): built for linux/amd64 and arm64
   (`.github/workflows/docker-publish.yml`).
   - **Publishing is triggered by pushing a version tag:** `git tag v<VERSION> && git push origin v<VERSION>`.
-    The tag must equal `v` + the `VERSION` file, or the build fails. The same tag makes the draft GitHub Release with
-    the desktop and CLI packages (below); publishing that draft is the last, manual step of a release.
+    The tag must equal `v` + the `VERSION` file, or the build fails. The same tag makes the GitHub Release with
+    the desktop, CLI and Android packages (below), published as soon as every test and package job has passed.
   - Image tags are `latest`, the `VERSION` value and `sha-…`.
   - Pushes to branches publish nothing. Pull requests run the tests and the end-to-end test, and a manual run
     (`workflow_dispatch`) builds the chosen ref.
@@ -2721,9 +2721,10 @@ contacts and calendars part is `scripts/smoke-android-collections.sh`): see its 
     with the Developer ID identities and a `notarytool` profile. linux-x64 also runs `scripts/smoke-packages.sh`.
   - `release` (tags only; needs `test`, `e2e`, `agent-desktop` and `package`): collects every target's files, only this
     release's Velopack files (by `assets.<rid>.json`, with `releases.<rid>.json` and `RELEASES-<rid>` filtered to them),
-    writes `SHA256SUMS`, and creates a **draft** GitHub Release for the tag with the version's release notes plus a
-    download table (`gh release create --draft --verify-tag`; a re-run uploads with `--clobber`). Installed apps only
-    see published releases, so a person reviews and publishes it.
+    writes `SHA256SUMS`, and creates the GitHub Release for the tag, **published**, with the version's release notes plus a
+    download table (`gh release create --verify-tag`; a re-run uploads with `--clobber` and publishes a draft with
+    `gh release edit --draft=false`). Installed apps see it at once (their update check reads published releases). Until
+    v0.1.6 it was a draft that a person published.
   - Docker images are published as before; the workflow is validated with `actionlint` (and shellcheck).
 - **Android** (job `android`, `ubuntu-24.04`, pull requests, tags and manual runs): .NET 10 with the `android` workload,
   Temurin 17, the SDK parts from the project's `InstallAndroidDependencies`, then `scripts/package-android.sh --aab`;

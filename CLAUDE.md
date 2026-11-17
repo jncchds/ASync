@@ -48,9 +48,9 @@ XVFB=/path/to/Xvfb scripts/smoke-desktop.sh   # the real desktop app on Xvfb + a
 
 Docker images and the desktop/CLI packages are published only for version tags. After `VERSION` and
 `RELEASE_NOTES.md` are on `main`: `git tag v$(cat VERSION) && git push origin v$(cat VERSION)`. The tag publishes the
-Docker images and creates a **draft** GitHub Release with every installer, archive, .deb/.rpm and the Velopack update
-feed; check it and press *Publish release* on GitHub (installed apps only see published releases). Pushing tags,
-publishing releases and `workflow_dispatch` are a person's steps, not an agent's.
+Docker images and, once every test and package job has passed, a **published** GitHub Release with every installer,
+archive, .deb/.rpm, the Android APK and the Velopack update feed (installed apps offer it at once). Pushing tags,
+editing releases and `workflow_dispatch` are a person's steps, not an agent's.
 
 ```bash
 scripts/package.sh linux-x64                 # one target's packages into artifacts/packages/<rid> (needs nfpm on Linux)

@@ -12,6 +12,9 @@
   them. The app asks to read contacts or calendars and explains why; it asks to add to them only for *Restore into the contacts… /
   calendars…*, which imports a chosen snapshot into the original accounts or one you pick, skipping what is already there and never
   deleting anything.
+- ci: **a version tag publishes the GitHub Release itself** (no draft to publish by hand): once every test and package job
+  has passed, the release goes out with every installer, archive and the APK, and installed apps offer the update at
+  once.
 - fix(android): **the app installs on phones that run Android in 32-bit mode.** Budget phones and Android Go editions (even
   on Android 14) said the app was "not compatible": the APK had no 32-bit ARM (armeabi-v7a) code. It now covers 64-bit and
   32-bit ARM and x86_64, on Android 8.0 and later.
