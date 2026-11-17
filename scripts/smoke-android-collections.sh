@@ -143,9 +143,9 @@ bg_has '.works | any((.tags | split(",") | index("contacts-trigger")) and .state
   && pass "the contacts content trigger is scheduled" || fail "contacts trigger" "$(bgstate | jq -c '[.works[] | {tags, state}]')"
 before=$(api GET "/api/folders/$cf/snapshots" | jq length)
 adb shell input keyevent KEYCODE_HOME
-grant WRITE_CONTACTS
-edit=$(ctl bg-pim-edit)
-revoke WRITE_CONTACTS; grant READ_CONTACTS
+# The adb shell changes the contact, as another app would (revoking ASync's own WRITE afterwards would kill its process).
+edit=$(adb shell "content update --uri content://com.android.contacts/data --bind data1:s:'+1 555 0299' --where \"mimetype='vnd.android.cursor.item/phone_v2' AND data1='+1 555 0200'\"" 2>&1 | tr -d '\r')
+edit="updated${edit:+ ($edit)}"
 more_snapshots() { [[ $(api GET "/api/folders/$cf/snapshots" | jq length) -gt $before ]]; }
 wait_for 240 more_snapshots && logged "Contacts changed: backing up" \
   && pass "Carol's new number ($edit) started a backup by itself: $(api GET "/api/folders/$cf" | jq -r '.devices[0].lastSyncMessage')" \
@@ -159,13 +159,13 @@ wait_for 30 bg_has '.works | any((.tags | split(",") | index("contacts-trigger")
 # Wipe the account and the calendar on the phone, then restore. The wipe trips the triggers: no empty snapshot over the good one.
 front_app
 wait_for 60 idle || true
-grant WRITE_CONTACTS WRITE_CALENDAR
-w1=$(ctl "bg-pim-wipe contacts $smoke_account"); w2=$(ctl "bg-pim-wipe calendar $work_cal")
-revoke WRITE_CONTACTS WRITE_CALENDAR; grant READ_CONTACTS READ_CALENDAR
-sleep 2
+# Wiped by the adb shell as the accounts' sync adapters would (rows really deleted), with ASync's permissions left as they are.
+adb shell "content delete --uri 'content://com.android.contacts/raw_contacts?caller_is_syncadapter=true' --where \"account_type='ua.pp.chds.async.smoke'\"" >/dev/null
+adb shell "content delete --uri 'content://com.android.calendar/events?caller_is_syncadapter=true&account_name=smoke@example.com&account_type=LOCAL' --where 'calendar_id=$work_cal'" >/dev/null
+
 front_app
 [[ "$(ctl "bg-pim-dump contacts $smoke_account")" == "[]" && "$(ctl "bg-pim-dump calendar $work_cal")" == "[]" ]] \
-  && pass "wiped on the phone: $w1 contacts, $w2 events" || fail "wipe" "$(ctl "bg-pim-dump contacts $smoke_account")"
+  && pass "wiped on the phone by the adb shell: smoke@example.com has no contacts, Smoke Work no events" || fail "wipe" "$(ctl "bg-pim-dump contacts $smoke_account")"
 snapshots_before=$(api GET "/api/folders/$cf/snapshots" | jq length)
 r=$(sync_phone "$cf" 120)
 jq -e '(.ok | not) and (.message | test("No snapshot was made"))' <<<"$r" >/dev/null && [[ $(api GET "/api/folders/$cf/snapshots" | jq length) -eq $snapshots_before ]] \

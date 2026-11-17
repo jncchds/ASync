@@ -21,10 +21,12 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AndroidPackageFormats Condition="'$(AndroidPackageFormats)' == ''">apk</AndroidPackageFormats>
     <AndroidPackageFormats>$([MSBuild]::Unescape($(AndroidPackageFormats.Replace(',', ';'))))</AndroidPackageFormats>
-    <!-- One APK for the two ABIs phones and emulators use (arm64 phones, x86_64 emulators and Chromebooks). -->
+    <!-- One APK for the phones and emulators there are: arm64 phones, 32-bit ARM ones (armeabi-v7a: budget phones and Android Go
+         editions run Android in 32-bit mode, even on 64-bit chips; without it they say "not compatible"), x86_64 emulators and
+         Chromebooks. 32-bit x86 is left out: no phone of Android 8 or later uses it. -->
     <!-- AndroidAbis=android-x64 builds only one (the emulator), quicker; commas between several on the command line. Setting
          RuntimeIdentifiers there instead would reach the libraries too. -->
-    <AndroidAbis Condition="'$(AndroidAbis)' == ''">android-arm64;android-x64</AndroidAbis>
+    <AndroidAbis Condition="'$(AndroidAbis)' == ''">android-arm64;android-arm;android-x64</AndroidAbis>
     <RuntimeIdentifiers>$([MSBuild]::Unescape($(AndroidAbis.Replace(',', ';'))))</RuntimeIdentifiers>
     <!-- Without this, the SDK adds the build machine's RID (linux-x64) to RuntimeIdentifiers of a trimmed Release build and
          asks for a Mono runtime pack of it that does not exist (NU1102), then for an inner build Android cannot do. -->

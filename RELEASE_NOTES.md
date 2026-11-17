@@ -12,6 +12,9 @@
   them. The app asks to read contacts or calendars and explains why; it asks to add to them only for *Restore into the contacts… /
   calendars…*, which imports a chosen snapshot into the original accounts or one you pick, skipping what is already there and never
   deleting anything.
+- fix(android): **the app installs on phones that run Android in 32-bit mode.** Budget phones and Android Go editions (even
+  on Android 14) said the app was "not compatible": the APK had no 32-bit ARM (armeabi-v7a) code. It now covers 64-bit and
+  32-bit ARM and x86_64, on Android 8.0 and later.
 - fix(android): the background folder runs have a stable worker name again (task 17 had put it on the browse wake-up
   worker by mistake). On the first start after this update the app re-enqueues the folders' scheduled work under the new
   name, so phones that already have the app keep running their folders in the background.

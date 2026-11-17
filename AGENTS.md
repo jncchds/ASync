@@ -1810,7 +1810,8 @@ headless on the desktop); the activity handles rotation and keyboard changes its
 
 **Build and signing:** `scripts/package-android.sh` builds Release (`TrimMode=partial`: only the framework is trimmed, so
 the client library's reflection JSON keeps working, with `JsonSerializerIsReflectionEnabledByDefault`), one APK for
-android-arm64 and android-x64 (52.8 MB; x64 alone 28 MB), `--aab` an App Bundle too, the version from `VERSION`
+android-arm64, android-arm (armeabi-v7a, since v0.1.6: phones running Android in 32-bit mode said "not compatible") and android-x64
+(the third ABI makes the APK larger; before, arm64 and x64 52.8 MB, x64 alone 28 MB; 32-bit x86 is left out: no Android 8+ phone uses it), `--aab` an App Bundle too, the version from `VERSION`
 (versionCode major·10000 + minor·100 + patch). Signed by the release keystore when `ASYNC_ANDROID_KEYSTORE`… are set (CI:
 secrets), else by the SDK's debug keystore. Two build quirks: `UseDefaultPublishRuntimeIdentifier=false` (otherwise the SDK
 adds linux-x64 to a trimmed Release build's RIDs and asks for a Mono pack that does not exist), and the ABI list comes as

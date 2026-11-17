@@ -60,6 +60,7 @@
 #   KEEP=1 …                                                # leave the stack, the emulator and artifacts/android-smoke
 #   SKIP_BACKGROUND=1 …                                     # leave out the background-work sections (quicker)
 #   SKIP_PHOTOS=1 / SKIP_COLLECTIONS=1 …                    # leave out the photos / contacts and calendars sections
+#   WIPE=1 …                                                # start the emulator with its data wiped (a fresh phone)
 # The checks read `condition && pass … || fail …`: pass never fails, so fail runs only when the condition does.
 #   NTFY_APK=path/to/ntfy.apk …   # the ntfy app (F-Droid io.heckel.ntfy) for the UnifiedPush checks; skipped without it
 # shellcheck disable=SC2015
@@ -260,7 +261,7 @@ backend=$(api POST /api/storage-backends '{"name":"smoke","settings":{"type":"Lo
 pass "server on $server (the phone uses $phone_server), account admin, storage $backend"
 
 if ! adb get-state >/dev/null 2>&1; then
-  emulator -avd "$avd" -no-window -no-audio -no-boot-anim -no-snapshot -memory 2048 -partition-size 2048 -gpu swiftshader_indirect -camera-back emulated \
+  emulator -avd "$avd" ${WIPE:+-wipe-data} -no-window -no-audio -no-boot-anim -no-snapshot -memory 2048 -partition-size 2048 -gpu swiftshader_indirect -camera-back emulated \
     >"$work/emulator.log" 2>&1 &
   started_emulator=1
   adb wait-for-device

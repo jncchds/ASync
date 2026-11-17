@@ -701,7 +701,9 @@ to"), without syncing them to the phone first: files are fetched when you open t
 The app is not in Google Play. Download `ASync-<version>-android.apk` from the
 [releases](https://github.com/jncchds/ASync/releases) page on the phone and open it; Android asks once to allow
 installing apps from your browser (or file manager): allow it, then *Install*. Play Protect may say it does not know the
-app: *More details → Install anyway*. One APK covers phones (arm64) and emulators/Chromebooks (x86_64).
+app: *More details → Install anyway*. One APK covers Android 8.0 and later on phones (64-bit and 32-bit ARM: budget phones and Android Go editions run Android in
+32-bit mode) and emulators/Chromebooks (x86_64). If Android says the app is *not compatible*, it is an older APK without
+32-bit ARM (before v0.1.6) or a phone older than Android 8.0.
 
 - **Updates:** install the newer APK over the old one; your enrollment and folders stay. Android only accepts an update
   signed like the installed app: the releases are signed with the project's key once it is set up; until then builds

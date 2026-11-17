@@ -20,7 +20,7 @@ cd "$(dirname "$0")/.."
 
 version="$(tr -d '[:space:]' < VERSION)"
 out=""
-abis="android-arm64;android-x64"
+abis="android-arm64;android-arm;android-x64"
 formats="apk"
 config="Release"
 while [[ $# -gt 0 ]]; do
