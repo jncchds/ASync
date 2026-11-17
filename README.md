@@ -745,7 +745,7 @@ computer.
 - **Not yet:** syncing with the app closed (iOS suspends it soon after it leaves the screen: open it, and folders run at
   once), Wi-Fi/charging conditions and wake-ups from the server; photos, contacts and calendars; ASync's folders in the Files
   app. Files of iCloud Drive that are not downloaded to the iPhone yet are not fetched. Tried on the iOS simulator only
-  (in CI): the camera scanner and the Secure Enclave run only on a real iPhone.
+  (in CI), not on an iPhone yet; the camera scanner can only be tried on one.
 
 ### Installing the iOS app
 

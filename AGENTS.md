@@ -2257,8 +2257,8 @@ NSURL as the picker does), add-folder…, setup/unlock, signout, keyinfo, haskey
 **Not yet (and which task brings it):** background syncing, run conditions and APNs wake-ups (task 22: BGTaskScheduler,
 background URLSession, the relay), photos (task 23: PhotoKit into the `MediaTree` of task 19), contacts and calendars (task 24:
 Contacts and EventKit into task 20's collection trees), the File Provider extension (task 25, with the app group). The camera
-scanner and the Secure Enclave key are only exercised on a device (the simulator has neither); the unsigned .ipa has not been
-tried on a phone yet.
+scanner is only exercised on a device (the simulator has no camera; the simulator's Secure Enclave key worked in CI, the Keychain fallback
+stays for simulators without one); the unsigned .ipa has not been tried on a phone yet.
 
 ## Background work and wake-ups (M3–M4)
 
@@ -3007,6 +3007,23 @@ contacts and calendars part is `scripts/smoke-android-collections.sh`): see its 
      8–10's storage permission and legacy storage, real USB drives and SD cards (the emulator's virtual SD card stands in),
      an OEM Settings without the per-app page (the fallback page).
      Next: the VFS on the desktops (Cloud Files, File Provider, FUSE), photos/contacts/calendars, iOS.
+   - **M4-9 iOS foundation (task 21, done):** `ASync.App.iOS` (see "iOS app (task 21)"): the agent in-process, the device
+     key in the Secure Enclave, the Keychain-sealed store, folders in the app's Documents and picked folders as
+     security-scoped bookmarks, enrollment by code, link, QR scan and device code, adding folders from the app, the web UI
+     browsing the app's Documents; `scripts/check-ios.sh` (Linux), `scripts/package-ios.sh`, `scripts/smoke-ios.sh` and
+     `.github/workflows/ios.yml` (only on request: `ios-ci/**`, iOS changes on `main`, tags). Verified on an iOS 26.5
+     simulator (iPhone 17) in CI against a native server: all 40 checks of `smoke-ios.sh` (run 44160695773): a pairing link
+     filling the form (also one opened through iOS's own URL routing), the device-code flow, sign-out deleting the Keychain
+     key, enrolling by code with a **Secure Enclave** key (the simulator on Apple silicon has one) whose converted
+     signatures the server accepts, the sealed store, a TwoWay folder in `~/Documents/Sync` both ways with `async-cli` (an
+     edit, a delete), the web UI's browsing (Documents listed, Library refused), the real document picker shown, a Backup
+     through a bookmark, the local tree contract 14/14 on bookmarked directories (`BookmarkTree`), *New folder…* from the
+     app, a restart. Found on the way: .NET has no Unix domain sockets on iOS (the automation is on loopback TCP),
+     `simctl openurl` makes iOS ask "Open in ASync?" (the test opens the link from inside the app), the macOS image's .NET
+     11 SDK clashes with the ios workload (the job pins its SDK), simulator builds need ad hoc signing for the
+     entitlements, the workload set's CLI spelling (`10.0.111.1`). Not exercised: a real iPhone (the unsigned .ipa is built,
+     31 MB, not yet installed with SideStore), the camera scanner (no camera in the simulator), a folder in iCloud Drive or
+     another provider (only bookmarks inside the app's container), notifications.
    - **M4-8 Contacts and calendars (task 20, done):** Contacts and Calendars folders: Backup folders of the phone's address book and
      calendars, all or chosen accounts / calendars (and "events since"), set in the web UI (the lists asked from the phone live over the
      hub, or its last reported lists) or in the app; one vCard 4.0 per contact with its photo, one iCalendar file per event with its
