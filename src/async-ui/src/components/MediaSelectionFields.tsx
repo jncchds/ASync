@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { errorMessage, getDeviceAlbums, type DeviceAlbums, type MediaSelection } from '../api'
 import { formatDate, relativeTime } from '../utils/format'
 import { countText } from '../utils/folders'
@@ -89,7 +89,7 @@ export default function MediaSelectionFields({ deviceId, deviceName, value, onCh
                     <label className="checkbox" title={a.path ?? undefined}>
                       <input type="checkbox" checked={chosen.some(c => c.id === a.id)} onChange={e => toggle(a.id, a.name, e.target.checked)} />
                       <span className="album-name">{a.name}</span>
-                      <span className="small-text muted">{countText(a.photos, a.videos)}</span>
+                      <span className="small-text muted album-counts">{countText(a.photos, a.videos).split(", ").map((part, i) => <Fragment key={part}>{i > 0 && ", "}<span>{part}</span></Fragment>)}</span>
                     </label>
                   </li>
                 ))}

@@ -70,6 +70,12 @@ public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid devi
                 : $"The folder {folder.LocalPath} does not exist (is the disk mounted?)."));
 
         var parent = (await repository.ListSnapshotsAsync(ct)).LastOrDefault(s => s.Source == Source);
+        // A photo library that shows nothing of the selection any more (the album emptied or moved, the access narrowed) makes no
+        // empty snapshot over the last good one: that one keeps the photos, and "restore the newest" still brings them back.
+        if (tree is Media.MediaTree photos && parent is not null && photos.Counts() is { Photos: 0, Videos: 0 })
+            throw new SyncRefusedException(
+                "The photo library shows nothing of what this folder backs up now (were the photos deleted or moved, or ASync's access " +
+                "narrowed?). No snapshot was made: the last one keeps them. Restore it, or choose other albums.");
         var snapshot = await new BackupRunner(repository).RunAsync(tree, new BackupOptions
         {
             Source = Source,

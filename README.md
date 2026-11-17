@@ -194,6 +194,7 @@ settings or passwords, other people's folders, or your account.
   <img src="docs/screenshots/android-photos-dashboard-light.png" alt="A Photos folder on the phone" width="24%">
   <img src="docs/screenshots/android-photos-albums-dark.png" alt="Choosing albums on the phone, dark" width="24%">
   <img src="docs/screenshots/android-photos-permission-light.png" alt="Why ASync asks to read photos" width="24%">
+  <img src="docs/screenshots/android-photos-restore-dark.png" alt="Restoring a snapshot into the phone's photos, dark" width="24%">
 </p>
 
 A **Photos** folder backs up a phone's photo library instead of a directory: every photo and video, or only the albums
@@ -218,8 +219,10 @@ They are kept in year and month directories, `2026/03/IMG_1234~1000000033.jpg` (
 files you can open anywhere. A photo in two albums, or renamed, is stored once; unchanged photos are not read again.
 Deleting a photo on the phone keeps it in the older snapshots for as long as the folder keeps them.
 
-**Getting them back:** *Restore into the library…* on the folder's card in the phone's app puts the newest snapshot back
-into the phone's photos, each where it was (DCIM/Camera…), and skips what is still there. On a computer,
+**Getting them back:** *Restore into the library…* on the folder's card in the phone's app asks which snapshot (the
+phone's newest is preselected; an older one brings back photos deleted since) and puts it back into the phone's photos,
+each where it was (DCIM/Camera…), skipping what is still there. If an album is emptied on the phone, ASync makes no
+empty snapshot: the run says so and the last snapshot keeps the photos. On a computer,
 `async-cli restore` (or the web UI's *Snapshots*) gives the files and their `.json` details.
 
 Browsing folders and listing albums from the web are one setting on the phone (*Settings → Allow browsing folders from the web*):

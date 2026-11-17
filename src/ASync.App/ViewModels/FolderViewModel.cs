@@ -111,14 +111,56 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
 
     private bool CanRestorePhotos() => !Working && !RestoreRunning && IsPhotos && _folder.LastResult is not null;
 
-    /// <summary>Puts this device's newest snapshot back into the photo library (what is already there is skipped).</summary>
+    /// <summary>The snapshots to choose from (newest first), while <see cref="ChoosingRestore"/>.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<RestoreChoice> RestoreChoices { get; } = [];
+
+    [ObservableProperty] public partial bool ChoosingRestore { get; private set; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ConfirmRestoreCommand))]
+    public partial RestoreChoice? SelectedRestore { get; set; }
+
+    /// <summary>Restore into the library: first which snapshot (this phone's newest preselected; an older one brings back what was deleted since).</summary>
     [RelayCommand(CanExecute = nameof(CanRestorePhotos))]
     private async Task RestorePhotos()
     {
+        if (shell.Session is not { } session) return;
         Working = true;
-        try { await shell.RunAsync((s, ct) => s.RestoreMediaAsync(Id, null, ct)!); }
+        try
+        {
+            var snapshots = await session.MediaSnapshotsAsync(Id, CancellationToken.None);
+            if (snapshots.Count == 0)
+            {
+                shell.ShowMessage($"\"{Name}\" has no snapshots yet.");
+                return;
+            }
+            RestoreChoices.Clear();
+            var now = shell.Time.GetUtcNow();
+            foreach (var s in snapshots) RestoreChoices.Add(new RestoreChoice(s, now));
+            SelectedRestore = RestoreChoices.FirstOrDefault(c => c.Snapshot.Mine) ?? RestoreChoices[0];
+            ChoosingRestore = true;
+        }
+        catch (Exception e) when (e is ControlException or IOException or InvalidDataException or ObjectDisposedException)
+        {
+            shell.ShowMessage(e.Message, error: true);
+        }
         finally { Working = false; }
     }
+
+    [RelayCommand(CanExecute = nameof(CanConfirmRestore))]
+    private async Task ConfirmRestore()
+    {
+        var chosen = SelectedRestore!.Snapshot.Id;
+        ChoosingRestore = false;
+        Working = true;
+        try { await shell.RunAsync((s, ct) => s.RestoreMediaAsync(Id, chosen, ct)!); }
+        finally { Working = false; }
+    }
+
+    private bool CanConfirmRestore() => SelectedRestore is not null;
+
+    [RelayCommand]
+    private void CancelRestore() => ChoosingRestore = false;
 
     /// <summary>The agent's restore into the library, when it is this folder's.</summary>
     public void UpdateRestore(MediaRestoreDto? restore)
@@ -389,4 +431,11 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         }
         finally { Working = false; }
     }
+}
+
+/// <summary>A snapshot in the restore's choice: "Today 06:53 · Pixel 8 · 22 files".</summary>
+public sealed record RestoreChoice(MediaSnapshotDto Snapshot, DateTimeOffset Now)
+{
+    public string Label => $"{Format.Ago(Snapshot.Time, Now)} ({Snapshot.Time.ToLocalTime():yyyy-MM-dd HH:mm}) · {(Snapshot.Mine ? "this phone" : Snapshot.Device ?? "another device")} · " +
+                           $"{Snapshot.Files} files · {Snapshot.ShortId}";
 }

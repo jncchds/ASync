@@ -70,6 +70,9 @@ public interface IAgentSession : IAsyncDisposable
     /// <summary>Attaches this device to one of the owner's Photos folders.</summary>
     Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => throw new ControlException(NoPhotos);
 
+    /// <summary>A Photos folder's snapshots, newest first (the restore's choice).</summary>
+    Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct) => throw new ControlException(NoPhotos);
+
     /// <summary>Starts restoring a Photos snapshot (null: this device's newest) into the photo library.</summary>
     Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) => throw new ControlException(NoPhotos);
 
@@ -110,6 +113,7 @@ public sealed class ControlAgentConnector(string configDirectory) : IAgentConnec
         public Task<string> SetMediaAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => client.SetMediaAsync(folderId, media, ct);
         public Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => client.JoinPhotosAsync(folderId, media, ct);
         public Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) => client.RestoreMediaAsync(folderId, snapshot, ct);
+        public Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct) => client.MediaSnapshotsAsync(folderId, ct);
         public ValueTask DisposeAsync() => client.DisposeAsync();
     }
 }

@@ -252,6 +252,25 @@ public class MediaBackupTests : IDisposable
     }
 
     [Fact]
+    public async Task ASelectionThatShowsNothingNow_MakesNoEmptySnapshot_OverTheLastGoodOne()
+    {
+        var camera = _lib.Album("Camera");
+        var a = _lib.Add("a.jpg", Bytes(71), new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc), [camera]);
+        var repo = await RepoAsync();
+        var selection = new MediaSelectionDto(false, [new(camera, "Camera")]);
+        var good = await BackUpAsync(repo, selection);
+        _lib.Remove(a.Id); // the album wiped (or moved away) on the phone
+        var refused = await Assert.ThrowsAsync<SyncRefusedException>(() => BackUpAsync(repo, selection));
+        Assert.Contains("No snapshot was made", refused.Message);
+        Assert.Equal([good.Id], (await repo.ListSnapshotsAsync()).Select(s => s.Id));
+
+        // A first backup of an empty selection is fine (nothing to protect yet).
+        var empty = new MediaSelectionDto(false, [new("nothing", "Nothing")]);
+        var other = (await new BackupJob(repo, Folder(empty), Guid.NewGuid(), "Other", new MediaTree(_lib, empty)).RunAsync()).Snapshot;
+        Assert.NotNull(other);
+    }
+
+    [Fact]
     public void TheTree_IsReadOnly_AndNeverWatched()
     {
         var tree = new MediaTree(_lib, null);

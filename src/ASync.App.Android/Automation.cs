@@ -322,6 +322,16 @@ public sealed class Automation : BroadcastReceiver
                 return PhotosState(shell);
             case "photos-state":
                 return PhotosState(shell);
+            case "photos-restore-choose":
+            {
+                // The card's Restore into the library…: the snapshot choice (closed again with photos-restore-cancel).
+                var card = Folder(arg);
+                await card.RestorePhotosCommand.ExecuteAsync(null);
+                return JsonSerializer.Serialize(new { card.ChoosingRestore, choices = card.RestoreChoices.Select(c => c.Label) }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            }
+            case "photos-restore-cancel":
+                Folder(arg).CancelRestoreCommand.Execute(null);
+                return "ok";
             case "photos-allow":
                 (shell.PhotosDialog ?? throw new InvalidOperationException("The Photos screen is not open.")).AllowCommand.Execute(null);
                 return "asked";

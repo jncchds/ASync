@@ -868,6 +868,25 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             : $"This phone now backs up {Lower(media.Describe())} into \"{joined.Name}\".");
     }
 
+    public async Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct)
+    {
+        var (_, api) = Running();
+        var folder = await FolderAsync(api, folderId, ct);
+        if (folder.Kind != FolderKind.Photos) throw new ControlException($"\"{folder.Name}\" is not a Photos folder.");
+        try
+        {
+            var repo = await RepositoryAccess.OpenAsync(api, _store, folder, new RemoteStorageBackend(api, folder.FolderId), ct);
+            var mine = api.Identity!.DeviceId.ToString("N");
+            return [.. (await repo.ListSnapshotsAsync(ct)).OrderByDescending(s => s.Time).Take(100)
+                .Select(s => new MediaSnapshotDto(s.Id, ASync.Engine.Repository.Repository.ShortSnapshotId(s.Id), s.Time, s.Hostname, s.Source == mine,
+                    s.Stats.FilesNew + s.Stats.FilesChanged + s.Stats.FilesUnmodified))];
+        }
+        catch (Exception e) when (e is ApiException or HttpRequestException or SyncRefusedException or IOException)
+        {
+            throw new ControlException(e.Message);
+        }
+    }
+
     public async Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct)
     {
         if (_options.Media is not { } library) throw new ControlException(NoPhotoLibrary);

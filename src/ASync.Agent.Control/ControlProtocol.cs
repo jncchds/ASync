@@ -102,6 +102,8 @@ public static class ControlProtocol
         /// the photo library. It runs in the agent; <see cref="AgentStatusDto.MediaRestore"/> follows it.
         /// </summary>
         public const string RestoreMedia = "restore-media";
+        /// <summary>A Photos folder's snapshots to restore from (<c>folderId</c>): <see cref="ControlResponse.MediaSnapshots"/>, newest first.</summary>
+        public const string MediaSnapshots = "media-snapshots";
     }
 }
 
@@ -159,7 +161,12 @@ public sealed record ControlResponse
     public int? FolderId { get; init; }
     /// <summary><c>media-library</c>: the photo library.</summary>
     public MediaLibraryDto? MediaLibrary { get; init; }
+    /// <summary><c>media-snapshots</c>: the snapshots a restore can use.</summary>
+    public List<MediaSnapshotDto>? MediaSnapshots { get; init; }
 }
+
+/// <summary>A Photos folder's snapshot for the restore's choice: <paramref name="Mine"/> = made by this device; <paramref name="Files"/>: originals and sidecars.</summary>
+public sealed record MediaSnapshotDto(string Id, string ShortId, DateTimeOffset Time, string? Device, bool Mine, int Files);
 
 /// <summary>
 /// The device's photo library as the agent sees it (task 19). <paramref name="Access"/>: what the permissions allow;

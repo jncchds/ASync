@@ -2386,6 +2386,11 @@ device's `IMediaLibrary` and the membership's selection instead of `LocalTrees.O
 - The run's message has the counts ("Snapshot 1a2b3c4d: 1204 photos, 37 videos (6.1 GB), 3 new, …"; with partial access "of those
   this phone lets ASync see"), the report carries them (`SyncReportRequest.Media`), and the albums are reported afterwards.
 - A photo deleted on the phone is simply not in the next snapshot: older snapshots keep it as long as the folder's retention does.
+- **No empty snapshot over a good one** (`BackupJob`): when the library shows nothing of the selection while this device has an
+  earlier snapshot (the album wiped or moved, the access narrowed to "Select photos" with nothing picked), the run fails with "No
+  snapshot was made: the last one keeps them" instead of writing an empty snapshot. Found by the smoke test: wiping an album
+  trips the content trigger, and the empty snapshot it made became the newest, so "restore the newest" restored nothing (and
+  retention would eventually have forgotten the good ones). The failure is reported like any other (Failing alerts follow).
 - **Background (Android):** `BackgroundPlanner.Plan`/`FoldersToWake` take Photos folders although their local path is empty
   (`HasPlace`); so they have their periodic job with the run conditions as before. New photos start a run through
   `MediaTriggerWorker` (`media-trigger`): a one-time WorkManager job with content-URI triggers on MediaStore's image and video
@@ -2411,7 +2416,9 @@ device's `IMediaLibrary` and the membership's selection instead of `LocalTrees.O
   before every run; the dialog's answer (`MainActivity.OnRequestPermissionsResult`, code 3) and coming back to the front raise
   `Changed`.
 - **Restore into the library** (`MediaRestorer`, control op `restore-media {folderId, snapshot?}`, the card's *Restore into the
-  library…*): needs full access (to see what is there). It walks the snapshot's sidecars; an asset is already there when the library
+  library…*, which first offers the folder's snapshots, newest first, this phone's newest preselected: control op
+  `media-snapshots` → `MediaSnapshotDto {id, shortId, time, device, mine, files}`; an older one brings back what was deleted since,
+  another phone's snapshot restores that phone's photos here): needs full access (to see what is there). It walks the snapshot's sidecars; an asset is already there when the library
   has the same id with the same size, or an asset of the same size **in the same place** (relative path) with the same SHA-256 (a
   copy in another album does not count, or the album would stay without its photo); otherwise its original is streamed out of the
   snapshot (`SnapshotFileStream`, one chunk in memory) into a MediaStore insert at its `relativePath` (else `Pictures/<album>/`,
@@ -2456,7 +2463,7 @@ with a sidecar each and byte-identical originals; the sidecar's fields, its stab
 refused; safe names, roles and the modified time without a date taken; the selection by album, date, videos and screenshots and the
 counts; a second run reading no unchanged original but seeing a favourite in the sidecar, an edited photo read again; a copy in a
 second album and a rename storing almost nothing; a deleted photo kept in the older snapshot; no permission stopping the run with
-the reason and nothing written, partial access backing up what it sees; the tree read-only; restoring a wiped library, skipping by id
+the reason and nothing written, partial access backing up what it sees, an emptied selection refused without an empty snapshot; the tree read-only; restoring a wiped library, skipping by id
 and then by content, the relative path, album, favourite and date taken, a different photo of the same size not skipped, a copy in
 another album not counting), `DeviceMediaServiceTests` (an asleep phone woken and asked and its list kept; not woken or a refused wake
 → the last list; a slow, failing or refusing answer, an older app, someone else), `ApiPhotosTests` (PostgreSQL: the selection
@@ -2464,7 +2471,7 @@ instead of a path, a computer refused, no albums refused, a selection kept by an
 counts, a phone creating and joining Photos folders with a selection; albums offline and never reported, reported by the phone, live
 over a real hub client with partial access explained, browsing turned off → the last list; owner only, people and devices apart, a
 computer's "no photo library"), `ApiSecurityTests` (the new endpoints classified). `ASync.App.Tests`: `PhotosTests` (the card, the
-explanation and the system's question, albums chosen and sent with a vanished album kept, everything, partial access and Back, the
+explanation and the system's question, the restore's snapshot choice, albums chosen and sent with a vanished album kept, everything, partial access and Back, the
 restore's progress, New folder and Add to a folder on a phone and not on a computer, the views at 360 px). `scripts/smoke-android.sh`
 (its photos part is `scripts/smoke-android-photos.sh`): see its header and "Milestones".
 

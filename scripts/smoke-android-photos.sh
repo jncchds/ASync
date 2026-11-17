@@ -74,11 +74,11 @@ jq -e '.live and (.albums | any(.name == "SmokeCamera" and .photos == 2 and .vid
   && pass "the album list comes live from the phone: $(jq -c '[.albums[] | select(.name | startswith("Smoke")) | "\(.name) \(.photos)+\(.videos)"]' <<<"$albums")" \
   || fail "albums" "$albums"
 api PUT "/api/folders/$pf/devices" "{\"deviceId\":\"$device\",\"localPath\":\"\",\"media\":{\"all\":false,\"albums\":[{\"id\":\"$cam_id\",\"name\":\"SmokeCamera\"}],\"includeVideos\":true,\"includeScreenshots\":true}}" >/dev/null
-wait_state '.folders[] | select(.name == "Phone library") | .path | test("SmokeCamera")' 30 \
-  && pass "SmokeCamera chosen in the web UI; the phone shows \"$(folder_json "Phone library" | jq -r .path)\"" || fail "selection on the phone" "$(folder_json "Phone library")"
+phone_selection() { ctl bg-photos | jq -e --argjson f "$pf" '.folders[] | select(.id == $f) | .media == "1 album: SmokeCamera"' >/dev/null; }
+wait_for 30 phone_selection && pass "SmokeCamera chosen in the web UI; the phone's agent has it: \"1 album: SmokeCamera\"" || fail "selection on the phone" "$(ctl bg-photos)"
 
 r=$(sync_phone "$pf" 180)
-jq -e '.ok and (.message | test("2 photos, 1 videos"))' <<<"$r" >/dev/null && pass "backed up: $(jq -r .message <<<"$r")" || fail "photos backup" "$r"
+jq -e '.ok and (.message | test("2 photos, 1 video "))' <<<"$r" >/dev/null && pass "backed up: $(jq -r .message <<<"$r")" || fail "photos backup" "$r"
 api GET "/api/folders/$pf" | jq -e '.devices[0].mediaCounts.photos == 2 and .devices[0].mediaCounts.videos == 1' >/dev/null \
   && pass "the web UI shows 2 photos, 1 video for the phone" || fail "counts on the server" "$(api GET "/api/folders/$pf")"
 shot photos-dashboard
@@ -114,7 +114,7 @@ jq -e '.format == 1 and .source == "android-mediastore" and (.id | startswith("a
 # The web UI's snapshot browser shows it and downloads an original.
 sid=$(api GET "/api/folders/$pf/snapshots" | jq -r '.[0].id')
 year=${c1%%/*}; rest=${c1#*/}; month=${rest%%/*}
-api GET "/api/folders/$pf/snapshots/$sid/tree?path=$year/$month" | jq -e --arg n "${c1##*/}" '.entries | any(.name == $n)' >/dev/null \
+api GET "/api/folders/$pf/snapshots/$sid/tree?path=$year/$month" | jq -e --arg n "${c1##*/}" '.nodes | any(.name == $n)' >/dev/null \
   && curl -fsS -H "Authorization: Bearer $token" "$server/api/folders/$pf/snapshots/$sid/file?path=$(enc "$c1")" -o "$work/photo-web.jpg" \
   && cmp -s "$work/photo-web.jpg" "$media_dir/cam-1.jpg" && pass "the web snapshot browser lists $year/$month and downloads the original" || fail "web snapshot browser"
 
@@ -134,12 +134,27 @@ wait_for 30 bg_has '.works | any((.tags | split(",") | index("media-trigger")) a
   && pass "and the next trigger is waiting" || fail "next trigger" "$(bgstate | jq -c '[.works[] | {tags, state}]')"
 front_app
 
-# Restore into a wiped album: the originals come back where they were, and a second restore skips them all.
+# Restore into a wiped album: the originals come back where they were, and a second restore skips them all. The wipe itself
+# trips the content trigger: that backup sees nothing of the selection and must not make an empty snapshot over the good one.
+front_app
+c=$(ctl "photos-restore-choose $pf")
+jq -e '.choosingRestore and (.choices | length >= 2) and (.choices[0] | test("this phone"))' <<<"$c" >/dev/null \
+  && pass "Restore into the library… offers the snapshots, newest first: $(jq -r '.choices[0]' <<<"$c")" || fail "restore choice" "$c"
+ctl "show RestoreChoice" >/dev/null
+shot photos-restore
+ctl "photos-restore-cancel $pf" >/dev/null
+# Opening the app ran its folders (a normal backup): wait for that, then count.
+photos_idle() { ctl bg-photos | jq -e --argjson f "$pf" '.folders[] | select(.id == $f) | .last != null' >/dev/null && idle; }
+declare -F idle >/dev/null || idle() { bg_has 'all(.folders[]; .activity == "Idle")'; }
+wait_for 60 photos_idle || true
+snapshots_before=$(api GET "/api/folders/$pf/snapshots" | jq length)
 adb shell "rm -f /sdcard/DCIM/SmokeCamera/*"
 scan /sdcard/DCIM/SmokeCamera/cam-1.jpg /sdcard/DCIM/SmokeCamera/cam-2.jpg /sdcard/DCIM/SmokeCamera/cam-3.jpg /sdcard/DCIM/SmokeCamera/clip.mp4
 gone() { ! indexed cam-2.jpg; }
 wait_for 60 gone && pass "SmokeCamera wiped on the phone" || fail "wipe" "$(adb shell content query --uri content://media/external/file --projection _display_name | grep cam)"
-api PUT "/api/folders/$pf/devices" "{\"deviceId\":\"$device\",\"localPath\":\"\",\"paused\":true}" >/dev/null # no backup of the empty album meanwhile
+r=$(sync_phone "$pf" 120)
+jq -e '(.ok | not) and (.message | test("No snapshot was made"))' <<<"$r" >/dev/null && [[ $(api GET "/api/folders/$pf/snapshots" | jq length) -eq $snapshots_before ]] \
+  && pass "a backup of the emptied album is refused, no empty snapshot: $(jq -r .message <<<"$r")" || fail "empty selection" "$r"
 ctl "bg-photos-restore $pf" >/dev/null
 restored() { ctl bg-photos | jq -e '.restore.running == false and .restore.done == .restore.total' >/dev/null; }
 wait_for 180 restored && p=$(ctl bg-photos) && jq -e '.restore.restored == 4 and .restore.ok' <<<"$p" >/dev/null \

@@ -256,7 +256,15 @@ public sealed class SyncAgent : IAsyncDisposable
         _logger.LogInformation("Woken for browsing: opening a fresh live connection.");
         try { if (hub.State != HubConnectionState.Disconnected) await hub.StopAsync(ct); }
         catch (Exception e) when (e is not OperationCanceledException) { _logger.LogDebug("Closing the old connection: {Message}", e.Message); }
-        if (!await TryStartHubAsync(ct, logFailure: true)) _ = KeepConnectingAsync(ct);
+        if (!await TryStartHubAsync(ct, logFailure: true))
+        {
+            _ = KeepConnectingAsync(ct);
+            return;
+        }
+        // Events sent while the old connection was already dead (a frozen process) are lost, as after any reconnect: a folder
+        // created or attached meanwhile would otherwise appear only after the next reconnect (seen in the Android smoke test).
+        try { await ReloadAsync(ct); }
+        catch (Exception e) when (e is ApiException or HttpRequestException or IOException) { _logger.LogDebug("Reload after the fresh connection: {Message}", e.Message); }
     }
 
     /// <summary>Tells the server the browsing state now (after the setting or the phone's All files access changed).</summary>
@@ -309,7 +317,7 @@ public sealed class SyncAgent : IAsyncDisposable
                 var counts = photos?.Counts();
                 var message = $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: " +
                               (counts is { } c
-                                  ? $"{c.Photos} photos, {c.Videos} videos ({Size(c.Bytes)}){(c.Access == MediaAccess.Partial ? " of those this phone lets ASync see" : "")}, "
+                                  ? $"{Plural(c.Photos, "photo")}, {Plural(c.Videos, "video")} ({Size(c.Bytes)}){(c.Access == MediaAccess.Partial ? " of those this phone lets ASync see" : "")}, "
                                   : "") +
                               $"{s.FilesNew} new, {s.FilesChanged} changed, {s.FilesUnmodified} unchanged, " +
                               $"{Size(s.BytesAdded)} added{(forgotten > 0 ? $", {forgotten} old snapshots forgotten" : "")}" +
@@ -381,6 +389,8 @@ public sealed class SyncAgent : IAsyncDisposable
         FolderRan?.Invoke(outcome);
         return outcome;
     }
+
+    private static string Plural(int n, string noun) => $"{n} {noun}{(n == 1 ? "" : "s")}";
 
     /// <summary>After a Photos backup: the albums for the web UI while this phone is offline (only with browsing allowed; failures are only logged).</summary>
     private async Task ReportAlbumsAsync(CancellationToken ct)

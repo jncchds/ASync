@@ -64,6 +64,9 @@ public interface IControlHandler
     /// <summary>Attaches this device to one of the owner's Photos folders.</summary>
     Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct) => throw new ControlException(NoPhotos);
 
+    /// <summary>The snapshots of a Photos folder a restore can use, newest first.</summary>
+    Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct) => throw new ControlException(NoPhotos);
+
     /// <summary>Starts restoring a Photos snapshot into the library.</summary>
     Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) => throw new ControlException(NoPhotos);
 
@@ -249,6 +252,7 @@ public sealed class ControlServer : IAsyncDisposable
                     Id = r.Id, Ok = true,
                     Message = await _handler.SetMediaAsync(Folder(), r.Media ?? throw new ControlException("\"set-media\" needs media."), ct),
                 },
+                ControlProtocol.Ops.MediaSnapshots => new ControlResponse { Id = r.Id, Ok = true, MediaSnapshots = await _handler.MediaSnapshotsAsync(Folder(), ct) },
                 ControlProtocol.Ops.RestoreMedia => new ControlResponse { Id = r.Id, Ok = true, Message = await _handler.RestoreMediaAsync(Folder(), r.Snapshot, ct) },
                 ControlProtocol.Ops.LeaveFolder => new ControlResponse { Id = r.Id, Ok = true, Message = await _handler.LeaveFolderAsync(Folder(), ct) },
                 _ => new ControlResponse { Id = r.Id, Error = $"Unknown operation \"{r.Op}\" (this agent speaks control protocol {ControlProtocol.Version})." },

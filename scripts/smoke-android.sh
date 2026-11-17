@@ -229,7 +229,8 @@ cli() { "$CLI" --config "$work/cli-config" "$@"; }
 # cli_sync: async-cli syncs Phone docs; again while the phone holds the folder's lease (it syncs by itself too).
 cli_sync() {
   local out
-  for _ in 1 2 3 4 5 6; do
+  # The phone may be running the folder again by itself (a reconnect, a settled file) for a while: up to two minutes.
+  for _ in $(seq 1 24); do
     out=$(cli sync --folder "$docs" 2>&1) || true
     [[ "$out" != *"Another device is syncing"* ]] && return 0
     sleep 5

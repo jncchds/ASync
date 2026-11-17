@@ -129,6 +129,9 @@ public sealed class ControlClient : IAsyncDisposable
     public async Task<FolderAddedDto> JoinPhotosAsync(int folderId, MediaSelectionDto media, CancellationToken ct = default) =>
         Added(await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.JoinFolder, FolderId = folderId, Media = media }, ct));
 
+    public async Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.MediaSnapshots, FolderId = folderId }, ct)).MediaSnapshots ?? [];
+
     public async Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct = default) =>
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.RestoreMedia, FolderId = folderId, Snapshot = snapshot }, ct)).Message ?? "";
 

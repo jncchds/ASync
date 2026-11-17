@@ -291,6 +291,9 @@ td.actions-cell .row-actions { flex-wrap: nowrap; }
 /* Many buttons (Users): two rows rather than a table wider than the page. */
 td.actions-cell.wrapping { width: 15rem; white-space: normal; }
 td.actions-cell.wrapping .row-actions { flex-wrap: wrap; }
+/* Buttons above each other: a wide table (Devices) keeps its last column narrow enough to fit 1280 px. */
+td.actions-cell.stacked .row-actions { flex-direction: column; align-items: stretch; }
+@media (max-width: 700px) { table.stack td.actions-cell.stacked .row-actions { flex-direction: row; align-items: center; } }
 
 /* Narrow screens: each row of a .stack table becomes a small card with labelled values. */
 @media (max-width: 700px) {
@@ -378,8 +381,9 @@ pre.command {
 .album-list li:last-child { border-bottom: none; }
 .album-list label.checkbox { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; margin: 0; cursor: pointer; }
 .album-list label.checkbox:hover { background: var(--accent-faint); }
-.album-name { overflow-wrap: anywhere; min-width: 0; flex: 1 1 auto; }
-.album-list .small-text { white-space: nowrap; }
+.album-name { overflow-wrap: break-word; min-width: 6em; flex: 1 1 8em; }
+.album-list .small-text { flex: 0 1 auto; text-align: right; }
+.album-counts > span { white-space: nowrap; }
 .media-filters { margin-top: 0.25rem; }
 
 /* ── Device folder picker (FolderDeviceForm's Browse…) ── */

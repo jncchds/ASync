@@ -152,6 +152,14 @@ internal sealed class FakeAgent : IAgentConnector, IAgentSession
         return Answer($"join-photos {folderId} {media.Describe()}", new FolderAddedDto(folderId, "joined the photos"));
     }
 
+    public List<MediaSnapshotDto> MediaSnapshots { get; set; } =
+    [
+        new("0190aaaa000070008000000000000003", "00000003", DateTimeOffset.UtcNow.AddHours(-1), "pixel", true, 8),
+        new("0190aaaa000070008000000000000002", "00000002", DateTimeOffset.UtcNow.AddDays(-1), "tablet", false, 6),
+    ];
+
+    public Task<List<MediaSnapshotDto>> MediaSnapshotsAsync(int folderId, CancellationToken ct) => Answer($"media-snapshots {folderId}", MediaSnapshots);
+
     public Task<string> RestoreMediaAsync(int folderId, string? snapshot, CancellationToken ct) =>
         Answer($"restore-media {folderId} {snapshot ?? "newest"}", "Restoring…");
 

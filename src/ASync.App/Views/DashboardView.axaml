@@ -82,6 +82,22 @@
               <Border Classes="notice" Name="PhotoAccess" IsVisible="{Binding PhotoAccessText, Converter={x:Static ObjectConverters.IsNotNull}}">
                 <TextBlock Classes="small" Text="{Binding PhotoAccessText}" TextWrapping="Wrap" />
               </Border>
+              <Border Classes="notice" Name="RestoreChoice" IsVisible="{Binding ChoosingRestore}">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="small" FontWeight="SemiBold" Text="Restore which snapshot into the library?" TextWrapping="Wrap" />
+                  <ComboBox Name="RestoreSnapshots" ItemsSource="{Binding RestoreChoices}" SelectedItem="{Binding SelectedRestore}" HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate DataType="vm:RestoreChoice"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <TextBlock Classes="muted small" TextWrapping="Wrap"
+                             Text="Photos still on the phone are skipped. An older snapshot brings back what was deleted since." />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button Classes="small" Name="ConfirmRestore" Content="Restore" Command="{Binding ConfirmRestoreCommand}" />
+                    <Button Classes="small secondary" Content="Cancel" Command="{Binding CancelRestoreCommand}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
               <StackPanel Spacing="4" Name="Restore" IsVisible="{Binding RestoreText, Converter={x:Static ObjectConverters.IsNotNull}}">
                 <ProgressBar Value="{Binding RestorePercent}" Maximum="100" IsVisible="{Binding RestoreRunning}" />
                 <TextBlock Classes="muted small" Text="{Binding RestoreText}" TextWrapping="Wrap" />

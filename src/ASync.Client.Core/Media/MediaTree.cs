@@ -95,7 +95,7 @@ public sealed class MediaTree : ILocalTree
 
     public string? UnavailableReason => _library.Access switch
     {
-        MediaAccess.None => "ASync may not read the photos on this device. Allow access to photos and videos in the app (Photos folder → Allow access).",
+        MediaAccess.None => "ASync may not read the photos on this device. Allow it in the app: Photos… on this folder's card.",
         MediaAccess.Unsupported => "This device has no photo library ASync can read.",
         _ => null,
     };

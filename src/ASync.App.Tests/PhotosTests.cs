@@ -129,7 +129,14 @@ public sealed class PhotosTests
         var card = f.Shell.Dashboard.Folders.Single();
         Assert.True(card.RestorePhotosCommand.CanExecute(null));
         await card.RestorePhotosCommand.ExecuteAsync(null);
-        Assert.Contains("restore-media 3 newest", f.Agent.Calls);
+        Assert.True(card.ChoosingRestore);
+        Assert.Equal(2, card.RestoreChoices.Count);
+        Assert.Contains("this phone", card.SelectedRestore!.Label);
+        card.SelectedRestore = card.RestoreChoices[1]; // an older one, of another device
+        Assert.Contains("tablet", card.SelectedRestore.Label);
+        await card.ConfirmRestoreCommand.ExecuteAsync(null);
+        Assert.False(card.ChoosingRestore);
+        Assert.Contains("restore-media 3 0190aaaa000070008000000000000002", f.Agent.Calls);
 
         f.Agent.PushStatus(Statuses.Connected(folder) with { MediaRestore = new MediaRestoreDto(3, "1a2b3c4d", true, 2, 8, 1, 1, "IMG_2.jpg") });
         await ShellFixture.Until(() => card.RestoreRunning, "the restore's progress");
