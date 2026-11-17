@@ -4,11 +4,11 @@
              x:Class="ASync.App.Views.DashboardView"
              x:DataType="vm:DashboardViewModel">
   <StackPanel Spacing="12">
-    <!-- Phones: Android's battery optimisation holds background work back (dismissable). -->
+    <!-- Phones: Android's battery optimisation, or iOS's Background App Refresh and notifications (dismissable). -->
     <Border Classes="card" Name="BatteryPrompt" IsVisible="{Binding Shell.Background.ShowBatteryPrompt, FallbackValue=False}">
       <StackPanel Spacing="8">
-        <TextBlock Text="Let ASync sync in the background" FontWeight="SemiBold" />
-        <TextBlock Classes="muted" Text="{x:Static vm:BackgroundViewModel.BatteryExplanation}" TextWrapping="Wrap" />
+        <TextBlock Name="BatteryPromptTitle" Text="{Binding Shell.Background.Texts.PromptTitle, FallbackValue=''}" FontWeight="SemiBold" />
+        <TextBlock Classes="muted" Name="BatteryPromptText" Text="{Binding Shell.Background.Texts.PromptExplanation, FallbackValue=''}" TextWrapping="Wrap" />
         <TextBlock Classes="muted small" Text="{Binding Shell.Background.VendorHint, FallbackValue=''}" TextWrapping="Wrap"
                    IsVisible="{Binding Shell.Background.HasVendorHint, FallbackValue=False}" />
         <WrapPanel ItemSpacing="8" LineSpacing="8">

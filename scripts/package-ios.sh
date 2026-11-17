@@ -10,7 +10,11 @@
 #   scripts/package-ios.sh --signed      ASync-<version>.ipa signed for App Store Connect / TestFlight, with the identity
 #                                        and provisioning profile already in the keychain (ios.yml's signing step):
 #                                        ASYNC_IOS_CODESIGN_KEY ("Apple Distribution: …") and ASYNC_IOS_PROVISION (the
-#                                        profile's name or UUID)
+#                                        profile's name or UUID). With the push entitlement (aps-environment, production:
+#                                        Entitlements.Push.plist, -p:AsyncPush=true): the App ID and the profile need the Push
+#                                        Notifications capability. ASYNC_IOS_PUSH=0 builds it without (a profile without push).
+#
+# The unsigned .ipa and the simulator build never carry aps-environment: the app then does not register for APNs at all.
 #
 # The version comes from VERSION (CFBundleShortVersionString and CFBundleVersion).
 set -euo pipefail
@@ -63,7 +67,8 @@ case $mode in
     : "${ASYNC_IOS_PROVISION:?set ASYNC_IOS_PROVISION to the provisioning profile}"
     dotnet publish "$project" -c Release -f net10.0-ios -r ios-arm64 -nologo \
       -p:ArchiveOnBuild=false -p:BuildIpa=true -p:IpaPackageDir="$PWD/$out/signed" \
-      -p:CodesignKey="$ASYNC_IOS_CODESIGN_KEY" -p:CodesignProvision="$ASYNC_IOS_PROVISION"
+      -p:CodesignKey="$ASYNC_IOS_CODESIGN_KEY" -p:CodesignProvision="$ASYNC_IOS_PROVISION" \
+      -p:AsyncPush="$([[ "${ASYNC_IOS_PUSH:-1}" == 0 ]] && echo false || echo true)"
     ipa=$(find "$out/signed" -name '*.ipa' | head -1)
     mv "$ipa" "$out/ASync-$version.ipa"
     rm -rf "$out/signed"

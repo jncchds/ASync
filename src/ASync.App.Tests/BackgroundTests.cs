@@ -211,4 +211,85 @@ public class BackgroundTests
         await Pump(() => window.GetVisualDescendants().OfType<SettingsView>().Any(v => v.IsEffectivelyVisible));
         Assert.False(Shows(window, "BackgroundCard"));
     }
+
+    // ── iOS (task 22): the same card in iOS's words ─────────────────────────────
+
+    private static FakeBackground Iphone(iOS.IosRefreshStatus refresh = iOS.IosRefreshStatus.Available, bool lowPower = false,
+        iOS.IosNotificationStatus notifications = iOS.IosNotificationStatus.NotDetermined, bool signedForPush = false) => new()
+    {
+        Texts = iOS.IosBackgroundTexts.Texts,
+        UsesDistributors = false,
+        Installed = [],
+        VendorHint = null,
+        IsIgnoringBatteryOptimizations = iOS.IosBackgroundTexts.Unrestricted(refresh, notifications),
+        RestrictionText = iOS.IosBackgroundTexts.Restriction(refresh, lowPower, notifications),
+        PushStatusText = iOS.IosBackgroundTexts.Push(
+            signedForPush ? new iOS.ApnsDecision(true, "production", "") : iOS.ApnsEntitlement.Decide(false, System.Text.Encoding.ASCII.GetBytes("<plist/>")),
+            hasToken: signedForPush, registered: signedForPush, problem: null),
+    };
+
+    [Fact]
+    public async Task OnAnIphone_TheCardSpeaksOfBackgroundAppRefreshAndApplePush_AndOffersNoDistributors()
+    {
+        var services = Iphone();
+        var f = new ShellFixture();
+        f.Platform.Phone = true;
+        f.Platform.BackgroundServices = services;
+        await using var _ = await f.StartAndWait(Statuses.Connected());
+        var background = f.Shell.Background!;
+        Assert.True(background.ShowBatteryPrompt); // the notification question is still open
+        Assert.StartsWith("Notifications are not allowed yet", background.BatteryText);
+        Assert.Equal(("Background App Refresh", "Wake-ups (Apple push)"), (background.Texts.AllowanceLabel, background.Texts.PushLabel));
+        Assert.False(background.HasDistributors);
+        Assert.False(background.NoDistributor); // no "install ntfy" on an iPhone
+        Assert.False(background.PushActive);
+        Assert.Contains("not signed for push", background.PushText);
+
+        // Answered (yes or no): no prompt any more; Low Power Mode is said even then.
+        var answered = Iphone(notifications: iOS.IosNotificationStatus.Denied, lowPower: true);
+        services.IsIgnoringBatteryOptimizations = answered.IsIgnoringBatteryOptimizations;
+        services.RestrictionText = answered.RestrictionText;
+        services.RaiseChanged();
+        Assert.False(background.ShowBatteryPrompt);
+        Assert.StartsWith("Low Power Mode is on", background.BatteryText);
+
+        var off = Iphone(refresh: iOS.IosRefreshStatus.Denied, notifications: iOS.IosNotificationStatus.Allowed);
+        services.IsIgnoringBatteryOptimizations = off.IsIgnoringBatteryOptimizations;
+        services.RestrictionText = off.RestrictionText;
+        services.RaiseChanged();
+        Assert.True(background.ShowBatteryPrompt);
+        Assert.Contains("Background App Refresh is off", background.BatteryText);
+
+        var fine = Iphone(notifications: iOS.IosNotificationStatus.Allowed, signedForPush: true);
+        services.IsIgnoringBatteryOptimizations = fine.IsIgnoringBatteryOptimizations;
+        services.RestrictionText = fine.RestrictionText;
+        services.PushStatusText = fine.PushStatusText;
+        services.RaiseChanged();
+        Assert.False(background.ShowBatteryPrompt);
+        Assert.StartsWith("Background App Refresh is on", background.BatteryText);
+        Assert.StartsWith("This iPhone's push token is on the server", background.PushText);
+    }
+
+    [AvaloniaFact]
+    public async Task OnAnIphone_ThePromptAsksForNotifications_AndTheCardHasNoDistributorPicker()
+    {
+        var services = Iphone();
+        var (window, f) = await PhoneAsync(services, Statuses.Folder());
+        await using var _ = f;
+        Assert.Equal("Let ASync remind you", Named<TextBlock>(window, "BatteryPromptTitle").Text);
+        Assert.Contains("Low Power Mode", Named<TextBlock>(window, "BatteryPromptText").Text);
+        Named<Button>(window, "AllowBackground").Command!.Execute(null);
+        Assert.Equal("battery", services.Calls.Single()); // the iOS head asks for the notification permission here
+
+        f.Shell.OpenSettingsCommand.Execute(null);
+        await Pump(() => Shows(window, "BackgroundCard"));
+        Assert.StartsWith("Notifications are not allowed yet", Named<TextBlock>(window, "BatteryText").Text);
+        Assert.Equal("iOS Settings", Named<Button>(window, "BatterySettings").Content);
+        Assert.Contains("Push__Mode=Direct", Named<TextBlock>(window, "PushExplanation").Text);
+        Assert.Contains("not signed for push", Named<TextBlock>(window, "PushText").Text);
+        Assert.False(Shows(window, "Distributor"));
+        Assert.False(Shows(window, "RegisterPush"));
+        Assert.False(Shows(window, "VendorHint"));
+        Assert.True(Named<Border>(window, "BackgroundCard").Bounds.Width <= 360);
+    }
 }

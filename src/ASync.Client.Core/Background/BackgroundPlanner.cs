@@ -23,8 +23,8 @@ public sealed record BackgroundChanges(IReadOnlyList<ScheduledFolder> Schedule, 
 }
 
 /// <summary>
-/// The scheduling decisions of a phone's background work (Android: WorkManager), kept free of the platform so they can be
-/// tested: one periodic job per folder at its interval (Android allows no less than 15 minutes) with its run conditions as
+/// The scheduling decisions of a phone's background work (Android: WorkManager; iOS: BGTaskScheduler, through the iOS head's
+/// <c>IosBackgroundPlan</c>), kept free of the platform so they can be tested: one periodic job per folder at its interval (Android allows no less than 15 minutes) with its run conditions as
 /// constraints; which folders a wake-up runs; when the local "nothing synced in N days" reminder fires.
 /// </summary>
 public static class BackgroundPlanner
@@ -98,8 +98,16 @@ public static class BackgroundPlanner
         return due > now ? due - now : TimeSpan.Zero;
     }
 
-    /// <summary>The reminder's text: "Docs has not synced for 3 days" (Backup folders: "backed up").</summary>
-    public static (string Title, string Message) ReminderText(string folderName, SyncMode mode, int days) =>
-        ($"{folderName}: nothing {(mode == SyncMode.Backup ? "backed up" : "synced")} for {days} day{(days == 1 ? "" : "s")}",
-         "Open ASync to see why. Background sync may be held back by battery optimisation, or a folder's conditions (Wi-Fi, charging) were not met.");
+    /// <summary>What may hold background runs back on Android (the reminder's second line).</summary>
+    public const string AndroidReminderHint =
+        "Open ASync to see why. Background sync may be held back by battery optimisation, or a folder's conditions (Wi-Fi, charging) were not met.";
+
+    /// <summary>The same on iOS, where the system decides when background work runs.</summary>
+    public const string IosReminderHint =
+        "Open ASync to sync now and see why. iOS runs background work rarely when Background App Refresh or Low Power Mode holds it back, " +
+        "or a folder's conditions (Wi-Fi, charging) were not met.";
+
+    /// <summary>The reminder's text: "Docs: nothing synced for 3 days" (Backup folders: "backed up"); <paramref name="hint"/>: the platform's second line.</summary>
+    public static (string Title, string Message) ReminderText(string folderName, SyncMode mode, int days, string hint = AndroidReminderHint) =>
+        ($"{folderName}: nothing {(mode == SyncMode.Backup ? "backed up" : "synced")} for {days} day{(days == 1 ? "" : "s")}", hint);
 }

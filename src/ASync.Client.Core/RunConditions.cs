@@ -8,8 +8,10 @@ namespace ASync.Client.Core;
 /// <summary>
 /// What the device can tell about its network and power right now. Null = this platform cannot tell; an unknown value
 /// never holds a run back (a rule the device cannot check is ignored, as AGENTS.md "Run conditions" documents).
+/// <paramref name="LowPowerMode"/>: the battery counts as low because the person turned on Low Power Mode (iOS), which also
+/// makes iOS hold background work back.
 /// </summary>
-public sealed record DeviceConditions(bool? Metered, bool? Charging, bool? BatteryLow)
+public sealed record DeviceConditions(bool? Metered, bool? Charging, bool? BatteryLow, bool LowPowerMode = false)
 {
     public static readonly DeviceConditions Unknown = new(null, null, null);
 }
@@ -31,7 +33,8 @@ public static class RunConditions
         if (rules is null || !rules.Any) return null;
         if (rules.UnmeteredOnly && now.Metered == true) return "Waiting for Wi-Fi (this folder syncs only on unmetered networks)";
         if (rules.ChargingOnly && now.Charging == false) return "Waiting for the charger (this folder syncs only while charging)";
-        if (rules.BatteryNotLow && now.BatteryLow == true) return "Waiting: the battery is low";
+        if (rules.BatteryNotLow && now.BatteryLow == true)
+            return now.LowPowerMode ? "Waiting: Low Power Mode is on (this folder waits while the battery is low)" : "Waiting: the battery is low";
         return null;
     }
 

@@ -60,15 +60,18 @@ public sealed class PushThrottle
 }
 
 /// <summary>
-/// Device push targets and wake-ups. UnifiedPush only so far: the server POSTs a tiny JSON body (no user data, see
+/// Device push targets and wake-ups. UnifiedPush: the server POSTs a tiny JSON body (no user data, see
 /// <see cref="PushWake"/>) to the endpoint the device's distributor made for it, which hands it to the app. Same stance as
 /// alert webhooks: only absolute http(s) URLs, no redirects, a short timeout; the endpoint may still point into the
-/// server's own network (a documented gap: devices are the person's own).
+/// server's own network (a documented gap: devices are the person's own). APNs (iOS, <c>Push__Mode=Direct</c>): the
+/// device's token, through <see cref="ApnsSender"/>.
 /// </summary>
 public class PushService(
     IDeviceRepository devices, IHttpClientFactory httpClients, PushSettings settings, PushThrottle throttle, DeviceConnections connections,
-    TimeProvider clock, ILogger<PushService> logger)
+    TimeProvider clock, ILogger<PushService> logger, ApnsSender? apns = null)
 {
+    private readonly ApnsSender _apns = apns ?? new ApnsSender(httpClients, settings, clock);
+
     public const string HttpClientName = "push";
 
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
@@ -91,19 +94,34 @@ public class PushService(
     public static readonly TimeSpan BrowseInterval = TimeSpan.FromSeconds(20);
 
     /// <summary>Whether a wake-up can be sent to the device now (push on, an endpoint registered, not revoked).</summary>
-    public bool CanWake(Device d) => settings.UnifiedPush && d.PushTarget is not null && d.RevokedAt is null;
+    public bool CanWake(Device d) => d.PushTarget is not null && d.PushType is { } type && settings.Sends(type) && d.RevokedAt is null;
 
     public DevicePushDto? ToDto(Device d) =>
         d.PushTarget is { } target && d.PushType is { } type
-            ? new DevicePushDto(type, Uri.TryCreate(target, UriKind.Absolute, out var uri) ? uri.Host : "", d.PushRegisteredAt ?? d.CreatedAt,
-                d.LastPushAt, d.LastPushOk, d.LastPushError, settings.UnifiedPush)
+            ? new DevicePushDto(type, Host(type, target), d.PushRegisteredAt ?? d.CreatedAt,
+                d.LastPushAt, d.LastPushOk, d.LastPushError, settings.Sends(type))
             : null;
+
+    /// <summary>What people see of a target: the endpoint's host; for APNs only which of Apple's services (never the token).</summary>
+    private static string Host(PushTargetType type, string target) =>
+        type == PushTargetType.Apns ? ApnsSender.ParseTarget(target) is { Sandbox: true } ? "APNs sandbox" : "APNs"
+        : Uri.TryCreate(target, UriKind.Absolute, out var uri) ? uri.Host : "";
 
     public async Task<string?> RegisterAsync(Device device, PushTargetRequest req)
     {
-        if (req.Type != PushTargetType.UnifiedPush) return "Only UnifiedPush endpoints can be registered.";
-        if (ValidateEndpoint(req.Endpoint) is { } invalid) return invalid;
-        var endpoint = req.Endpoint.Trim();
+        string endpoint;
+        if (req.Type == PushTargetType.Apns)
+        {
+            var (token, sandbox, error) = ApnsSender.Validate(req.Endpoint, req.Environment);
+            if (error is not null) return error;
+            endpoint = ApnsSender.Target(token!, sandbox);
+        }
+        else if (req.Type == PushTargetType.UnifiedPush)
+        {
+            if (ValidateEndpoint(req.Endpoint) is { } invalid) return invalid;
+            endpoint = req.Endpoint.Trim();
+        }
+        else return "Only UnifiedPush endpoints and APNs tokens can be registered.";
         if (device.PushTarget != endpoint || device.PushType != req.Type)
         {
             device.PushTarget = endpoint;
@@ -113,7 +131,7 @@ public class PushService(
             device.LastPushOk = null;
             device.LastPushError = null;
             await devices.UpdateAsync(device);
-            logger.LogInformation("Device {DeviceId} registered a {Type} endpoint on {Host}.", device.Id, req.Type, new Uri(endpoint).Host);
+            logger.LogInformation("Device {DeviceId} registered a {Type} endpoint on {Host}.", device.Id, req.Type, Host(req.Type, endpoint));
         }
         return null;
     }
@@ -142,7 +160,9 @@ public class PushService(
         if (!settings.UnifiedPush) return WakeOutcome.Skipped("Push__Mode is None: this server sends no wake-ups.");
         var device = await devices.GetAsync(deviceId);
         if (device is null || device.RevokedAt is not null) return WakeOutcome.Skipped("No such device.");
-        if (device.PushTarget is not { } target) return WakeOutcome.Skipped("The device has not registered a push endpoint.");
+        if (device.PushTarget is not { } target || device.PushType is not { } type) return WakeOutcome.Skipped("The device has not registered a push endpoint.");
+        if (!settings.Sends(type))
+            return WakeOutcome.Skipped("APNs wake-ups need Push__Mode=Direct with the APNs key of whoever signs the app (Push__Apns__*).");
         if (reason == PushWake.Changed && connections.IsConnected(deviceId)) return WakeOutcome.Skipped("The device is connected.");
         var interval = reason switch
         {
@@ -152,13 +172,16 @@ public class PushService(
         };
         if (!force && !throttle.TryTake(deviceId, reason, interval, clock.GetUtcNow())) return WakeOutcome.Skipped("Woken a moment ago.");
 
-        var (error, gone) = await PostAsync(target, reason, ct);
+        var (error, gone) = type == PushTargetType.Apns
+            ? ApnsSender.ParseTarget(target) is { } apns ? await _apns.SendAsync(apns.Token, apns.Sandbox, reason, ct) : ("Not an APNs token.", true)
+            : await PostAsync(target, reason, ct);
         device.LastPushAt = Now;
         device.LastPushOk = error is null;
         device.LastPushError = error is { Length: > 500 } ? error[..500] : error;
         if (gone)
         {
-            // UnifiedPush: 404/410 means the distributor dropped the registration; the app registers again when it can.
+            // UnifiedPush: 404/410, the distributor dropped the registration; APNs: 410, the token is no longer valid. The
+            // app registers again when it can.
             Clear(device);
             logger.LogInformation("The push endpoint of device {DeviceId} is gone ({Error}); removed it.", deviceId, error);
         }

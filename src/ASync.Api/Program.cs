@@ -82,7 +82,8 @@ builder.Services.AddSingleton<PurgeSignal>();
 builder.Services.AddHostedService<PurgeWorker>();
 
 // ── Alerts (overdue detection; webhook, ntfy, e-mail) and push mode ───────────
-// Alerts need no push: they work from what devices report. Push__Mode: UnifiedPush (default) or None; see PushSettings.
+// Alerts need no push: they work from what devices report. Push__Mode: UnifiedPush (default), Direct (also APNs with
+// Push__Apns__*) or None; see PushSettings.
 var pushSettings = PushSettings.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(pushSettings);
 builder.Services.AddSingleton<PushQueue>();
@@ -92,6 +93,14 @@ builder.Services.AddHostedService<PushDispatcher>();
 // Device-supplied endpoints: the same stance as alert webhooks (http/https only, no redirects, a short timeout).
 builder.Services.AddHttpClient(PushService.HttpClientName, c => c.Timeout = pushSettings.Timeout)
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, ConnectTimeout = pushSettings.Timeout });
+// APNs (Push__Mode=Direct with Push__Apns__*): HTTP/2 to Apple; one sender, so its provider token is reused (Apple limits new ones).
+builder.Services.AddSingleton<ApnsSender>();
+builder.Services.AddHttpClient(ApnsSender.HttpClientName, c => c.Timeout = pushSettings.Timeout)
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false, ConnectTimeout = pushSettings.Timeout, EnableMultipleHttp2Connections = true,
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(10),
+    });
 builder.Services.AddSingleton(AlertOptions.FromConfiguration(builder.Configuration));
 builder.Services.AddSingleton(SmtpOptions.FromConfiguration(builder.Configuration));
 builder.Services.AddSingleton(new ServerStarted(DateTime.UtcNow));

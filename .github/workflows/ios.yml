@@ -84,8 +84,8 @@ jobs:
       - name: Compile the iOS head (scripts/check-ios.sh)
         run: scripts/check-ios.sh
 
-      - name: The iOS head's shared code (IosTests)
-        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests'
+      - name: The iOS head's shared code (IosTests, IosBackgroundTests)
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests'
 
   ios:
     needs: [decide, check]
@@ -138,8 +138,8 @@ jobs:
         run: dotnet workload install ios --version "$IOS_WORKLOAD_SET"
 
       # The shared iOS code on macOS itself (/var and /private/var, the real container layout of paths).
-      - name: Unit tests (IosTests)
-        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests'
+      - name: Unit tests (IosTests, IosBackgroundTests)
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests'
 
       - name: Build for the simulator
         run: scripts/package-ios.sh --simulator
@@ -181,8 +181,12 @@ jobs:
           identity=$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Apple Distribution[^"]*\)".*/\1/p' | head -1)
           { echo "ASYNC_IOS_CODESIGN_KEY=$identity"; echo "ASYNC_IOS_PROVISION=$uuid"; } >> "$GITHUB_ENV"
 
+      # With the push entitlement (aps-environment): the profile in IOS_PROVISIONING_PROFILE needs the Push Notifications
+      # capability (the repository variable IOS_PUSH=0 builds without it, for a profile that has none).
       - name: The signed .ipa
         if: env.HAS_IOS_SIGNING == 'true'
+        env:
+          ASYNC_IOS_PUSH: ${{ vars.IOS_PUSH || '1' }}
         run: scripts/package-ios.sh --signed
 
       - name: Upload to TestFlight

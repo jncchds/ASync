@@ -77,19 +77,19 @@
       <StackPanel Spacing="12">
         <TextBlock Classes="h2" Text="Background sync" />
         <StackPanel Spacing="6">
-          <TextBlock Classes="label" Text="Battery" />
+          <TextBlock Classes="label" Text="{Binding Background.Texts.AllowanceLabel, FallbackValue=''}" />
           <TextBlock Name="BatteryText" Text="{Binding Background.BatteryText, FallbackValue=''}" TextWrapping="Wrap" />
           <WrapPanel ItemSpacing="8" LineSpacing="8">
-            <Button Name="AllowBattery" Content="Allow background sync" Command="{Binding Background.AllowBatteryCommand, FallbackValue={x:Null}}"
+            <Button Name="AllowBattery" Content="{Binding Background.Texts.AllowLabel, FallbackValue=''}" Command="{Binding Background.AllowBatteryCommand, FallbackValue={x:Null}}"
                     IsVisible="{Binding !Background.BatteryUnrestricted, FallbackValue=False}" />
-            <Button Classes="secondary" Content="Battery settings" Command="{Binding Background.OpenBatterySettingsCommand, FallbackValue={x:Null}}" />
+            <Button Classes="secondary" Name="BatterySettings" Content="{Binding Background.Texts.SettingsLabel, FallbackValue=''}" Command="{Binding Background.OpenBatterySettingsCommand, FallbackValue={x:Null}}" />
           </WrapPanel>
           <TextBlock Classes="muted small" Name="VendorHint" Text="{Binding Background.VendorHint, FallbackValue=''}" TextWrapping="Wrap"
                      IsVisible="{Binding Background.HasVendorHint, FallbackValue=False}" />
         </StackPanel>
         <StackPanel Spacing="6">
-          <TextBlock Classes="label" Text="Wake-ups (UnifiedPush)" />
-          <TextBlock Classes="muted small" Text="{x:Static vm:BackgroundViewModel.PushExplanation}" TextWrapping="Wrap" />
+          <TextBlock Classes="label" Text="{Binding Background.Texts.PushLabel, FallbackValue=''}" />
+          <TextBlock Classes="muted small" Name="PushExplanation" Text="{Binding Background.Texts.PushExplanation, FallbackValue=''}" TextWrapping="Wrap" />
           <TextBlock Name="PushText" Text="{Binding Background.PushText, FallbackValue=''}" TextWrapping="Wrap"
                      Classes.error="{Binding Background.PushProblem, FallbackValue=False}" />
           <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding Background.HasDistributors, FallbackValue=False}">
@@ -108,8 +108,7 @@
           <TextBlock Classes="label" Text="Remind me when nothing synced for" />
           <ComboBox Name="ReminderDays" ItemsSource="{Binding Background.ReminderOptions, FallbackValue={x:Null}}"
                     SelectedIndex="{Binding Background.ReminderIndex, FallbackValue=0}" MinWidth="160" />
-          <TextBlock Classes="muted small" TextWrapping="Wrap"
-                     Text="A notification from the phone itself, moved on after every successful run: it needs neither the server nor push." />
+          <TextBlock Classes="muted small" TextWrapping="Wrap" Text="{Binding Background.Texts.ReminderNote, FallbackValue=''}" />
         </StackPanel>
       </StackPanel>
     </Border>

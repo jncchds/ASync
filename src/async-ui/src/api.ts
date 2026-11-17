@@ -127,7 +127,7 @@ export interface Device {
   createdAt: string
   lastSeenAt: string | null
   revokedAt: string | null
-  /** Where the server can wake it (UnifiedPush); null = it relies on its own schedule. */
+  /** Where the server can wake it (UnifiedPush, APNs); null = it relies on its own schedule. */
   push: DevicePush | null
   /** Whether the web UI can browse its folders now, and if not, why (null: an older server). */
   browse?: BrowseAvailability | null
@@ -195,15 +195,15 @@ export const browseDevice = (id: string, path?: string, files = true) =>
 export const browseDeviceMkdir = (id: string, path: string, name: string) =>
   api.post<BrowseListing>(`/devices/${id}/browse/mkdir`, { path, name }).then(r => r.data)
 
-/** A device's UnifiedPush registration: only the endpoint's host (the full address can wake the device). */
+/** A device's push registration: only the endpoint's host (the full address can wake the device); for APNs "APNs" or "APNs sandbox". */
 export interface DevicePush {
-  type: 'UnifiedPush'
+  type: 'UnifiedPush' | 'Apns'
   host: string
   registeredAt: string
   lastWakeAt: string | null
   lastWakeOk: boolean | null
   lastWakeError: string | null
-  /** The server sends wake-ups (Push__Mode is not None). */
+  /** The server sends wake-ups of this type (UnifiedPush: Push__Mode is not None; APNs: Push__Mode=Direct with an APNs key). */
   enabled: boolean
 }
 

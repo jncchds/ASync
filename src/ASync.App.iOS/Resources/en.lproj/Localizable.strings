@@ -1,0 +1,3 @@
+/* The overdue alert of Apple push (the server sends only these keys: no user data, no server text). */
+"ASYNC_OVERDUE_TITLE" = "ASync: a folder is overdue";
+"ASYNC_OVERDUE_BODY" = "Nothing has synced for longer than expected. Open ASync to sync now and see why.";

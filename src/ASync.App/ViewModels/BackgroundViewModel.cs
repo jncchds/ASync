@@ -5,9 +5,10 @@ using CommunityToolkit.Mvvm.Input;
 namespace ASync.App.ViewModels;
 
 /// <summary>
-/// The phone's background side, in Settings and as the dashboard's prompt: the battery-optimisation exemption (explained,
-/// offered, the maker's extra steps as text), UnifiedPush wake-ups through an installed distributor, and the local
-/// "nothing synced in N days" reminder. Only exists when the platform has <see cref="IPlatformServices.Background"/>.
+/// The phone's background side, in Settings and as the dashboard's prompt: on Android the battery-optimisation exemption
+/// (explained, offered, the maker's extra steps as text) and UnifiedPush wake-ups through an installed distributor; on iOS
+/// Background App Refresh, the notification permission and Apple's push (<see cref="IBackgroundServices.Texts"/>); and the
+/// local "nothing synced in N days" reminder. Only exists when the platform has <see cref="IPlatformServices.Background"/>.
 /// </summary>
 public sealed partial class BackgroundViewModel : ObservableObject
 {
@@ -28,6 +29,9 @@ public sealed partial class BackgroundViewModel : ObservableObject
         Refresh();
     }
 
+    /// <summary>The platform's words for the card and the prompt.</summary>
+    public BackgroundTexts Texts => _services.Texts;
+
     public static readonly int[] ReminderChoices = [0, 1, 2, 3, 7, 14];
 
     public IReadOnlyList<string> ReminderOptions { get; } =
@@ -46,14 +50,7 @@ public sealed partial class BackgroundViewModel : ObservableObject
     /// <summary>The dashboard's prompt: optimised, and not dismissed.</summary>
     public bool ShowBatteryPrompt => !BatteryUnrestricted && !BatteryPromptDismissed;
 
-    public string BatteryText => BatteryUnrestricted
-        ? "ASync may run in the background without battery restrictions."
-        : "Battery optimisation is on for ASync: Android may delay or skip its background syncs, most of all when the phone is idle.";
-
-    public const string BatteryExplanation =
-        "Folders sync in the background on their schedule, also with the app closed. Android's battery optimisation can hold that " +
-        "work back for hours. Allowing ASync to run in the background lets it sync on time; transfers still wait for the " +
-        "conditions you set (Wi-Fi, charging).";
+    public string BatteryText => _services.RestrictionText ?? (BatteryUnrestricted ? Texts.Unrestricted : Texts.Restricted);
 
     public string? VendorHint => _services.VendorHint;
     public bool HasVendorHint => VendorHint is not null;
@@ -81,8 +78,8 @@ public sealed partial class BackgroundViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(RegisterPushCommand))]
     public partial PushDistributor? SelectedDistributor { get; set; }
 
-    public bool HasDistributors => Distributors.Count > 0;
-    public bool NoDistributor => Distributors.Count == 0 && !PushActive;
+    public bool HasDistributors => _services.UsesDistributors && Distributors.Count > 0;
+    public bool NoDistributor => _services.UsesDistributors && Distributors.Count == 0 && !PushActive;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(NoDistributor))]
@@ -92,12 +89,6 @@ public sealed partial class BackgroundViewModel : ObservableObject
     [ObservableProperty] public partial string PushText { get; private set; } = "";
 
     [ObservableProperty] public partial bool PushProblem { get; private set; }
-
-    public const string PushExplanation =
-        "With a UnifiedPush distributor such as ntfy installed, the server can wake this phone when another device changes a " +
-        "folder, when it has not synced for too long, or when you browse its folders from the web. Nothing else goes through it: " +
-        "the message only says \"wake up\". " +
-        "Without one, folders still sync on their schedule.";
 
     private bool CanRegister() => SelectedDistributor is not null;
 
@@ -132,13 +123,14 @@ public sealed partial class BackgroundViewModel : ObservableObject
         try
         {
             BatteryUnrestricted = _services.IsIgnoringBatteryOptimizations;
+            OnPropertyChanged(nameof(BatteryText));
             BatteryPromptDismissed = _shell.Settings.BatteryPromptDismissed;
             Distributors = _services.Distributors();
             var push = _services.Push;
-            PushActive = push.Distributor is not null;
+            PushActive = _services.UsesDistributors && push.Distributor is not null;
             SelectedDistributor = Distributors.FirstOrDefault(d => d.Id == push.Distributor) ?? SelectedDistributor ?? Distributors.FirstOrDefault();
             PushProblem = push.Problem is not null;
-            PushText = push switch
+            PushText = _services.PushStatusText ?? push switch
             {
                 { Problem: { } problem } => problem,
                 { Registered: true } => $"The server can wake this phone through {push.DistributorName ?? push.Distributor}.",

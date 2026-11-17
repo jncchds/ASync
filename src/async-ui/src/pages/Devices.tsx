@@ -120,17 +120,19 @@ export default function Devices() {
                   </td>
                   <td data-label="Wake-ups" className="wrap">
                     {d.push ? (
-                      <span title={`UnifiedPush through ${d.push.host}, registered ${formatDate(d.push.registeredAt)}` +
+                      <span title={`${d.push.type === 'Apns' ? 'Apple push' : 'UnifiedPush'} through ${d.push.host}, registered ${formatDate(d.push.registeredAt)}` +
                         (d.push.lastWakeAt ? `\nLast wake-up ${formatDate(d.push.lastWakeAt)}${d.push.lastWakeError ? `: ${d.push.lastWakeError}` : ''}` : '')}>
                         <span className={`pill ${!d.push.enabled ? '' : d.push.lastWakeOk === false ? 'pill-danger' : 'pill-success'}`}>
-                          {d.push.lastWakeOk === false ? '⚠ ' : ''}UnifiedPush
+                          {d.push.lastWakeOk === false ? '⚠ ' : ''}{d.push.type === 'Apns' ? 'APNs' : 'UnifiedPush'}
                         </span>
                         <span className="status-msg">
-                          {d.push.enabled ? d.push.host : 'off on this server (Push__Mode=None)'}
+                          {d.push.enabled ? d.push.host
+                            : d.push.type === 'Apns' ? 'not sent by this server (APNs needs Push__Mode=Direct with an APNs key)'
+                            : 'off on this server (Push__Mode=None)'}
                           {d.push.enabled && <> · <button type="button" className="link" onClick={() => testPush(d)}>Send wake-up</button></>}
                         </span>
                       </span>
-                    ) : <span className="muted">{d.platform === 'Android' ? 'Own schedule' : '—'}</span>}
+                    ) : <span className="muted">{d.platform === 'Android' || d.platform === 'IOS' ? 'Own schedule' : '—'}</span>}
                   </td>
                   <td data-label="Adds folders" className="nowrap">
                     <label className="checkbox" title={d.mayAddFolders

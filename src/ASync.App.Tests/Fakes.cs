@@ -360,6 +360,11 @@ internal sealed class FakeBackground : IBackgroundServices
     public PushState Push { get; set; } = PushState.None;
     public int ReminderDays { get; set; } = 3;
     public event Action? Changed;
+    /// <summary>iOS's words and its system push instead of Android's (task 22).</summary>
+    public BackgroundTexts Texts { get; set; } = BackgroundTexts.Android;
+    public string? RestrictionText { get; set; }
+    public bool UsesDistributors { get; set; } = true;
+    public string? PushStatusText { get; set; }
 
     public void RequestIgnoreBatteryOptimizations() => Calls.Add("battery");
     public void OpenBatterySettings() => Calls.Add("battery-settings");

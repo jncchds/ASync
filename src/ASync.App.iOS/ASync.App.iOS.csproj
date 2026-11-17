@@ -14,7 +14,14 @@
     network texts, an App Transport Security exception (self-hosted servers are often plain http on a LAN; the app's HTTP
     stack is .NET's, which ATS does not cover anyway), UILaunchScreen (without one iOS runs the app letterboxed).
     Entitlements.plist: only used when signed (simulator builds ad hoc, TestFlight); the Keychain group of the device key and
-    the store's key. APNs (task 22) and the app group shared with the File Provider extension (task 25) are added there.
+    the store's key. The app group shared with the File Provider extension (task 25) is added there.
+    Background work (task 22): Info.plist's UIBackgroundModes (fetch, processing: BGTaskScheduler; remote-notification: silent
+    pushes), BGTaskSchedulerPermittedIdentifiers (ua.pp.chds.async.refresh, .processing) and the "Back up now" quick action
+    (UIApplicationShortcutItems). Entitlements.Push.plist is Entitlements.plist plus aps-environment: only the signed build path
+    uses it (-p:AsyncPush=true, the signed mode of scripts/package-ios.sh), since a profile without the push capability refuses it; the
+    unsigned .ipa and the simulator build have no push entitlement and the app then does not register (see BackgroundWork.cs).
+    Resources/en.lproj/Localizable.strings: the overdue alert's text, which APNs pushes name by key only.
+    AllowUnsafeBlocks: the quick action's method added to Avalonia's scene delegate (a function pointer, a block call).
   -->
   <PropertyGroup>
     <TargetFramework>net10.0-ios</TargetFramework>
@@ -39,7 +46,9 @@
     <UseNativeHttpHandler>false</UseNativeHttpHandler>
     <!-- Entitlements only take effect when the app is signed (CI's TestFlight job, or SideStore/AltStore re-signing it): the
          app group and the File Provider extension of task 25 go there. -->
-    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false'">Entitlements.plist</CodesignEntitlements>
+    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false' And '$(AsyncPush)' != 'true'">Entitlements.plist</CodesignEntitlements>
+    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false' And '$(AsyncPush)' == 'true'">Entitlements.Push.plist</CodesignEntitlements>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
