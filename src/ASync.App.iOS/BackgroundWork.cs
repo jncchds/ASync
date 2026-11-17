@@ -111,18 +111,19 @@ public static class IosBackground
     {
         var kind = IosTaskRequest.KindOf(task.Identifier) ?? IosTaskKind.Refresh;
         Log($"Background: iOS started the {kind} task.");
+        // Not disposed: iOS may call the expiration handler at any time, also after the task completed.
         var expired = new CancellationTokenSource();
-        task.ExpirationHandler = () => expired.Cancel();
+        task.ExpirationHandler = () =>
+        {
+            try { expired.Cancel(); }
+            catch (Exception e) { Log($"Background: expiration: {e.Message}"); }
+        };
         _ = Task.Run(async () =>
         {
             var ok = false;
             try { ok = await RunTaskAsync(kind, expired.Token); }
             catch (Exception e) { Log($"Background: the {kind} task failed: {e}"); }
-            finally
-            {
-                task.SetTaskCompleted(ok);
-                expired.Dispose();
-            }
+            finally { task.SetTaskCompleted(ok); }
         });
     }
 
@@ -145,12 +146,18 @@ public static class IosBackground
         return true;
     }
 
-    /// <summary>Tests: what iOS does for a pending task (a private BGTaskScheduler method; on a device only from the debugger).</summary>
-    internal static string SimulateLaunch(IosTaskKind kind)
+    /// <summary>
+    /// Tests: what iOS does for a pending task (a private BGTaskScheduler method, meant for the debugger). Only for a request iOS
+    /// holds: without one there is nothing to launch.
+    /// </summary>
+    internal static async Task<string> SimulateLaunchAsync(IosTaskKind kind)
     {
+        var identifier = kind == IosTaskKind.Refresh ? IosTaskRequest.RefreshId : IosTaskRequest.ProcessingId;
+        var pending = await BGTaskScheduler.Shared.GetPendingAsync();
+        if (pending.All(p => p.Identifier != identifier)) return "no pending request";
         var selector = new Selector("_simulateLaunchForTaskWithIdentifier:");
         if (!BGTaskScheduler.Shared.RespondsToSelector(selector)) return "unsupported";
-        using var id = new NSString(kind == IosTaskKind.Refresh ? IosTaskRequest.RefreshId : IosTaskRequest.ProcessingId);
+        using var id = new NSString(identifier);
         objc_msgSend(BGTaskScheduler.Shared.Handle, selector.Handle, id.Handle);
         return "asked";
     }

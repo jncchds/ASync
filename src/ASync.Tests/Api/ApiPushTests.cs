@@ -55,6 +55,31 @@ public class ApiPushTests(ApiWorld world) : IClassFixture<ApiWorld>
     }
 
     [SkippableFact]
+    public async Task AnIphone_RegistersItsApnsToken_WhichNobodySees_AndThisServerDoesNotSendWithoutDirectMode()
+    {
+        Skip.If(ApiWorld.Connection is null, "Set ASYNC_TEST_POSTGRES.");
+        const string token = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        using (var bad = await world.SendAsync(HttpMethod.Put, "api/sync/push", world.BobDeviceToken, new PushTargetRequest(PushTargetType.Apns, "not-hex")))
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        using (var put = await world.SendAsync(HttpMethod.Put, "api/sync/push", world.BobDeviceToken, new PushTargetRequest(PushTargetType.Apns, token, "development")))
+        {
+            put.EnsureSuccessStatusCode();
+            var dto = await put.Content.ReadFromJsonAsync<DevicePushDto>(ApiWorld.Json);
+            // The test server runs the default mode (UnifiedPush): the token is kept, but no APNs push is sent.
+            Assert.Equal((PushTargetType.Apns, "APNs sandbox", false), (dto!.Type, dto.Host, dto.Enabled));
+        }
+        using var list = await world.SendAsync(HttpMethod.Get, "api/devices", world.BobToken);
+        Assert.DoesNotContain(token[..16], await list.Content.ReadAsStringAsync());
+        using (var test = await world.SendAsync(HttpMethod.Post, $"api/devices/{world.BobDevice}/push/test", world.BobToken))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, test.StatusCode);
+            Assert.Contains("Push__Mode=Direct", await test.Content.ReadAsStringAsync());
+        }
+        using (var delete = await world.SendAsync(HttpMethod.Delete, "api/sync/push", world.BobDeviceToken))
+            Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
+    }
+
+    [SkippableFact]
     public async Task RunConditions_AreSetByThePersonAndByTheDevice_AndKeptWhenNotSent()
     {
         Skip.If(ApiWorld.Connection is null, "Set ASYNC_TEST_POSTGRES.");

@@ -30,7 +30,8 @@ namespace ASync.App.iOS;
 /// bookmarked directories), <c>home</c> (the container's path).</para>
 /// <para>Background work (task 22): <c>bg</c> (pending BGTask requests, reminders, conditions, permissions, push, the store),
 /// <c>bg-simulate refresh|processing</c> (iOS's own launch of a pending task; private API), <c>bg-run refresh|processing [seconds]</c>
-/// (the task's code path after a delay, so the app can be sent to the background first), <c>bg-wake &lt;reason&gt;</c> (a silent
+/// (the task's code path after a delay, so the app can be sent to the background first), <c>bg-due &lt;folder&gt;</c> (counts as never run),
+/// <c>bg-wake &lt;reason&gt;</c> (a silent
 /// push handled in the app), <c>bg-reminder &lt;days&gt;</c>, <c>notify-permission</c> (the system's question), <c>editconditions
 /// &lt;folder&gt;</c>.</para>
 /// </summary>
@@ -274,24 +275,37 @@ internal static class Automation
                 return await BackgroundState();
             case "bg-simulate":
                 // What iOS does for a pending task: works only where iOS took the request (not on the simulator, which refuses them).
-                return IosBackground.SimulateLaunch(ParseKind(arg));
+                return await IosBackground.SimulateLaunchAsync(ParseKind(arg));
             case "bg-run":
             {
                 // The task's own code path (IosBackground.RunTaskAsync, what the BGTask handler calls), started after a delay so the
-                // test can send the app to the background first; it holds background time like a run started in the foreground.
+                // test can send the app to the background first; it holds background time like a run started in the foreground,
+                // and the time running out stands for the task's expiration.
                 var a = arg.Split(' ', 2);
                 var kind = ParseKind(a[0]);
                 var delay = a.Length > 1 ? int.Parse(a[1], CultureInfo.InvariantCulture) : 0;
-                var assertion = UIApplication.SharedApplication.BeginBackgroundTask("async-automation", null);
+                var expired = new CancellationTokenSource();
+                var ended = 0;
+                nint assertion = 0;
+                void End()
+                {
+                    if (Interlocked.Exchange(ref ended, 1) == 0) UIApplication.SharedApplication.EndBackgroundTask(assertion);
+                }
+                assertion = UIApplication.SharedApplication.BeginBackgroundTask("async-automation", () =>
+                {
+                    expired.Cancel();
+                    End();
+                });
                 _ = Task.Run(async () =>
                 {
                     try
                     {
                         await Task.Delay(TimeSpan.FromSeconds(delay));
-                        var ok = await IosBackground.RunTaskAsync(kind, CancellationToken.None);
+                        var ok = await IosBackground.RunTaskAsync(kind, expired.Token);
                         Console.WriteLine($"ASync: automation bg-run {kind}: {(ok ? "done" : "not done")}");
                     }
-                    finally { UIApplication.SharedApplication.EndBackgroundTask(assertion); }
+                    catch (Exception e) { Console.WriteLine($"ASync: automation bg-run {kind}: {e.Message}"); }
+                    finally { End(); }
                 });
                 return "started";
             }
