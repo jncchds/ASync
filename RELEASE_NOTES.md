@@ -12,6 +12,9 @@
   them. The app asks to read contacts or calendars and explains why; it asks to add to them only for *Restore into the contacts… /
   calendars…*, which imports a chosen snapshot into the original accounts or one you pick, skipping what is already there and never
   deleting anything.
+- fix(android): the background folder runs have a stable worker name again (task 17 had put it on the browse wake-up
+  worker by mistake). On the first start after this update the app re-enqueues the folders' scheduled work under the new
+  name, so phones that already have the app keep running their folders in the background.
 
 ## v0.1.5 — 2026-11-17
 

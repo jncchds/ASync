@@ -2869,7 +2869,7 @@ contacts and calendars part is `scripts/smoke-android-collections.sh`): see its 
      the app; originals as they are with a JSON sidecar each in a permanent `<year>/<month>/<name>~<id>` tree, deduplicated across
      albums and renames, incremental by id, size and time; new photos start a backup (MediaStore content trigger); the permissions
      of Android 13/14 (partial access explained) and the location kept; restore into the library skipping what is there;
-     `async-cli restore` writes plain files and sidecars. See "Extra data sources". Verification: SMOKE_RESULT_PLACEHOLDER
+     `async-cli restore` writes plain files and sidecars. See "Extra data sources". Verification: the Android smoke test (with its photos part, `scripts/smoke-android-photos.sh`) passed 199/199 checks in its fourth run.
    - **M4-6 Adding folders from the apps (task 18, done):** *New folder…* and *Add to a folder…* in the shared app
      (Android and desktop), device endpoints gated by the per-device *May add folders* (Devices page; on for one-time
      codes and the device-code flow, off for reusable codes and older devices), "added from <device>" in the web UI; the

@@ -209,6 +209,18 @@ sleep 1
 wait_for 60 restored calendars && p=$(pim calendars) && jq -e '.restore.restored == 0 and .restore.skipped == 2' <<<"$p" >/dev/null \
   && pass "a second calendar restore skips them (by UID)" || fail "second calendar restore" "$(pim calendars)"
 
+# An upgrade from before v0.1.6 (FolderRunWorker had a generated Java name): the folders' periodic work is re-enqueued under the
+# stable one. bg-worker-names 0 puts the phone back into that state and plans again, as the first start after the upgrade does.
+folder_work() { ctl bg | jq -c --arg t "folder-$cf" '[.works[] | select((.tags | split(",") | index($t)) and .state == "ENQUEUED")] | first'; }
+before_work=$(folder_work)
+[[ "$(jq -r .worker <<<"$before_work")" == "ua.pp.chds.async.FolderRunWorker" ]] \
+  && pass "a folder's periodic work is stored under the stable worker name ua.pp.chds.async.FolderRunWorker" || fail "worker name" "$before_work"
+ctl "bg-worker-names 0" >/dev/null
+rescheduled() { local w; w=$(folder_work); [[ "$(jq -r .id <<<"$w")" != "$(jq -r .id <<<"$before_work")" && "$(jq -r .worker <<<"$w")" == "ua.pp.chds.async.FolderRunWorker" ]]; }
+wait_for 30 rescheduled && logged "workers renamed" && [[ "$(ctl "bg-worker-names 2")" == "worker names 2" ]] \
+  && pass "after an upgrade from the old worker names the folder's work is cancelled and enqueued afresh (new work id, stable name)" \
+  || fail "worker migration" "$(ctl bg | jq -c '[.works[] | {tags, worker, state, id}]')"
+
 # Tidy up for the restart check.
 api DELETE "/api/folders/$cf" >/dev/null && api DELETE "/api/folders/$kf" >/dev/null && pass "the Contacts and Calendars folders deleted in the web UI" || fail "delete pim folders"
 wait_state '((.folders | any(.name == "Phone contacts")) or (.folders | any(.name == "Phone calendars"))) | not' 30 || fail "pim folders gone" "$(state)"

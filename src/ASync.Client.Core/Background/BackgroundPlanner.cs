@@ -11,6 +11,12 @@ public sealed record ScheduledFolder(int FolderId, string Name, int IntervalMinu
 }
 
 /// <summary>The changes to make to the scheduled work: (re)schedule these, cancel those.</summary>
+/// <summary>
+/// <see cref="BackgroundPlanner.MigrateWorkers"/>: the unique works to cancel, and whether the stored schedule is forgotten (so the
+/// next plan enqueues every folder's periodic work again).
+/// </summary>
+public sealed record WorkerMigration(IReadOnlyList<string> Cancel, bool Reschedule);
+
 public sealed record BackgroundChanges(IReadOnlyList<ScheduledFolder> Schedule, IReadOnlyList<int> Cancel)
 {
     public bool IsEmpty => Schedule.Count == 0 && Cancel.Count == 0;
@@ -31,6 +37,23 @@ public static class BackgroundPlanner
 
     /// <summary>The Photos folders that new photos and videos start (the media content trigger, task 19).</summary>
     public static IReadOnlyList<int> PhotoFolders(IEnumerable<DeviceFolderDto> folders) => FoldersOfKind(folders, FolderKind.Photos);
+
+    /// <summary>
+    /// The version of the Android workers' Java names that the phone's queued work refers to. WorkManager stores each work's worker
+    /// class name; v1 (before v0.1.6) had FolderRunWorker under a generated name and BrowseWakeWorker under
+    /// <c>ua.pp.chds.async.FolderRunWorker</c>. v2 registers both under their own stable names.
+    /// </summary>
+    public const int WorkerNamesVersion = 2;
+
+    /// <summary>
+    /// What to do on the first start after an upgrade that renamed workers: the unique works stored under the old names (WorkManager
+    /// would fail them on every run, and its UPDATE policy refuses to change a work's class) are cancelled, and every scheduled
+    /// folder is planned again so its periodic work is enqueued afresh under the new name. Nothing when the stored version is current.
+    /// </summary>
+    public static WorkerMigration MigrateWorkers(int storedVersion, IEnumerable<int> scheduledFolders) =>
+        storedVersion >= WorkerNamesVersion
+            ? new WorkerMigration([], false)
+            : new WorkerMigration([.. scheduledFolders.Order().Select(id => $"folder-{id}"), "wake", "browse-wake"], true);
 
     /// <summary>The unpaused folders of a kind (the contacts and calendar content triggers, task 20).</summary>
     public static IReadOnlyList<int> FoldersOfKind(IEnumerable<DeviceFolderDto> folders, FolderKind kind) =>
