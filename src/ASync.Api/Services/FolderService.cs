@@ -89,7 +89,7 @@ public class FolderService(
     /// <summary>Which devices can back up a photo library, contacts and calendars (the server decides by the platform the device enrolled with).</summary>
     public static bool HasPhotoLibrary(DevicePlatform platform) => platform is DevicePlatform.Android or DevicePlatform.IOS;
 
-    public const string NoPhotoLibrary = "Only phones back up their photos (the ASync app on Android; iOS later). Computers back up a Pictures folder as files.";
+    public const string NoPhotoLibrary = "Only phones back up their photos (the ASync app on Android and iOS). Computers back up a Pictures folder as files.";
 
     /// <summary>What a computer is told for a Contacts or Calendars folder (400).</summary>
     public static string NoPhoneData(FolderKind kind) => kind == FolderKind.Contacts

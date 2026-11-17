@@ -21,6 +21,12 @@ public sealed class FakeMediaLibrary : IMediaLibrary
     public ConcurrentDictionary<string, int> Reads { get; } = new();
     public List<(MediaInsert Insert, byte[] Bytes)> Inserted { get; } = [];
     public Dictionary<string, MediaDetails> DetailsById { get; } = [];
+    /// <summary>Assets whose files are "in the cloud only": a read without network access throws <see cref="MediaUnavailableException"/>.</summary>
+    public HashSet<string> CloudOnly { get; } = [];
+    /// <summary>The roles a restore hands over beside the original (iOS: "live").</summary>
+    public IReadOnlyCollection<string> RestoredRoles { get; set; } = [];
+    public List<(string FileName, string Role, string Name, byte[] Bytes)> ExtrasInserted { get; } = [];
+    public List<(string Id, IReadOnlyList<MediaAlbumRef> Albums)> AlbumCalls { get; } = [];
 
     public string Album(string name, string? id = null)
     {
@@ -79,6 +85,18 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         return new MemoryStream(v.Bytes[resource.Role], writable: false);
     }
 
+    public Stream OpenRead(MediaAsset asset, MediaResource resource, MediaReadOptions options)
+    {
+        if (!options.AllowNetwork && CloudOnly.Contains(asset.Id)) throw new MediaUnavailableException($"{resource.FileName} is in the cloud only");
+        return OpenRead(asset, resource);
+    }
+
+    public Task AddToAlbumsAsync(MediaAsset existing, IReadOnlyList<MediaAlbumRef> albums, CancellationToken ct)
+    {
+        lock (AlbumCalls) AlbumCalls.Add((existing.Id, albums));
+        return Task.CompletedTask;
+    }
+
     public MediaDetails Details(MediaAsset asset) => DetailsById.GetValueOrDefault(asset.Id) ?? new MediaDetails();
 
     public async Task<string> InsertAsync(MediaInsert insert, Stream content, CancellationToken ct)
@@ -87,6 +105,13 @@ public sealed class FakeMediaLibrary : IMediaLibrary
         await content.CopyToAsync(buffer, ct);
         var bytes = buffer.ToArray();
         lock (Inserted) Inserted.Add((insert, bytes));
+        foreach (var extra in insert.Extras ?? [])
+        {
+            await using var s = extra.Open();
+            using var b = new MemoryStream();
+            await s.CopyToAsync(b, ct);
+            lock (ExtrasInserted) ExtrasInserted.Add((insert.FileName, extra.Role, extra.FileName, b.ToArray()));
+        }
         var album = _albums.FirstOrDefault(kv => kv.Value == insert.AlbumName).Key ?? Album(insert.AlbumName ?? "Restored");
         var added = Add(insert.FileName, bytes, DateTimeOffset.FromUnixTimeMilliseconds(insert.Taken ?? insert.Modified).UtcDateTime, [album], insert.Kind,
             favourite: insert.Favourite, modified: DateTimeOffset.FromUnixTimeMilliseconds(insert.Modified).UtcDateTime);

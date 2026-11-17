@@ -217,6 +217,17 @@ public sealed class SyncAgent : IAsyncDisposable
     /// <summary>The clock "events since" counts back from (tests set it).</summary>
     public TimeProvider Clock { get; init; } = TimeProvider.System;
 
+    /// <summary>
+    /// What a Photos run may do now: a folder that runs on Wi-Fi only downloads no cloud originals (iCloud Photos) on a metered
+    /// network either, also when the person started the run (they wait for a run on Wi-Fi; nothing is taken for deleted).
+    /// </summary>
+    public MediaReadOptions MediaOptions(DeviceFolderDto folder)
+    {
+        if (folder.Conditions is not { UnmeteredOnly: true } || Conditions is not { } probe) return MediaReadOptions.Default;
+        try { return new MediaReadOptions(AllowNetwork: probe.Read().Metered != true); }
+        catch (Exception e) when (e is not OperationCanceledException) { return MediaReadOptions.Default; }
+    }
+
     private static MediaAccess AccessOf(Func<MediaAccess>? read)
     {
         try { return read?.Invoke() ?? MediaAccess.Unsupported; }
@@ -366,13 +377,15 @@ public sealed class SyncAgent : IAsyncDisposable
             {
                 var photos = folder.Kind == FolderKind.Photos
                     ? new MediaTree(Media ?? throw new SyncRefusedException("This device has no photo library ASync can back up: Photos folders are for phones."),
-                        folder.Media, MediaSource)
+                        folder.Media, MediaSource, options: MediaOptions(folder))
                     : null;
                 var collection = folder.Kind is FolderKind.Contacts or FolderKind.Calendars ? CollectionTreeFor(folder) : null;
                 var repo = await RepositoryAccess.OpenAsync(_api, _store, folder, backend, ct);
                 var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName,
                     (ILocalTree?)photos ?? (ILocalTree?)collection ?? LocalTrees.Open(folder.LocalPath)).RunAsync(progress, ct);
                 var s = snapshot.Stats;
+                // Files the library could not give now (iCloud-only originals): kept from earlier snapshots, read next run, no error.
+                var errors = photos is null ? s.Errors : [.. s.Errors.Where(e => !photos.IsPostponed(e))];
                 var counts = photos?.Counts();
                 var items = collection?.Counts();
                 var message = $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: " +
@@ -386,9 +399,10 @@ public sealed class SyncAgent : IAsyncDisposable
                                   : "") +
                               $"{s.FilesNew} new, {s.FilesChanged} changed, {s.FilesUnmodified} unchanged, " +
                               $"{Size(s.BytesAdded)} added{(forgotten > 0 ? $", {forgotten} old snapshots forgotten" : "")}" +
-                              (s.Errors.Count > 0 ? $", {s.Errors.Count} unreadable: {s.Errors[0]}" : "");
-                outcome = new FolderRunResult(folder.FolderId, folder.Name, s.Errors.Count == 0, message, Media: counts, Collections: items);
-                report = new SyncReportRequest(s.Errors.Count == 0, message, Uploaded: s.FilesNew + s.FilesChanged, Bytes: s.BytesAdded, Media: counts,
+                              (photos is { Postponed: > 0 } p ? $", {p.Postponed} left for the next run ({p.PostponedReason})" : "") +
+                              (errors.Count > 0 ? $", {errors.Count} unreadable: {errors[0]}" : "");
+                outcome = new FolderRunResult(folder.FolderId, folder.Name, errors.Count == 0, message, Media: counts, Collections: items);
+                report = new SyncReportRequest(errors.Count == 0, message, Uploaded: s.FilesNew + s.FilesChanged, Bytes: s.BytesAdded, Media: counts,
                     Collections: items);
                 if (photos is not null) await ReportAlbumsAsync(ct);
                 if (collection is not null) await ReportCollectionsAsync(folder.Kind, ct);

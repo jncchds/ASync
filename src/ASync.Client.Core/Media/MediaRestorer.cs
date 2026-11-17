@@ -17,12 +17,13 @@ public sealed record MediaRestoreResult(int Restored, int Skipped, int Total, Li
 /// at the relative path it came from). Assets that are already there are skipped: the same id with the same size, or an asset of the
 /// same size in the same place (relative path, where the library has one) whose bytes hash the same (a photo restored before, or one
 /// that got a new id). A copy in another album does not count, or the album would stay without its photo. Only originals go
-/// back: a library has no place for the further resources of another platform's asset (iOS's "live" video on Android); they stay in
-/// the snapshot and come out with <c>async-cli restore</c>.
+/// back, with the further resources the library takes (<see cref="IMediaLibrary.RestoredRoles"/>: iOS pairs a Live Photo's "live"
+/// video again); the others (edits, RAW on Android) stay in the snapshot and come out with <c>async-cli restore</c>. An asset found
+/// already there is put back into the sidecar's albums (<see cref="IMediaLibrary.AddToAlbumsAsync"/>, iOS).
 /// </summary>
 public sealed class MediaRestorer(Repo repository, IMediaLibrary library)
 {
-    private sealed record Found(string Directory, MediaSidecar Sidecar, TreeNode? Original);
+    private sealed record Found(string Directory, MediaSidecar Sidecar, TreeNode? Original, IReadOnlyDictionary<string, TreeNode> Siblings);
 
     public async Task<MediaRestoreResult> RunAsync(Snapshot snapshot, IProgress<MediaRestoreProgress>? progress = null, CancellationToken ct = default)
     {
@@ -46,7 +47,7 @@ public sealed class MediaRestorer(Repo repository, IMediaLibrary library)
                     {
                         var sidecar = MediaSidecar.Parse(await ReadAllAsync(node, ct));
                         var original = sidecar.Resources.FirstOrDefault(r => r.Role == MediaResource.Original);
-                        found.Add(new Found(path, sidecar, original.File is { } file && byName.TryGetValue(file, out var o) ? o : null));
+                        found.Add(new Found(path, sidecar, original.File is { } file && byName.TryGetValue(file, out var o) ? o : null, byName));
                     }
                     catch (InvalidDataException e) { errors.Add($"{full}: {e.Message}"); }
                 }
@@ -66,12 +67,17 @@ public sealed class MediaRestorer(Repo repository, IMediaLibrary library)
             try
             {
                 if (item.Original is not { } original) throw new InvalidDataException("its original is missing from the snapshot");
-                if (await AlreadyThereAsync(item.Sidecar, original, byId, bySize, ct)) skipped++;
+                if (await AlreadyThereAsync(item.Sidecar, original, byId, bySize, ct) is { } there)
+                {
+                    skipped++;
+                    if (item.Sidecar.Albums.Count > 0) await library.AddToAlbumsAsync(there, item.Sidecar.Albums, ct);
+                }
                 else
                 {
                     await using var content = new SnapshotFileStream(repository, original);
                     await library.InsertAsync(new MediaInsert(item.Sidecar.Kind, name, item.Sidecar.Mime, item.Sidecar.Modified, item.Sidecar.Taken,
-                        item.Sidecar.RelativePath, item.Sidecar.Albums.FirstOrDefault()?.Name, item.Sidecar.Favourite), content, ct);
+                        item.Sidecar.RelativePath, item.Sidecar.Albums.FirstOrDefault()?.Name, item.Sidecar.Favourite,
+                        item.Sidecar.Albums, item.Sidecar.Latitude, item.Sidecar.Longitude, Extras(item)), content, ct);
                     restored++;
                 }
             }
@@ -86,16 +92,37 @@ public sealed class MediaRestorer(Repo repository, IMediaLibrary library)
         return new MediaRestoreResult(restored, skipped, found.Count, errors);
     }
 
-    private async Task<bool> AlreadyThereAsync(MediaSidecar sidecar, TreeNode original, Dictionary<string, MediaAsset> byId,
+    /// <summary>The resources beside the original that the library takes back (iOS: a Live Photo's video), from the same snapshot directory.</summary>
+    private List<MediaInsertResource>? Extras(Found item)
+    {
+        var roles = library.RestoredRoles;
+        if (roles.Count == 0) return null;
+        var extras = new List<MediaInsertResource>();
+        foreach (var (role, file, _, mime) in item.Sidecar.Resources)
+        {
+            if (role == MediaResource.Original || !roles.Contains(role) || !item.Siblings.TryGetValue(file, out var node) || node.Type != NodeType.File) continue;
+            extras.Add(new MediaInsertResource(role, ExtraName(item.Sidecar.FileName, file), mime, node.Size, () => new SnapshotFileStream(repository, node)));
+        }
+        return extras;
+    }
+
+    /// <summary>A further resource's name as the library knew it: the original's stem with the resource's extension (IMG_1.HEIC → IMG_1.mov).</summary>
+    private static string ExtraName(string originalName, string storedName)
+    {
+        var ext = Path.GetExtension(storedName);
+        return (Path.GetFileNameWithoutExtension(originalName) is { Length: > 0 } stem ? stem : "asset") + ext;
+    }
+
+    private async Task<MediaAsset?> AlreadyThereAsync(MediaSidecar sidecar, TreeNode original, Dictionary<string, MediaAsset> byId,
         ILookup<long, MediaAsset> bySize, CancellationToken ct)
     {
-        if (byId.TryGetValue(sidecar.Id, out var same) && same.OriginalResource.Size == original.Size) return true;
+        if (byId.TryGetValue(sidecar.Id, out var same) && same.OriginalResource.Size == original.Size) return same;
         // In the place the asset would go back to: a copy elsewhere (another album) leaves this one without it.
         var candidates = bySize[original.Size]
             .Where(c => sidecar.RelativePath is not { Length: > 0 } wanted || c.RelativePath is not { Length: > 0 } here
                         || string.Equals(Trim(wanted), Trim(here), StringComparison.OrdinalIgnoreCase))
             .ToList();
-        if (candidates.Count == 0) return false;
+        if (candidates.Count == 0) return null;
         byte[] wanted;
         await using (var content = new SnapshotFileStream(repository, original)) wanted = await SHA256.HashDataAsync(content, ct);
         foreach (var candidate in candidates)
@@ -103,11 +130,11 @@ public sealed class MediaRestorer(Repo repository, IMediaLibrary library)
             try
             {
                 await using var stream = library.OpenRead(candidate, candidate.OriginalResource);
-                if ((await SHA256.HashDataAsync(stream, ct)).AsSpan().SequenceEqual(wanted)) return true;
+                if ((await SHA256.HashDataAsync(stream, ct)).AsSpan().SequenceEqual(wanted)) return candidate;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
-        return false;
+        return null;
     }
 
     private static string Trim(string relativePath) => relativePath.Trim('/');

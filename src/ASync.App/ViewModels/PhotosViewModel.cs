@@ -18,7 +18,8 @@ public sealed partial class AlbumChoice(string id, string name, int photos, int 
 
 /// <summary>
 /// A Photos folder on this phone (task 19): first, while ASync may not read the photos, why it asks and what it reads (originals as
-/// they are, their location only with "media location", Android 14's "Select photos" giving some photos only); then what to back
+/// they are, their location only with "media location", Android 14's "Select photos" or iOS's "Selected Photos" giving some photos
+/// only, in the platform's words: <see cref="PhotoTexts"/>); then what to back
 /// up: all photos and videos, or chosen albums of the phone's own list, with or without videos and screenshots. Opened from a
 /// Photos folder's card (<see cref="FolderViewModel"/>) and from New folder / Add to a folder (<see cref="AddFolderViewModel"/>),
 /// each with its own <c>apply</c>.
@@ -65,7 +66,7 @@ public sealed partial class PhotosViewModel : ObservableObject
     public bool NeedsPermission => Access is MediaAccess.None;
     public bool IsPartial => Access is MediaAccess.Partial;
     public bool CanChoose => Access is MediaAccess.Full or MediaAccess.Partial;
-    public bool NoLocation => CanChoose && !HasLocation;
+    public bool NoLocation => CanChoose && !HasLocation && Texts.NoLocation is not null;
 
     public string AccessText => Access switch
     {
@@ -75,15 +76,35 @@ public sealed partial class PhotosViewModel : ObservableObject
         _ => "ASync may not read photos and videos yet.",
     };
 
-    public string Explanation =>
-        "To back up your photos and videos ASync needs to read them. It reads each original as it is, never changes or deletes " +
-        "anything, and sends it only to your own server's storage (encrypted there if the folder is end-to-end). " +
-        "Allow the location in photos too, or Android removes it from what ASync reads.";
+    private PhotoTexts Texts => _access?.Texts ?? PhotoTexts.Android;
 
-    public string PartialText => _access?.OffersPartial == true
-        ? "With \"Select photos\" Android lets ASync see only the photos you pick, and only those are backed up; new photos are not " +
-          "seen until you pick them too. Choose \"Allow all\" in the settings to back up everything."
-        : "";
+    public string Explanation => Texts.Explanation;
+
+    public string PartialText => _access?.OffersPartial == true ? Texts.PartialText : "";
+
+    public string AllowAllLabel => Texts.AllowAllLabel;
+
+    public string? NoLocationText => Texts.NoLocation;
+
+    /// <summary>With partial access: the system's picker of the photos ASync may see (iOS).</summary>
+    public bool CanChooseMore => IsPartial && _access?.CanChooseMore == true;
+
+    /// <summary>The switch for originals kept only in iCloud (iOS); hidden elsewhere.</summary>
+    public bool OffersCloudDownloads => CanChoose && _access?.OffersCloudDownloads == true;
+
+    public string? CloudLabel => Texts.CloudLabel;
+    public string? CloudHint => Texts.CloudHint;
+
+    public bool CloudDownloads
+    {
+        get => _access?.CloudDownloads ?? false;
+        set
+        {
+            if (_access is null || _access.CloudDownloads == value) return;
+            _access.CloudDownloads = value;
+            OnPropertyChanged();
+        }
+    }
 
     private void OnAccessChanged()
     {
@@ -102,6 +123,9 @@ public sealed partial class PhotosViewModel : ObservableObject
         HasLocation = _access?.HasLocation ?? false;
         OnPropertyChanged(nameof(NoLocation));
         OnPropertyChanged(nameof(PartialText));
+        OnPropertyChanged(nameof(CanChooseMore));
+        OnPropertyChanged(nameof(OffersCloudDownloads));
+        OnPropertyChanged(nameof(CloudDownloads));
     }
 
     [RelayCommand]
@@ -109,6 +133,9 @@ public sealed partial class PhotosViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenSettings() => _access?.OpenSettings();
+
+    [RelayCommand]
+    private void ChooseMore() => _access?.ChooseMore();
 
     // ── What to back up ───────────────────────────────────────────────────────
 
