@@ -116,9 +116,17 @@ jobs:
           xcodebuild -version
 
       - name: Setup .NET
+        id: dotnet
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.1xx'
+
+      # The image also has a newer SDK (11), which dotnet would pick, and whose workload manifests clash with these: pin the
+      # one just installed for this job (not committed: the repository builds with any 10.x SDK).
+      - name: Pin the .NET SDK
+        run: |
+          dotnet new globaljson --sdk-version "${{ steps.dotnet.outputs.dotnet-version }}" --roll-forward latestPatch --force
+          dotnet --version
 
       - name: NuGet cache
         uses: actions/cache@v5
