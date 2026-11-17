@@ -7,8 +7,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
 > headless CLI agent and the desktop app (Linux; built for Windows and macOS, not tried there yet) work: devices sync
 > and back up folders through the server today. Desktop installers with self-update are built for every release (tried
 > on Linux; not code-signed yet). The Android app (an APK to sideload) syncs and backs up in the background too, and the
-> server can wake it through UnifiedPush (ntfy). The iOS app (an .ipa to sideload) enrolls and syncs while it is open;
-> background syncing on iOS comes next. The current version is in [VERSION](VERSION), changes are in
+> server can wake it through UnifiedPush (ntfy). The iOS app (an .ipa to sideload) enrolls and syncs, also in the background as
+> far as iOS allows. The current version is in [VERSION](VERSION), changes are in
 > [RELEASE_NOTES.md](RELEASE_NOTES.md), and the design, roadmap and known gaps are in [AGENTS.md](AGENTS.md).
 
 <p>
@@ -319,8 +319,9 @@ Listing accounts and calendars from the web is the same phone setting as browsin
 - The Android app was tried on an Android 15 emulator only (not on a phone yet), background work, UnifiedPush and the
   Files app view included. Phones of some makers stop background work beyond what Android does: see
   [Background sync on Android](#background-sync-on-android). See "The Android app" for what else it cannot do yet.
-- The iOS app syncs only while it is open, and was tried on the iOS simulator only (in CI); it is sideloaded (no App Store
-  or TestFlight yet). See [The iOS app](#the-ios-app).
+- The iOS app syncs in the background only when iOS gives it time (rarely in Low Power Mode, never after it is closed from
+  the app switcher); opening it always syncs. It was tried on the iOS simulator only (in CI), is sideloaded (no App Store or
+  TestFlight yet), and the sideloaded build cannot be woken by the server. See [Background sync on iOS](#background-sync-on-ios).
 
 What comes next is listed in [AGENTS.md](AGENTS.md) under "Milestones and current stage" (the mobile apps).
 
@@ -353,7 +354,8 @@ Open http://localhost:5100 and create the admin account. Settings are environmen
 | `Alerts__PollSeconds`, `Alerts__Enabled` | How often the server looks for problems (default 300); `false` turns alerts off. `Alerts__RetryMinutes` (15): wait after a message no channel took. |
 | `Smtp__Host`, `Smtp__Port`, `Smtp__Username`, `Smtp__Password`, `Smtp__From`, `Smtp__Security` | The mail account for e-mail alerts. Without `Smtp__Host` and `Smtp__From`, e-mail is not offered. Port 465 uses TLS on connect, others STARTTLS; `Smtp__Security=None` for a local relay. |
 | `Usage__ScanIntervalHours`, `Quotas__WarnPercent`, `Health__IntervalMinutes`, `Health__RetryMinutes`, `Health__FailuresBeforeAlert` | Usage counting, the quota warning and storage health checks (defaults 6, 90, 60, 5, 2): see [Quotas and storage health](#quotas-and-storage-health). |
-| `Push__Mode` | How the server wakes phones: `UnifiedPush` (the default) posts a tiny "wake" (no data) to the address a phone registered from its UnifiedPush distributor, when another device changes a folder it downloads and it is not connected, and while it is overdue; phones without a distributor are never contacted. `None`: no wake-ups. `Relay` and `Direct` (Google/Apple push) do not exist yet and act as `UnifiedPush`. Alerts and every device's own schedule work without push. |
+| `Push__Mode` | How the server wakes phones: `UnifiedPush` (the default) posts a tiny "wake" (no data) to the address a phone registered from its UnifiedPush distributor, when another device changes a folder it downloads and it is not connected, and while it is overdue; phones without a distributor are never contacted. `Direct`: the same, and the server also sends **Apple push** to iPhones itself, with the `Push__Apns__*` key below (for an iOS app you build and sign with your own Apple developer account; Apple accepts pushes only from the key of whoever signs the app). `None`: no wake-ups. `Relay` (our hosted relay for the published apps) does not exist yet and acts as `UnifiedPush`; Google push (FCM) is not built. Alerts and every device's own schedule work without push. |
+| `Push__Apns__KeyFile` (or `Push__Apns__Key`), `Push__Apns__KeyId`, `Push__Apns__TeamId`, `Push__Apns__BundleId` | `Push__Mode=Direct` only: the APNs authentication key (the `.p8` file from *Certificates, Identifiers & Profiles → Keys* with *Apple Push Notifications service* enabled, or its text), its Key ID, your Team ID, and the app's bundle id (default `ua.pp.chds.async`). Pushes go over HTTP/2 to `api.push.apple.com`, or to Apple's sandbox for development builds (the app says which). A change, test or browse wake is a silent push (Apple delivers few of them); an overdue device gets a visible "a folder is overdue" notice whose text is in the app. A token Apple no longer knows (the app was removed) is dropped. Without these settings the server logs a warning and sends UnifiedPush only. |
 | `Push__ChangedSeconds`, `Push__OverdueHours`, `Push__TimeoutSeconds` | At most one "changed" wake per phone in this many seconds (default 60), one "overdue" wake in this many hours (6); how long one wake may take (10 s). |
 
 To move a generated signing key into the environment:
@@ -728,9 +730,8 @@ To build it: `dotnet workload install android`, an Android SDK (`ANDROID_HOME`) 
   <img src="docs/screenshots/ios-folders-dark.png" alt="Folders, dark" width="24%">
 </p>
 
-**Early: the foundation (v0.1.6).** The same pages as the Android app, on iOS 15 and later, while the app is open; syncing in
-the background comes next. Like on Android, the phone never needs its browser: the server is set up in the web UI on a
-computer.
+**Early (v0.1.6).** The same pages as the Android app, on iOS 15 and later, syncing also in the background as far as iOS allows
+(below). Like on Android, the phone never needs its browser: the server is set up in the web UI on a computer.
 - **Adding the iPhone:** scan the QR code of *Devices → Add device* with the app's *Scan the QR code* (or with the Camera
   app: it opens ASync), tap or paste its `async://pair` link, type the server address and the code, or *Approve on your
   computer* (a short code to enter in the web UI there). The device's key is made in the iPhone's **Secure Enclave** and
@@ -742,10 +743,42 @@ computer.
   says *Choose the folder again* and nothing is synced or deleted. *New folder…* and *Add to a folder…* work as on Android,
   and so do Two-way, Mirror and Backup folders, *Sync now*, pause, end-to-end setup and unlocking. From the web UI on a
   computer, *Browse…* lists the app's own folder (picked folders are chosen on the iPhone).
-- **Not yet:** syncing with the app closed (iOS suspends it soon after it leaves the screen: open it, and folders run at
-  once), Wi-Fi/charging conditions and wake-ups from the server; photos, contacts and calendars; ASync's folders in the Files
-  app. Files of iCloud Drive that are not downloaded to the iPhone yet are not fetched. Tried on the iOS simulator only
-  (in CI), not on an iPhone yet; the camera scanner can only be tried on one.
+- **Not yet:** photos, contacts and calendars; ASync's folders in the Files app. Files of iCloud Drive that are not
+  downloaded to the iPhone yet are not fetched. Tried on the iOS simulator only (in CI), not on an iPhone yet; the camera
+  scanner and real background slots can only be tried on one.
+
+### Background sync on iOS
+
+<p>
+  <img src="docs/screenshots/ios-background-settings-light.png" alt="Background sync in Settings" width="24%">
+  <img src="docs/screenshots/ios-folder-conditions-light.png" alt="A folder with conditions" width="24%">
+  <img src="docs/screenshots/ios-conditions-editor-dark.png" alt="Editing a folder's conditions" width="24%">
+  <img src="docs/screenshots/ios-notification-permission-light.png" alt="The notification question" width="24%">
+</p>
+
+iOS, not the app, decides when an app may run in the background. ASync asks for what iOS offers and makes the most of it:
+- **Opening the app syncs every folder**, and while it stays open, folders run when their interval is due. This is the one way
+  that always works: when a folder matters, open ASync.
+- **Background slots:** a short one (about 30 seconds: enough for small changes and downloads) and a longer one (minutes,
+  usually at night while the iPhone charges). ASync asks for them at the folders' shortest interval (at least 15 minutes), but
+  iOS chooses: a few times a day for apps you use, less for apps you rarely open, **none in Low Power Mode**, none when
+  *Settings › General › Background App Refresh* is off for ASync, and **none after you close ASync from the app switcher**
+  (until you open it again). A run that does not finish in its slot stops cleanly; large files continue where they stopped.
+- **Leaving the app during a sync:** the run carries on for the time iOS grants (usually half a minute, sometimes more),
+  then stops cleanly and continues at the next run.
+- **Conditions** (*Conditions…* on a folder, or the web UI): *Wi-Fi only* waits on cellular, on a phone's hotspot and in Low
+  Data Mode; *while charging* waits off the charger (such a folder then asks iOS for a slot on external power); *battery not
+  low* waits at 15 % or less and in Low Power Mode. They hold back only the automatic runs; *Sync now* always runs.
+- **Reminder:** *Settings → Background sync → Remind me when nothing synced for* (3 days by default, *Never* to turn it off):
+  the iPhone itself tells you when a folder has had no successful run for that long, even when nothing else works. The
+  reminders arrive quietly in Notification Center until you tap *Allow* on the dashboard (once) for alerts on the Lock Screen;
+  if you turn notifications off for ASync, there are no reminders.
+- **Back up now:** press and hold the ASync icon for *Back up now*, or open `async://sync` (for example from a Shortcuts
+  automation: *Open URLs* when you arrive home or connect the charger). It opens ASync and runs every folder at once.
+- **Wake-ups from the server** need an app signed with push and a server with `Push__Mode=Direct` and an APNs key (see the
+  settings table). The sideloaded .ipa is not signed for push: it does not register and does not need to: its folders still
+  run on iOS's slots, when opened, and you still get the reminder and the server's overdue alerts. Settings shows which
+  applies.
 
 ### Installing the iOS app
 

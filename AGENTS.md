@@ -80,8 +80,8 @@ src/
   ASync.App.Tests/        xunit v3: view models with a fake agent, views in Avalonia.Headless
   ASync.App.iOS/          iOS head (task 21): the agent in-process, the Secure Enclave key and the Keychain-sealed store,
                           the app's Documents and bookmarked folders, QR scanner, async://pair links (not in ASync.slnx: needs
-                          the ios workload and Xcode; Shared/ is plain C# tested in ASync.App.Tests); later BGTaskScheduler,
-                          APNs, background URLSession (22), PhotoKit (23), Contacts/EventKit (24), File Provider (25)
+                          the ios workload and Xcode; Shared/ is plain C# tested in ASync.App.Tests); BGTaskScheduler,
+                          run conditions, reminders, APNs (22); later PhotoKit (23), Contacts/EventKit (24), File Provider (25)
   ASync.App.Android/      Android head (M4-1): the agent in-process, Android Keystore keys and sealed store, SAF trees,
                           QR scanner, async://pair links, WorkManager and UnifiedPush (M4-2), the documents
                           provider (M4-3) (not in ASync.slnx: needs the android workload). photos (task 19:
@@ -2142,8 +2142,8 @@ section "documents provider" (below).
 ## iOS app (task 21)
 
 `src/ASync.App.iOS` (net10.0-ios, iOS 15+, bundle id `ua.pp.chds.async`, the same id family as Android) is the Avalonia.iOS head
-of the shared `ASync.App`: enroll, show and sync folders while the app is open, add folders from the app. Background work
-(BGTaskScheduler, background URLSession, APNs wake-ups, run conditions) is task 22, photos (PhotoKit) task 23, contacts and
+of the shared `ASync.App`: enroll, show and sync folders, add folders from the app. Background work (BGTaskScheduler, run
+conditions, the reminder, APNs wake-ups) is task 22 ("iOS background work (task 22)"), photos (PhotoKit) task 23, contacts and
 calendars (Contacts, EventKit) task 24, the File Provider extension task 25. Like the Android head it is not in `ASync.slnx`:
 it needs the `ios` workload and Xcode, so it builds only on a Mac, which here means GitHub's macOS runners (`ios.yml`, below);
 `scripts/check-ios.sh` compiles its C# on Linux against the iOS reference assemblies (`Microsoft.iOS.Ref`) and Avalonia.iOS's
@@ -2162,12 +2162,9 @@ comments (the build's plist reader); the csproj explains them.
 
 **The agent runs in the app's process** (`IosAgent`, as `AndroidAgent`): one `AgentRuntime` per process, `AgentMode.InApp`,
 `ControlChannel = false`, `WaitForIdentity`, the sealed store and the Secure Enclave keys, `IosTreeFactory`, `IosBrowseScope`;
-the shared view models reach it through `InProcessAgentConnector`. Unlike Android it keeps the desktop's scheduling for now
-(`RunAtStart`, `RunOnInterval`): while the app is in the foreground folders run at start, on their interval and on the server's
-events; coming back to the foreground (Avalonia's `IActivatableLifetime`, `ActivationKind.Background`) runs every folder, at most
-once a minute. iOS suspends the app soon after it leaves the screen; task 22 moves the scheduling to BGTaskScheduler with
-`BackgroundPlanner` as Android did with WorkManager. `Conditions` is null (nothing blocks) and the apps say so under the
-conditions editor (`ConditionsNote`). The store is `Library/Application Support/async` (not Documents, which the Files app
+the shared view models reach it through `InProcessAgentConnector`. Since task 22 it schedules as Android does (`RunAtStart` and
+`RunOnInterval` false, BGTaskScheduler from `BackgroundPlanner`, the conditions from iOS): see "iOS background work (task 22)".
+The store is `Library/Application Support/async` (not Documents, which the Files app
 shows, and not .NET's `SpecialFolder.ApplicationData`, which is `Documents/.config` on iOS), excluded from backups
 (`NSURLIsExcludedFromBackupKey`: its keys stay on this device, so a restored copy could not be read anyway); the log is
 `Library/Logs/async.log` (`RollingFileLoggerProvider`) and stdout. HTTP is .NET's own stack (`UseNativeHttpHandler=false`), as on
@@ -2254,30 +2251,166 @@ for `UnixDomainSocketEndPoint` on iOS (found in the first simulator run); a simu
 enroll, link, devicecode, sync/run tickets, choose (the real picker), pick (what the next picker returns), bookmark (made by
 NSURL as the picker does), add-folder…, setup/unlock, signout, keyinfo, haskey, files, selftest, theme, show…: see the file).
 
-**Not yet (and which task brings it):** background syncing, run conditions and APNs wake-ups (task 22: BGTaskScheduler,
-background URLSession, the relay), photos (task 23: PhotoKit into the `MediaTree` of task 19), contacts and calendars (task 24:
+**Not yet (and which task brings it):** photos (task 23: PhotoKit into the `MediaTree` of task 19), contacts and calendars (task 24:
 Contacts and EventKit into task 20's collection trees), the File Provider extension (task 25, with the app group). The camera
 scanner is only exercised on a device (the simulator has no camera; the simulator's Secure Enclave key worked in CI, the Keychain fallback
 stays for simulators without one); the unsigned .ipa has not been tried on a phone yet.
+
+## iOS background work (task 22)
+
+Folders sync and back up without the app open, as far as iOS allows, with the decisions Android uses (`BackgroundPlanner`,
+`RunConditions`, `AgentRuntime.RunAutomaticAsync`, the reminder). Server and repository formats are unchanged. Code:
+`src/ASync.App.iOS/BackgroundWork.cs` (the iOS calls), `Shared/IosBackground.cs` and `Shared/IosBackgroundTexts.cs` (plain C#, the
+decisions; linked into ASync.App.Tests: `IosBackgroundTests`, `BackgroundTests`), the exports in `AppDelegate.cs`, the scheduling
+changes in `IosAgent.cs`.
+
+**What iOS allows, and how the app uses it.** iOS decides when an app runs in the background; an app can only ask:
+- **Who schedules:** the agent no longer runs folders on its interval or at start (`RunOnInterval = false`, `RunAtStart = false`,
+  as on Android). Folders run on requests (*Sync now*, *Back up now*), on the hub's events while connected, on a reconnect, when
+  the app comes to the front (`IosAgent.AppOpened` on `UIApplication.didBecomeActive`, also at launch: at a cold start it waits
+  for the folder list, then runs every folder; at most once a minute), while the app stays open when a folder is due (a
+  five-minute check of `IosBackgroundPlan.IsDue`: background tasks never run while the app is in the foreground), from the
+  background tasks and from pushes. Task 21's Avalonia `ActivationKind.Background` trigger is gone.
+- **BGTaskScheduler** (`UIBackgroundModes` fetch + processing, `BGTaskSchedulerPermittedIdentifiers`): two tasks, registered in
+  `application:willFinishLaunchingWithOptions:` (iOS requires it before launch ends, also for a background launch):
+  `ua.pp.chds.async.refresh` (`BGAppRefreshTaskRequest`: about 30 s; download folders, small changes) and
+  `ua.pp.chds.async.processing` (`BGProcessingTaskRequest`, `RequiresNetworkConnectivity`: minutes, typically at night on the
+  charger). `IosBackgroundPlan.Requests` maps `BackgroundPlanner.Plan`: no folders, no tasks; refresh at the shortest interval of
+  the folders that need no charger (at least 15 min); processing at the shortest interval of all, with `RequiresExternalPower` when
+  any folder is charging-only (its only slot; the others have the refresh task too). The earliest begin is a lower bound only:
+  iOS runs tasks when it chooses (usage, battery, Low Power Mode, Background App Refresh), typically hours apart, one pending
+  request per identifier. A task runs the folders that are due (`FoldersFor`: no success here yet, or the interval is over, less
+  five minutes; the refresh task leaves out charging-only folders unless the phone charges) through `RunAutomaticAsync`, so the
+  run conditions apply. Requests are submitted again **after every task of that kind** (a new earliest begin) and **when the
+  folder list changes the plan** (`Diff` against the keys kept in `ios-background.json` and BGTaskScheduler's pending requests: an
+  unchanged plan submits nothing, so a folder-list change never moves the next slot further out; a request iOS dropped, after a
+  force-quit or a reinstall, is submitted again). Nothing is applied before the folder list arrived (`FoldersLoaded`), so a starting
+  agent's empty list never cancels them; signing out cancels every task and reminder. **Expiration:** the handler cancels the
+  token; the coordinator calls `SyncAgent.CancelRuns` (the runs end *Deferred*, "Stopped; it continues on the next run", not
+  reported as failures) and the task completes with `setTaskCompleted(success: false)`; success is true when nothing was cut off,
+  failed or busy (`IosBackgroundPlan.Succeeded`; a run deferred by its conditions counts as done). The last task's kind, time and
+  outcome are kept (`LastTask`).
+- **Run conditions** (`IosDeviceConditions`, `IosConditions.Map`): metered = `NWPath.isExpensive` (cellular, a phone's hotspot) or
+  `isConstrained` (Low Data Mode), unknown without a satisfied path; charging = `UIDeviceBatteryState` Charging or Full; battery low
+  = at most 15 % and not charging, **or Low Power Mode** (`DeviceConditions.LowPowerMode`: "Waiting: Low Power Mode is on"). The
+  battery is read on the main thread and followed through UIDevice's notifications; the simulator reports none (unknown: those
+  rules are ignored there, and `ConditionsNote` says so). A blocked automatic run ends *Deferred* and the apps show *Waiting*, as
+  on Android.
+- **Transfers that outlive a run:** `RunKeeper` holds `UIApplication.beginBackgroundTask` while any folder runs (whoever started
+  it), so leaving the app does not freeze a run at once; when iOS says the time is up, the runs are cancelled cleanly and the
+  assertion ends (iOS kills apps that do not). Resumable uploads and downloads ("Large files") continue at the next run.
+  **Background `NSURLSession` was evaluated and not used:** the engine's transfers are many short requests through
+  `AsyncApiClient` (chunk and pack PUTs of an upload session, ranged GETs, each with the device's short-lived access token)
+  whose results the engine needs in-process to go on; a background session hands file-based tasks to `nsurlsessiond`, which runs
+  them when iOS likes, discourages many small tasks (rate-limited, discretionary), cannot refresh a token mid-way, and reports to
+  an app that may be relaunched later. Using it would need a server protocol of a few large self-authorizing transfers (e.g.
+  pre-signed URLs for whole packs, valid for hours) and an engine that can finish an upload from a completion event; neither
+  exists, and the protocol must not change here. iOS 26's `BGContinuedProcessingTask` (a run the person starts, with progress
+  in the system UI) is the better fit for large backups later.
+- **The reminder** (`IosReminder`, `NotificationReminders`): a pending `UNNotificationRequest` per folder (`reminder-<id>`,
+  `UNTimeIntervalNotificationTrigger`) N days (Settings, default 3, 0 = off: the same setting and default as Android) after its
+  last successful run here (or from now for a new folder; `LastSuccess` in the store), replaced by every success
+  (`AgentRuntime.FolderRan`), all rescheduled when the setting changes; text from `BackgroundPlanner.ReminderText` with an iOS hint
+  ("Background App Refresh or Low Power Mode"). It needs neither the server nor push. A `UNUserNotificationCenterDelegate` shows
+  notifications also while the app is open.
+- **Notification permission, asked at a sensible moment:** never as a question at launch. At start the app asks for
+  **provisional** authorization (granted without a question; notifications arrive quietly in Notification Center): found in the
+  first simulator run, iOS keeps **no pending requests at all** for an app without any authorization, so without this the
+  reminders would silently not exist; once authorization arrives every reminder is scheduled again from its folder's last
+  success (`RefreshReminders`). The shared dashboard prompt
+  (`BackgroundViewModel`, iOS texts from `IosBackgroundTexts`) shows "Let ASync remind you" while the question is open (never asked, or provisional only); *Allow*
+  asks it (`requestAuthorization`, alert + sound + badge); choosing reminder days in Settings asks it too; a failure notification
+  (task 21's `Notify`) asks when the first one is due. After an answer, yes or no, the prompt does not come back (no nagging); the
+  card says when notifications are off. **Background App Refresh** (`UIApplication.backgroundRefreshStatus`) takes the place of
+  Android's battery exemption in the same card: off or restricted, the card says so and *Allow*/*iOS Settings* open the app's page
+  in Settings; Low Power Mode is mentioned while on.
+- **"Back up now":** App Intents cannot be built from .NET (their metadata is produced by the Swift compiler), and SiriKit custom
+  intents need Xcode's intent code generation and an extension; `NSUserActivity` shortcuts are not reachable either (Avalonia's
+  scene delegate handles only web-browsing activities). What is built: a **home-screen quick action** (`UIApplicationShortcutItems`
+  "Back up now", type `ua.pp.chds.async.backup-now`; iOS hands it to the scene delegate, Avalonia's internal one without that
+  method, so `QuickActions.Install` adds `windowScene:performActionForShortcutItem:completionHandler:` to its class with
+  `class_addMethod`, an `[UnmanagedCallersOnly]` function, and calls the completion block; at a cold launch the action is not
+  reachable, but the app coming to the front runs every folder anyway) and **`async://sync`** links (the existing URL scheme;
+  Shortcuts' *Open URLs*, also in personal automations: arriving home, connecting the charger, a time of day). Both run every
+  folder as a request (`SyncAsync`, conditions ignored, like *Sync now*).
+
+**APNs, ready for signing.** The app registers for remote notifications only when the build has the push entitlement
+(`ApnsEntitlement.Decide`, from the bundle's `embedded.mobileprovision`, a signed plist searched as text): a profile with
+`aps-environment` registers in that environment; a profile without (SideStore/AltStore re-signing with a free account) and the
+simulator do not register at all (no error, no prompt; Settings says "not signed for push"); no profile on a device means an App
+Store/TestFlight build (Apple removed the profile): production. The token (hex) goes to the server with `PUT /api/sync/push
+{type: Apns, endpoint: <hex>, environment: development|production}` once the device runs (again after a restart until the server
+took it, and when the token changes). A remote notification (`application:didReceiveRemoteNotification:fetchCompletionHandler:`,
+`UIBackgroundModes` remote-notification) with `async: wake` runs `BackgroundPlanner.FoldersToWake` within 25 s (`IosWake.Budget`;
+iOS gives 30), then cancels what still runs (it continues later) and answers NewData/NoData/Failed; a `browse` wake goes online for
+the web UI's picker for the same time. The overdue alert is an alert push whose text is the app's `Localizable.strings`
+(`ASYNC_OVERDUE_TITLE`, `ASYNC_OVERDUE_BODY`): no server text passes through Apple. **Signed vs unsigned:** `Entitlements.plist`
+(the Keychain group) for every signed build; `Entitlements.Push.plist` adds `aps-environment` (production) and is used only with
+`-p:AsyncPush=true`, which only `scripts/package-ios.sh --signed` passes (ios.yml's signed step; `IOS_PUSH=0`, a repository
+variable, builds a signed app without push for a profile that lacks the capability). The unsigned .ipa and the simulator build
+never carry it. Push never matters for correctness ("Working without push").
+
+**Not possible on iOS (by design of the system):** running on a fixed schedule; background work after the person force-quits the
+app (until it is opened again); background work in Low Power Mode or with Background App Refresh off (except pushes the person
+sees and opening the app); more than about 30 s per refresh slot; silent pushes on demand (Apple throttles them, a few per hour
+at most, fewer for rarely used apps); waking a sideloaded free-account build from the server (no APNs entitlement). A local
+notification cannot run code, so the reminder only tells the person.
+
+**Automation for the smoke test:** `bg` (pending BGTask requests, the requests the plan wants, the applied keys, the last submit
+error, pending notification requests with their seconds to go, the conditions, Background App Refresh, the notification status,
+push), `bg-simulate refresh|processing` (BGTaskScheduler's private `_simulateLaunchForTaskWithIdentifier:`, only for a request iOS
+holds), `bg-run refresh|processing [delay]` (the task's own code path, `IosBackground.RunTaskAsync`, under background time whose
+expiry stands for the task's), `bg-due <folder>`, `bg-wake <reason>` (the push handler with a dictionary), `bg-reminder <days>` (the
+setting without the permission question), `notify-permission`, `editconditions <folder>`.
+
+**Tests (Linux):** `IosBackgroundTests` (the plan → requests: earliest begin, network, power; `Diff`: unchanged, changed, dropped by
+iOS, after a run; which folders a task runs; `Succeeded`; the coordinator against fake BGTaskScheduler and notification center:
+nothing before the folder list, a new process submitting nothing, signing out, a task's runs and its re-submission, an expired
+task stopping its runs and reporting not done, reminders moved by successes and the setting, a silent push within its budget;
+`IosConditions.Map`; `IosWake`; `ApnsEntitlement` on profiles with and without `aps-environment`; `RunKeeper`; the store),
+`BackgroundTests` (the shared card and prompt in iOS's words: no distributors, Background App Refresh, Low Power Mode, push
+status; headless views at phone size). Server: `ApnsTests`, `ApiPushTests` (below, "Push").
+
+**Verified on the simulator** (`scripts/smoke-ios.sh`, ios.yml, iOS 26.5, iPhone 17; run 44187660063 passed every check,
+after 44181103915 (the csproj comment) and 44182159609 (reminders and a test race, below)): the folders' two requests (60 min, network;
+power once a folder is charging-only, set in the web UI and shown in the app); the reminder pending in the notification
+center 3 days after the folder's last success, moved by the setting, gone with *Never*; no APNs registration without the
+entitlement; the conditions from iOS (metered false, the simulator's battery unknown); the push handler answering NewData
+within 30 s; the refresh task's code path run with the app in the background, a change made on the server meanwhile arriving,
+the task reporting done; opening the app syncing. Screenshots: `docs/screenshots/ios-background-settings-*.png`,
+`ios-folder-conditions-*`, `ios-conditions-editor-*`, `ios-notification-permission-*`. **Found on the way:** the simulator
+refuses every BGTaskScheduler request (`BGTaskSchedulerErrorDomain` 1, unavailable), so iOS's own launch of a task
+(`_simulateLaunchForTaskWithIdentifier:`, which needs a pending request) cannot be tried there: the smoke test runs the task's
+code path (`bg-run`) instead, and real slots need a device. iOS keeps **no pending notification requests** for an app without
+any authorization (`add` succeeds, the pending list stays empty): hence the provisional authorization at start. A
+`content-available` push from `xcrun simctl push` did **not** reach the suspended app in two runs (no "Push: woken" in its log;
+an earlier "pass" was the file arriving through the reconnect, now told apart by the app's log line): the push handler is
+covered in-process (`bg-wake`), real delivery needs a signed build on a device. A run started under background time keeps the
+hub connection alive, so a server change can arrive by the hub event before the task runs (`bg-run … <folder>` marks the
+folder due right before its run). Not exercised: a real iPhone, real BGTask slots, APNs against Apple (no account), the quick
+action (needs a touch on the home screen), Low Power Mode.
 
 ## Background work and wake-ups (M3–M4)
 
 Implemented: the desktop agent service ("Agent service and control channel"), the server's overdue detection and alerts
 (below), Android's WorkManager work, foreground service, battery prompt, local reminder and UnifiedPush ("Android
-background work (M4-2)"), and the server's UnifiedPush wake-ups ("Push"). Planned: iOS, FCM, the relay, MediaStore
-content triggers.
+background work (M4-2)"), MediaStore content triggers (task 19), iOS's BGTaskScheduler tasks, background time around runs,
+local reminder, quick action and APNs handling ("iOS background work (task 22)"), and the server's UnifiedPush and direct APNs
+wake-ups ("Push"). Planned: FCM, the relay, iOS 26's `BGContinuedProcessingTask`, a PhotoKit observer (task 23).
 
 - **Desktop:** the agent runs as a systemd unit, a launchd agent, or a logon task / Windows Service (implemented).
   The desktop app talks to it over the named pipe or Unix socket. The CLI container runs the same agent.
-- **iOS** (silent push alone is not reliable, so several mechanisms are layered):
-  - Background `URLSession` transfers keep going after the app is suspended.
-  - `BGAppRefreshTask` and `BGProcessingTask` run scheduled scans; processing tasks can require power and
-    Wi-Fi.
-  - Silent pushes are sent through the relay when a backup is due. Apple throttles them and drops them if the
-    app was force-quit.
-  - A visible notification ("backup 2 days overdue") is the fallback.
-  - iOS 26's `BGContinuedProcessingTask` covers large backups the user starts.
-  - A PhotoKit change observer queues new photos.
+- **iOS** (silent push alone is not reliable, so several mechanisms are layered; task 22):
+  - `BGAppRefreshTask` and `BGProcessingTask` run the due folders; the processing task requires the network, and external
+    power when a folder is charging-only (iOS has no Wi-Fi requirement: the run checks it and waits).
+  - `beginBackgroundTask` keeps a run going for a while after the app leaves the screen; resumable transfers continue at the
+    next run. A background `URLSession` is not used (see "iOS background work": it does not fit the engine's transfers
+    without a protocol change).
+  - Silent pushes wake the app when the server sends APNs itself (`Push__Mode=Direct`, a signed build); through the relay
+    later. Apple throttles them and drops them if the app was force-quit.
+  - A visible notification: the local reminder, and the server's overdue alert push (`loc-key`).
+  - Opening the app (and the "Back up now" quick action or `async://sync`) runs every folder.
+  - Later: iOS 26's `BGContinuedProcessingTask` for large backups the user starts; a PhotoKit change observer (task 23).
 - **Android:** WorkManager with constraints, a foreground service during large transfers, and UnifiedPush
   (implemented, M4-2). FCM high-priority data messages for Google Play builds are planned (no Play/Firebase account yet).
 - **Server scheduler:** knows each device's expected schedule and alerts the person after a grace period
@@ -2289,15 +2422,18 @@ content triggers.
 Push is an optimisation, never a requirement. Every platform must back up on its own schedule with
 `Push__Mode=None`, with no relay, and with the relay down; a push only makes a due run start sooner.
 
-- **iOS:**
-  - Background `URLSession` for transfers, so they continue while the app is suspended.
-  - `BGProcessingTask` (can require power and Wi-Fi) and `BGAppRefreshTask` for scheduled scans.
-  - A local "no backup in N days" notification, rescheduled after each successful backup. It fires only when
-    backups have stopped, and needs neither the server nor a push.
-  - An App Intent ("Back up now"), so people can run backups from Shortcuts automations (when charging, on
-    arriving home, at a time of day).
-  - Small, resumable work units: each background slot uploads a few chunks, records progress and can be cut
-    off at any point without losing work.
+- **iOS** (task 22, all implemented as listed):
+  - `BGProcessingTask` (network, and power for charging-only folders) and `BGAppRefreshTask` for the due folders,
+    re-submitted after every run. An unsigned/sideloaded build has no APNs at all and relies on exactly these.
+  - Background time (`beginBackgroundTask`) around runs, instead of a background `URLSession` (not used: see "iOS background
+    work").
+  - A local "nothing synced for N days" notification, rescheduled after each successful run. It fires only when runs have
+    stopped, and needs neither the server nor a push.
+  - "Back up now" from Shortcuts automations (when charging, on arriving home, at a time of day) through the `async://sync`
+    link (App Intents cannot be built from .NET), and as a home-screen quick action.
+  - Opening the app runs every folder; while open, due folders run.
+  - Small, resumable work units: a slot that ends stops the run cleanly (*Deferred*), and uploads and downloads continue
+    where they stopped ("Large files").
 - **Android:**
   - WorkManager periodic work with network and charging constraints.
   - MediaStore content-trigger jobs, so new photos start a run without polling.
@@ -2381,8 +2517,10 @@ device ──push token──► its ASync server ──POST /v1/wake──► r
 - Later, only if abuse happens: automatic per-server keys, or tokens sealed by the relay.
 
 **Push messages:**
-- **iOS silent:** `apns-push-type: background`, priority 5, `content-available: 1`. Apple throttles these.
-- **iOS overdue:** an alert built from a `loc-key` string in the app.
+- **iOS silent:** `apns-push-type: background`, priority 5, `content-available: 1`, `{"async":"wake","reason":…}`. Apple
+  throttles these.
+- **iOS overdue:** `apns-push-type: alert`, priority 10, `title-loc-key`/`loc-key` (`ASYNC_OVERDUE_TITLE`/`ASYNC_OVERDUE_BODY`,
+  the app's `Localizable.strings`), also `content-available` so the app may run.
 - **FCM:** high-priority data messages through the HTTP v1 API, authenticated with an OAuth token from the
   service-account JSON.
 
@@ -2404,9 +2542,10 @@ device ──push token──► its ASync server ──POST /v1/wake──► r
 | `Relay` + custom `Push__RelayUrl` | Self-hosters with their own builds and several servers | Their own relay: deploy the Worker (free Cloudflare) or the `async-push-relay` container |
 | `None` (the default, and the only mode until M4) | Anyone who wants no outside service involved | Nothing. The server sends no wake-ups; devices rely on their own scheduling and the person gets overdue alerts (see "Working without push") |
 
-Today (M4-2) `PushSettings` reads `Push__Mode`: **`UnifiedPush` is the default** and the only mode that sends anything;
-`None` sends nothing; `Relay` and `Direct` act as `UnifiedPush` with a warning in the log (APNs/FCM are not built: no
-Apple/Firebase accounts yet), as does an unknown value. The default changed from `None` because UnifiedPush involves no
+Today `PushSettings` reads `Push__Mode`: **`UnifiedPush` is the default**; `None` sends nothing; **`Direct` sends UnifiedPush
+and APNs** (task 22, below) when `Push__Apns__*` is complete, else UnifiedPush only with a warning; `Relay` acts as
+`UnifiedPush` with a warning (the relay is not built: it needs our hosted service and our Apple/Firebase keys), as does an
+unknown value. FCM is not built (no Firebase account). The default changed from `None` because UnifiedPush involves no
 service of ours: the server only posts to an address the person's own phone registered, from a distributor they
 installed; a phone without one is never contacted.
 
@@ -2439,6 +2578,24 @@ device's distributor endpoint (for example ntfy). Implemented in `ASync.Api/Serv
 - An Apple Developer account and an APNs `.p8` key for `ua.pp.chds.async`.
 - A Firebase project and its service-account JSON.
 - A Cloudflare account (free) and a DNS name.
+
+**APNs in `Push__Mode=Direct`** (task 22, `ASync.Api/Services/Push/Apns.cs`): for self-hosters who build and sign the iOS app
+under their own account (APNs accepts only the signer's key). Settings: `Push__Apns__KeyFile` (the `.p8`) or `Push__Apns__Key`
+(its PEM), `Push__Apns__KeyId`, `Push__Apns__TeamId`, `Push__Apns__BundleId` (default `ua.pp.chds.async`); a missing or unreadable
+key is a startup warning and no APNs pushes (`ApnsOptions.FromConfiguration`). A device registers `PUT /api/sync/push {type: Apns,
+endpoint: <hex token>, environment}` (`PushTargetRequest.Environment`, additive; `PushTargetType.Apns`, stored by name in the
+existing `PushType` column, so no migration); the target is stored as `production:<hex>` or `sandbox:<hex>` (64–200 hex digits,
+lower case), people see only "APNs" or "APNs sandbox" (`DevicePushDto.Host`), `Enabled` says whether this server sends it, and a
+server without Direct keeps the token and skips its wakes with that reason. `ApnsSender` (a singleton: it keeps the provider
+token): an ES256 JWT (`{alg, kid}`, `{iss: team, iat}`, P1363 signature), reused for 40 minutes and made again after
+`ExpiredProviderToken`/`InvalidProviderToken`; `POST https://api.push.apple.com/3/device/<token>` (or `api.sandbox.push.apple.com`)
+over HTTP/2 exactly (the `apns` client: `SocketsHttpHandler`, several HTTP/2 connections, no redirects, `Push__TimeoutSeconds`),
+headers `authorization: bearer`, `apns-topic`, `apns-push-type`, `apns-priority`, `apns-expiration` (a day), `apns-collapse-id`.
+**410 Unregistered drops the token** (the app sends its new one at its next start); other answers are recorded with Apple's
+`reason` and a hint (`BadDeviceToken`: the other environment; `DeviceTokenNotForTopic`: the bundle id). Throttling, live
+connections and the queue are the UnifiedPush ones. Tests: `ApnsTests` (settings, validation, storage and what people see, the
+JWT verified with the public key, the request's version, path, headers and both payloads, 410 and 400, the token's reuse and
+renewal), `ApiPushTests` (a token through the real server, not sent without Direct). Not tried against Apple itself (no account).
 
 If the relay is down, devices still run their own scheduled background tasks; only server-triggered
 wake-ups are missed. The same holds with `Push__Mode=None`: see "Working without push" above.
@@ -3007,6 +3164,12 @@ contacts and calendars part is `scripts/smoke-android-collections.sh`): see its 
      8–10's storage permission and legacy storage, real USB drives and SD cards (the emulator's virtual SD card stands in),
      an OEM Settings without the per-app page (the fallback page).
      Next: the VFS on the desktops (Cloud Files, File Provider, FUSE), photos/contacts/calendars, iOS.
+   - **M4-10 iOS background work (task 22, done):** see "iOS background work (task 22)": BGTaskScheduler refresh and processing
+     tasks from `BackgroundPlanner`, the agent's own interval off, background time around runs, run conditions from
+     NWPathMonitor/UIDevice/Low Power Mode, the reminder (provisional notification authorization), the shared background card in
+     iOS's words, *Back up now* (quick action, `async://sync`), APNs registration only with the entitlement and silent pushes in
+     the app; the server sends APNs itself in `Push__Mode=Direct`. Verified in CI run 44187660063 (simulator); background
+     `NSURLSession` evaluated and not used; the hosted relay still needs our hosting and Apple account.
    - **M4-9 iOS foundation (task 21, done):** `ASync.App.iOS` (see "iOS app (task 21)"): the agent in-process, the device
      key in the Secure Enclave, the Keychain-sealed store, folders in the app's Documents and picked folders as
      security-scoped bookmarks, enrollment by code, link, QR scan and device code, adding folders from the app, the web UI
@@ -3167,3 +3330,8 @@ Open questions:
   added by concurrent gateway requests, and an EF read-modify-write would lose some.
 - **SPA:** `vite build` writes to `src/ASync.Api/wwwroot` (gitignored). The Docker image builds the UI
   itself.
+- **iOS project files:** XML comments in `ASync.App.iOS.csproj` must not contain `--` (MSBuild refuses the project: found
+  in task 22's first Mac run, so write "the signed mode of package-ios.sh", not the option); the plists take no comments at all.
+- **iOS app delegate methods** that Avalonia's `AvaloniaAppDelegate` lacks are added with `[Export]` in our subclass
+  (`willFinishLaunching`, the remote-notification callbacks); scene-delegate methods cannot be added that way (Avalonia's scene
+  delegate is internal and sealed): the quick action's is added to its Objective-C class at launch (`QuickActions`).

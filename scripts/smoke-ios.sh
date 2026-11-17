@@ -411,12 +411,15 @@ cat >"$work/push.json" <<EOF
 {"Simulator Target Bundle": "$bundle", "aps": {"content-available": 1}, "async": "wake", "reason": "changed"}
 EOF
 xcrun simctl push "$udid" "$bundle" "$work/push.json" >/dev/null 2>&1 || true
-if wait_for 45 test -f "$docs/Sync/pushed.txt"; then
-  pass "xcrun simctl push woke the suspended app: pushed.txt came down"
-elif grep -q "Push: woken" "$logs"/app-stdout-1.log 2>/dev/null; then
-  fail "the push reached the app but pushed.txt did not come down" "$(ls "$docs/Sync")"
+# The app's own log line tells whether the push reached it (the file alone could also come from a reconnect).
+push_seen() { xcrun simctl spawn "$udid" log show --last 3m --style compact --predicate 'process == "ASync"' 2>/dev/null | grep -q "Push: woken (changed)"; }
+wait_for 45 test -f "$docs/Sync/pushed.txt" || true
+if push_seen; then
+  [[ -f "$docs/Sync/pushed.txt" ]] && pass "xcrun simctl push woke the suspended app: pushed.txt came down" \
+    || fail "the push reached the app but pushed.txt did not come down" "$(ls "$docs/Sync")"
 else
-  note "the simulator did not deliver the silent push to the suspended app (no \"Push: woken\" in its log); the push code path ran above (bg-wake)"
+  # Seen in task 22's runs on an iOS 26.5 simulator: a content-available push to a suspended app that never registered.
+  note "the simulator did not deliver the silent push to the suspended app (no \"Push: woken (changed)\" in its log); the push handler ran above (bg-wake)"
 fi
 in_front
 wait_for 30 test -f "$docs/Sync/pushed.txt" && pass "opening the app syncs (pushed.txt is there)" || fail "app opened sync" "$(ls "$docs/Sync")"

@@ -2,6 +2,16 @@
 
 ## v0.1.6 — 2026-11-17
 
+- feat(ios): **the iPhone syncs in the background.** Folders run when iOS gives the app background time (a short refresh slot
+  and longer slots, usually overnight on the charger; how often is iOS's decision: more for apps you use, rarely in Low Power
+  Mode, never after closing the app from the app switcher), every time you open the app, and while it stays open when they are
+  due. A run that started while the app was open carries on for a while after you leave it, and large files continue where
+  they stopped. Folder conditions now work on the iPhone (Wi-Fi only: cellular, hotspots and Low Data Mode count as metered;
+  while charging; battery not low, which Low Power Mode counts as). The iPhone reminds you when a folder has not synced for the
+  days chosen in Settings (3 by default), and asks for the notification permission from a card on the dashboard. *Back up
+  now* is a home-screen quick action and an `async://sync` link for Shortcuts automations. Server wake-ups through Apple push
+  need a build signed with push (the sideloaded .ipa has none and simply does without) and a server with
+  `Push__Mode=Direct`, which now sends APNs pushes itself with your `Push__Apns__*` key (see README "Push").
 - feat: **An iOS app, first version (sideloaded).** `ASync-<version>-unsigned.ipa` installs with SideStore or AltStore on iOS 15
   and later. Add the iPhone with a scanned QR code (the app's scanner or the Camera app), an `async://pair` link, the server and
   code, or a code approved on your computer; its key is made in the Secure Enclave and what the app stores is sealed with a
