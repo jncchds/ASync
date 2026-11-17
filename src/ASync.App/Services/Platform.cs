@@ -123,6 +123,46 @@ public interface IBackgroundServices
     int ReminderDays { get; set; }
 
     event Action? Changed;
+
+    /// <summary>The words of the background card and the dashboard prompt on this platform.</summary>
+    BackgroundTexts Texts => BackgroundTexts.Android;
+
+    /// <summary>Why background work is held back now, when the platform says more than <see cref="BackgroundTexts.Restricted"/>.</summary>
+    string? RestrictionText => null;
+
+    /// <summary>Whether wake-ups need a distributor the person chooses (UnifiedPush); false: the system's own push (APNs).</summary>
+    bool UsesDistributors => true;
+
+    /// <summary>The wake-ups' state in words, for platforms whose push the person does not set up (iOS); null = from <see cref="Push"/>.</summary>
+    string? PushStatusText => null;
+}
+
+/// <summary>
+/// What the background card and the dashboard prompt say on a platform: Android's battery optimisation and UnifiedPush, or
+/// iOS's Background App Refresh, notifications and Apple's push.
+/// </summary>
+public sealed record BackgroundTexts(
+    string AllowanceLabel, string Unrestricted, string Restricted, string PromptTitle, string PromptExplanation, string AllowLabel,
+    string SettingsLabel, string PushLabel, string PushExplanation, string ReminderNote)
+{
+    public static readonly BackgroundTexts Android = new(
+        AllowanceLabel: "Battery",
+        Unrestricted: "ASync may run in the background without battery restrictions.",
+        Restricted: "Battery optimisation is on for ASync: Android may delay or skip its background syncs, most of all when the phone is idle.",
+        PromptTitle: "Let ASync sync in the background",
+        PromptExplanation:
+            "Folders sync in the background on their schedule, also with the app closed. Android's battery optimisation can hold that " +
+            "work back for hours. Allowing ASync to run in the background lets it sync on time; transfers still wait for the " +
+            "conditions you set (Wi-Fi, charging).",
+        AllowLabel: "Allow background sync",
+        SettingsLabel: "Battery settings",
+        PushLabel: "Wake-ups (UnifiedPush)",
+        PushExplanation:
+            "With a UnifiedPush distributor such as ntfy installed, the server can wake this phone when another device changes a " +
+            "folder, when it has not synced for too long, or when you browse its folders from the web. Nothing else goes through it: " +
+            "the message only says \"wake up\". " +
+            "Without one, folders still sync on their schedule.",
+        ReminderNote: "A notification from the phone itself, moved on after every successful run: it needs neither the server nor push.");
 }
 
 /// <summary>The app's own preferences (not the agent's: those live on the server).</summary>
