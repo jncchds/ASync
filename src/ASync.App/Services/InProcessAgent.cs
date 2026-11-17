@@ -100,6 +100,13 @@ public sealed class InProcessAgentConnector(IControlHandler agent, ControlEventH
         public Task<string> InitEncryptionAsync(int folderId, string passphrase, CancellationToken ct) =>
             Call(() => agent.InitEncryptionAsync(folderId, passphrase is { Length: > 0 } ? passphrase : throw new ControlException("\"init-encryption\" needs a passphrase."), ct), ct);
 
+        public Task<DeviceFolderOptionsDto> FolderOptionsAsync(CancellationToken ct) => Call(() => agent.FolderOptionsAsync(ct), ct);
+        public Task<FolderAddedDto> CreateFolderAsync(DeviceCreateFolderRequest request, CancellationToken ct) =>
+            Call(() => agent.CreateFolderAsync(request ?? throw new ControlException("\"create-folder\" needs newFolder."), ct), ct);
+        public Task<FolderAddedDto> JoinFolderAsync(int folderId, string path, MirrorDirection? direction, CancellationToken ct) =>
+            Call(() => agent.JoinFolderAsync(folderId, Need(path, "join-folder", "path"), direction, ct), ct);
+        public Task<string> LeaveFolderAsync(int folderId, CancellationToken ct) => Call(() => agent.LeaveFolderAsync(folderId, ct), ct);
+
         public ValueTask DisposeAsync()
         {
             Interlocked.Exchange(ref _disposed, 1);

@@ -1,0 +1,154 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ASync.App.ViewModels"
+             x:Class="ASync.App.Views.AddFolderView"
+             x:DataType="vm:AddFolderViewModel">
+  <StackPanel Spacing="12">
+    <Grid ColumnDefinitions="*,Auto" Margin="2,0,0,0">
+      <TextBlock Classes="h1" Name="AddFolderTitle" Text="{Binding Title}" VerticalAlignment="Center" TextWrapping="Wrap" />
+      <Button Grid.Column="1" Classes="secondary" Name="CloseAddFolder" Content="Cancel" Command="{Binding CloseCommand}" />
+    </Grid>
+
+    <!-- New folder, or join one: two tabs as radio buttons. -->
+    <WrapPanel ItemSpacing="16" LineSpacing="4" IsVisible="{Binding !HasRecoveryKey}">
+      <RadioButton GroupName="addKind" Name="KindNew" Content="New folder" IsChecked="{Binding IsCreating}" />
+      <RadioButton GroupName="addKind" Name="KindJoin" Content="{Binding JoinTabText}" IsChecked="{Binding IsJoining}" />
+    </WrapPanel>
+
+    <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="4" />
+
+    <!-- This device may not add folders: where to allow it. -->
+    <Border Classes="notice" Name="Refusal" IsVisible="{Binding IsRefused}">
+      <StackPanel Spacing="8">
+        <TextBlock Name="RefusalText" Text="{Binding Refusal}" TextWrapping="Wrap" />
+        <Button Classes="small secondary" Name="ReloadOptions" Content="Try again" Command="{Binding ReloadCommand}" HorizontalAlignment="Left" />
+      </StackPanel>
+    </Border>
+
+    <Border Classes="notice danger" IsVisible="{Binding HasError}">
+      <StackPanel Spacing="8">
+        <SelectableTextBlock Name="AddFolderError" Text="{Binding Error}" TextWrapping="Wrap" />
+        <Button Classes="small secondary" Content="Try again" Command="{Binding ReloadCommand}" HorizontalAlignment="Left"
+                IsVisible="{Binding !Loaded}" />
+      </StackPanel>
+    </Border>
+
+    <!-- New folder. -->
+    <Border Classes="card" Name="NewFolderForm" IsVisible="{Binding ShowNewForm}">
+      <StackPanel Spacing="14">
+        <StackPanel>
+          <TextBlock Classes="label" Text="Name" />
+          <TextBox Name="FolderName" Text="{Binding Name}" PlaceholderText="e.g. Photos" MaxLength="100" />
+        </StackPanel>
+
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label" Text="How it syncs" />
+          <WrapPanel ItemSpacing="16" LineSpacing="4">
+            <RadioButton GroupName="mode" Name="ModeTwoWay" Content="Two-way" IsChecked="{Binding IsTwoWay}" />
+            <RadioButton GroupName="mode" Name="ModeMirror" Content="Mirror" IsChecked="{Binding IsMirror}" />
+            <RadioButton GroupName="mode" Name="ModeBackup" Content="Backup" IsChecked="{Binding IsBackup}" />
+          </WrapPanel>
+          <TextBlock Classes="muted small" Text="{Binding ModeHint}" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <StackPanel Spacing="4" IsVisible="{Binding ShowDirection}">
+          <TextBlock Classes="label" Text="Mirror direction" />
+          <WrapPanel ItemSpacing="16" LineSpacing="4">
+            <RadioButton GroupName="newDirection" Name="DirectionUpload" Content="{Binding UploadText}" IsChecked="{Binding IsUpload}" />
+            <RadioButton GroupName="newDirection" Name="DirectionDownload" Content="{Binding DownloadText}" IsChecked="{Binding IsDownload}" />
+          </WrapPanel>
+        </StackPanel>
+
+        <StackPanel Spacing="4" IsVisible="{Binding CanEncrypt}">
+          <CheckBox Name="EndToEnd" Content="End-to-end encryption" IsChecked="{Binding EndToEnd}" />
+          <TextBlock Classes="muted small" TextWrapping="Wrap"
+                     Text="Files are encrypted on your devices with a passphrase you choose next; nobody can read the backups without it, not even the server's admin." />
+        </StackPanel>
+
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label" Text="Storage" />
+          <ComboBox Name="Storage" ItemsSource="{Binding Storages}" SelectedItem="{Binding SelectedStorage}" HorizontalAlignment="Stretch">
+            <ComboBox.ItemTemplate>
+              <DataTemplate DataType="vm:StorageChoice"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <TextBlock Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasNoStorage}"
+                     Text="There is no storage to put folders on yet: add one in the web UI (Storage)." />
+        </StackPanel>
+
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label" Text="Directory on the storage" />
+          <TextBox Name="RootPath" Text="{Binding RootPath}" PlaceholderText="e.g. photos" Classes="mono" />
+          <TextBlock Classes="muted small" TextWrapping="Wrap" Text="Folders never share a directory, nor one inside another. It cannot change later." />
+        </StackPanel>
+
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label" Text="Runs" />
+          <ComboBox Name="Interval" ItemsSource="{x:Static vm:AddFolderViewModel.Intervals}" SelectedItem="{Binding SelectedInterval}" MinWidth="180">
+            <ComboBox.ItemTemplate>
+              <DataTemplate DataType="vm:IntervalChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <TextBlock Classes="muted small" TextWrapping="Wrap" Text="Also when files change and on Sync now. Retention, excludes and the rest are in the web UI." />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- Join one of the account's folders. -->
+    <Border Classes="card" Name="JoinFolderForm" IsVisible="{Binding ShowJoinForm}">
+      <StackPanel Spacing="12">
+        <TextBlock Classes="label" Text="Folder" />
+        <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding HasNothingToJoin}" Name="NothingToJoin"
+                   Text="This device is already part of every folder of the account. Create a new one instead." />
+        <ListBox Name="JoinableFolders" ItemsSource="{Binding JoinableFolders}" SelectedItem="{Binding SelectedFolder}"
+                 IsVisible="{Binding !HasNothingToJoin}" Background="Transparent">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="vm:JoinableFolder">
+              <StackPanel Spacing="2" Margin="0,4">
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Classes="muted small" Text="{Binding Description}" TextWrapping="Wrap" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <StackPanel Spacing="4" IsVisible="{Binding ShowDirection}">
+          <TextBlock Classes="label" Text="Mirror direction" />
+          <WrapPanel ItemSpacing="16" LineSpacing="4">
+            <RadioButton GroupName="joinDirection" Name="JoinUpload" Content="{Binding UploadText}" IsChecked="{Binding IsUpload}" />
+            <RadioButton GroupName="joinDirection" Name="JoinDownload" Content="{Binding DownloadText}" IsChecked="{Binding IsDownload}" />
+          </WrapPanel>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- Where it lives here: both forms. -->
+    <Border Classes="card" Name="LocalCard" IsVisible="{Binding ShowLocal}">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="label" Text="{Binding LocalTitle}" TextWrapping="Wrap" />
+        <TextBox Name="LocalPath" Text="{Binding LocalPath}" Classes="mono" IsVisible="{Binding CanTypePath}"
+                 PlaceholderText="A folder on this computer" />
+        <TextBlock Name="LocalDisplay" Classes="mono" Text="{Binding LocalDisplay}" TextWrapping="Wrap" IsVisible="{Binding IsPhone}"
+                   Classes.muted="{Binding !HasLocalPath}" />
+        <Button Classes="secondary" Name="ChooseLocal" Content="Choose folder…" Command="{Binding ChooseLocalCommand}" HorizontalAlignment="Left" />
+      </StackPanel>
+    </Border>
+
+    <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding ShowLocal}">
+      <Button Name="SubmitAddFolder" Content="{Binding SubmitText}" Command="{Binding SubmitCommand}" />
+      <Button Classes="secondary" Content="Cancel" Command="{Binding CloseCommand}" />
+    </WrapPanel>
+
+    <!-- A new standard Backup folder: its recovery key, once. -->
+    <Border Classes="card" Name="CreatedRecoveryKey" IsVisible="{Binding HasRecoveryKey}">
+      <StackPanel Spacing="12">
+        <TextBlock Classes="h2" Text="{Binding CreatedText}" TextWrapping="Wrap" />
+        <TextBlock TextWrapping="Wrap"
+                   Text="This is its recovery key: write it down or store it in a password manager now. It is shown only this once." />
+        <SelectableTextBlock Name="RecoveryKeyText" Classes="mono" Text="{Binding RecoveryKey}" TextWrapping="Wrap" FontSize="15" />
+        <TextBlock Classes="muted small" TextWrapping="Wrap"
+                   Text="It opens the backups without this server (after losing its database, or on another server). The web UI can make a new one later." />
+        <Button Name="RecoveryKeyDone" Content="I have written it down" Command="{Binding CloseCommand}" HorizontalAlignment="Left" />
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

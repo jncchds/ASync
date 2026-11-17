@@ -26,6 +26,8 @@ namespace ASync.App.Android;
 /// All files access: <c>choose-local &lt;folder&gt;</c> (the explanation or the in-app picker), <c>picker</c>,
 /// <c>picker-go|picker-open|picker-up|picker-volume|picker-use|picker-allow|picker-system|picker-cancel</c>,
 /// <c>switch-real &lt;folder&gt;</c>, <c>storage [refresh]</c>.
+/// Adding folders (task 18): <c>add-folder new|join</c>, <c>add-folder-set &lt;field&gt; &lt;value&gt;</c>, <c>add-folder-local</c> (the
+/// picker), <c>add-folder-submit</c>, <c>add-folder-state</c>, <c>add-folder-reload</c>, <c>add-folder-close</c>.
 /// </summary>
 [BroadcastReceiver(Name = "ua.pp.chds.async.Automation", Exported = true, Permission = "android.permission.DUMP")]
 [IntentFilter(["ua.pp.chds.async.AUTOMATION"])]
@@ -143,6 +145,52 @@ public sealed class Automation : BroadcastReceiver
                 return "picker open";
             case "picker-cancel":
                 shell.FolderDialog?.Cancel();
+                return "ok";
+            // ── Adding folders from the app (task 18) ──
+            case "add-folder":
+                // add-folder new|join: opens the page as the dashboard's buttons do, after the agent answered folder-options.
+                await shell.OpenAddFolderAsync(join: arg == "join");
+                return AddFolderState(shell);
+            case "add-folder-state":
+                return AddFolderState(shell);
+            case "add-folder-reload":
+                await AddFolder(shell).ReloadCommand.ExecuteAsync(null);
+                return AddFolderState(shell);
+            case "add-folder-set":
+            {
+                // add-folder-set <field> <value>: name, root, mode (Backup|Mirror|TwoWay), direction (Upload|Download), e2e (true|false),
+                // storage <id>, interval <minutes>, folder <id> (to join), local <path> (as if the picker chose it).
+                var page = AddFolder(shell);
+                var kv = arg.Split(' ', 2);
+                var value = kv.Length > 1 ? kv[1] : "";
+                switch (kv[0])
+                {
+                    case "name": page.Name = value; break;
+                    case "root": page.RootPath = value; break;
+                    case "mode": page.Mode = Enum.Parse<ASync.Contracts.SyncMode>(value); break;
+                    case "direction": page.Direction = Enum.Parse<ASync.Contracts.MirrorDirection>(value); break;
+                    case "e2e": page.EndToEnd = bool.Parse(value); break;
+                    case "storage": page.SelectedStorage = page.Storages.First(s => s.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) == value); break;
+                    case "interval": page.SelectedInterval = AddFolderViewModel.Intervals.First(i => i.Minutes.ToString(System.Globalization.CultureInfo.InvariantCulture) == value); break;
+                    case "folder": page.SelectedFolder = page.JoinableFolders.First(f => f.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) == value); break;
+                    case "local": page.LocalPath = value; break;
+                    default: return $"error: unknown field {kv[0]}";
+                }
+                return AddFolderState(shell);
+            }
+            case "add-folder-local":
+                // The form's Choose folder…: the All files access picker (then picker-* commands) or its explanation.
+                await AddFolder(shell).ChooseLocalCommand.ExecuteAsync(null);
+                return shell.FolderDialog is { } chooser ? chooser.IsExplaining ? "explaining" : "picking" : "no dialog";
+            case "add-folder-submit":
+            {
+                var page = AddFolder(shell);
+                if (!page.SubmitCommand.CanExecute(null)) return $"error: cannot submit {AddFolderState(shell)}";
+                await page.SubmitCommand.ExecuteAsync(null);
+                return AddFolderState(shell);
+            }
+            case "add-folder-close":
+                shell.AddFolderPage?.Close();
                 return "ok";
             case "switch-real":
             {
@@ -456,6 +504,36 @@ public sealed class Automation : BroadcastReceiver
         }.ToJsonString();
     }
 
+    private static AddFolderViewModel AddFolder(ShellViewModel shell) =>
+        shell.AddFolderPage ?? throw new InvalidOperationException("The add-folder page is not open (add-folder new|join).");
+
+    /// <summary>The add-folder page as JSON: which form, what may be used, what is filled in, and its messages.</summary>
+    private static string AddFolderState(ShellViewModel shell)
+    {
+        if (shell.AddFolderPage is not { } p)
+            return new JsonObject { ["open"] = false, ["message"] = shell.Message, ["dialog"] = shell.Dialog is { } d ? d.IsSetup ? "setup" : "unlock" : null }.ToJsonString();
+        return new JsonObject
+        {
+            ["open"] = true,
+            ["joining"] = p.IsJoining,
+            ["loaded"] = p.Loaded,
+            ["refusal"] = p.Refusal,
+            ["error"] = p.Error,
+            ["storages"] = new JsonArray([.. p.Storages.Select(s => (JsonNode?)new JsonObject { ["id"] = s.Id, ["label"] = s.Label })]),
+            ["folders"] = new JsonArray([.. p.JoinableFolders.Select(f => (JsonNode?)new JsonObject { ["id"] = f.Id, ["name"] = f.Name, ["mode"] = f.Folder.Mode.ToString() })]),
+            ["name"] = p.Name,
+            ["root"] = p.RootPath,
+            ["mode"] = p.Mode.ToString(),
+            ["storage"] = p.SelectedStorage?.Id,
+            ["folder"] = p.SelectedFolder?.Id,
+            ["local"] = p.LocalPath,
+            ["localDisplay"] = p.LocalDisplay,
+            ["canSubmit"] = p.SubmitCommand.CanExecute(null),
+            ["recoveryKey"] = p.RecoveryKey is null ? null : "shown",
+            ["message"] = shell.Message,
+        }.ToJsonString();
+    }
+
     private static string State(ShellViewModel shell)
     {
         var o = new JsonObject
@@ -474,6 +552,7 @@ public sealed class Automation : BroadcastReceiver
             ["folderDialog"] = shell.FolderDialog is null ? null : shell.FolderDialog.IsExplaining ? "explaining" : "picking",
             ["allFiles"] = shell.Storage?.HasAllFilesAccess,
             ["settings"] = shell.SettingsPage is not null,
+            ["addFolder"] = shell.AddFolderPage is { } addFolder ? addFolder.IsJoining ? "join" : "new" : null,
             ["batteryPrompt"] = shell.Background?.ShowBatteryPrompt,
             ["pushText"] = shell.Background?.PushText,
         };

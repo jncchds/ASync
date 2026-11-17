@@ -65,17 +65,28 @@ public class DevicesController : ControllerBase
     private ActionResult<BrowseListing> Answer(BrowseOutcome outcome) =>
         outcome.Listing is { } listing ? listing : StatusCode(outcome.Status, new { message = outcome.Message });
 
+    /// <summary>Renames the device, or switches whether it may add folders itself (task 18); both optional.</summary>
     [HttpPatch("{id:guid}")]
-    public async Task<ActionResult<DeviceDto>> Rename(Guid id, [FromBody] RenameDeviceRequest req)
+    public async Task<ActionResult<DeviceDto>> Update(Guid id, [FromBody] UpdateDeviceRequest req, [FromServices] ISyncNotifier notifier)
     {
         // Someone else's device is not found, whatever the request says.
         var device = await _devices.GetAsync(id);
         if (device is null || device.UserId != User.UserId()) return NotFound();
-        var name = req.Name?.Trim();
-        if (string.IsNullOrEmpty(name) || name.Length > 100)
-            return BadRequest(new { message = "A device name of 1–100 characters is required." });
-        device.Name = name;
+        if (req.Name is not null)
+        {
+            var name = req.Name.Trim();
+            if (name.Length is 0 or > 100) return BadRequest(new { message = "A device name of 1–100 characters is required." });
+            device.Name = name;
+        }
+        var permissionChanged = req.MayAddFolders is bool may && may != device.MayAddFolders;
+        if (req.MayAddFolders is bool allowed) device.MayAddFolders = allowed;
         await _devices.UpdateAsync(device);
+        if (permissionChanged)
+        {
+            // The device's app shows what it may do and asks again; the owner's other pages reload the list.
+            await notifier.ToDevicesAsync([id], SyncEvents.ConfigChanged);
+            await notifier.ToUserAsync(device.UserId, SyncEvents.DeviceStatus, id);
+        }
         return Dto(device);
     }
 

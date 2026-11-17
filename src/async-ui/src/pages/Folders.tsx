@@ -210,6 +210,7 @@ export default function Folders() {
                       <span>every {formatMinutes(f.intervalMinutes)}</span>
                       <FolderSize usage={f.usage} backup={f.mode === 'Backup'} />
                       <span>folder #{f.id}</span>
+                      {f.addedFromDevice && <span title={`Created from the app on ${f.addedFromDevice}, ${new Date(f.createdAt).toLocaleString()}`}>added from {f.addedFromDevice}</span>}
                     </div>
                     {f.excludes.length > 0 && <span className="muted small-text">Excludes: {f.excludes.join(', ')}</span>}
                     {f.mode === 'Backup' && f.repositoryReady && (

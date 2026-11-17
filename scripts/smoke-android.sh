@@ -17,6 +17,9 @@
 #   byte by async-cli with that passphrase.
 #   Browsing from the web UI (task 17): through the API, a clear 409 without All files access; with it, the storage's
 #   root listed, Android/ without data and obb, Android/data itself refused.
+#   Adding folders from the app (task 18): New folder (a TwoWay folder at a real path chosen in the All files access
+#   picker, "added from" the phone in the web UI, synced both ways with async-cli); Add to a folder (one made in the web
+#   UI, downloaded); with "May add folders" switched off in the web UI the app says where to allow it.
 #   Background work (M4-2): the foreground-service notification during the large transfer; the battery prompt and the
 #   system's exemption question; the folders' periodic WorkManager jobs; with the app in the background and its process
 #   killed (am kill), a file changed by async-cli arrives through the folder's periodic job, which the system runs in a
@@ -927,6 +930,82 @@ ctl "storage refresh" >/dev/null
 r=$(sync_phone "$rootf")
 jq -e '.ok' <<<"$r" >/dev/null && pass "turned on again: the folder syncs ($(jq -r .message <<<"$r"))" || fail "after re-grant" "$r"
 api DELETE "/api/folders/$rootf/devices/$device" >/dev/null || true # the restart check counts the phone's folders
+
+section "adding folders from the app (task 18)"
+# All files access is on (above). New folder: a TwoWay folder at a real path, synced both ways with async-cli.
+api GET /api/devices | jq -e --arg d "$device" '.[] | select(.id == $d) | .mayAddFolders' >/dev/null \
+  && pass "the phone (enrolled with a one-time code) may add folders" || fail "flag default" "$(api GET /api/devices)"
+adb shell "rm -rf /storage/emulated/0/ASyncNew /storage/emulated/0/ASyncJoined; mkdir -p /storage/emulated/0/ASyncNew /storage/emulated/0/ASyncJoined && echo 'made on the phone' > /storage/emulated/0/ASyncNew/new-from-phone.txt"
+settle /storage/emulated/0/ASyncNew/new-from-phone.txt
+page=$(ctl "add-folder new")
+jq -e --argjson b "$backend" '.open and .loaded and (.refusal == null) and (.storages | any(.id == $b))' <<<"$page" >/dev/null \
+  && pass "New folder… asks the server what the phone may use: $(jq -c '[.storages[].label]' <<<"$page")" || fail "add-folder options" "$page"
+ctl "add-folder-set name Phone new" >/dev/null
+page=$(ctl "add-folder-state")
+[[ "$(jq -r .root <<<"$page")" == phone-new ]] && pass "the directory on the storage follows the name (phone-new)" || fail "root default" "$page"
+ctl "add-folder-set storage $backend" >/dev/null
+[[ "$(ctl add-folder-local)" == picking ]] && pass "Choose folder… opens the All files access picker" || fail "local picker" "$(ctl picker)"
+ctl "picker-go /storage/emulated/0/ASyncNew" >/dev/null
+ctl picker-use >/dev/null
+page=$(ctl "add-folder-state")
+jq -e '.local == "/storage/emulated/0/ASyncNew" and .canSubmit' <<<"$page" >/dev/null \
+  && pass "the real path is the form's local folder ($(jq -r .localDisplay <<<"$page"))" || fail "local chosen" "$page"
+shot add-folder-new
+page=$(ctl add-folder-submit)
+jq -e '(.open | not) and (.message | test("was created"))' <<<"$page" >/dev/null && pass "created: $(jq -r .message <<<"$page")" || fail "create" "$page"
+wait_state '.folders | any(.name == "Phone new" and .path == "/storage/emulated/0/ASyncNew")' 30 \
+  && pass "it is on the dashboard at once, syncing /storage/emulated/0/ASyncNew" || fail "new folder appears" "$(state)"
+newf=$(api GET /api/folders | jq -r '.[] | select(.name == "Phone new") | .id')
+api GET "/api/folders/$newf" | jq -e --arg d "$device" '.addedFromDevice != null and (.devices | length == 1 and .[0].deviceId == $d) and .mode == "TwoWay"' >/dev/null \
+  && pass "the web UI sees it: TwoWay, only the phone, \"added from $(api GET "/api/folders/$newf" | jq -r .addedFromDevice)\"" || fail "server folder" "$(api GET "/api/folders/$newf")"
+r=$(sync_phone "$newf")
+server_has "$newf" new-from-phone.txt >/dev/null && pass "up: the phone's file is on the server ($(jq -r .message <<<"$r"))" || fail "new folder upload" "$r"
+mkdir -p "$work/cli-new"
+api PUT "/api/folders/$newf/devices" "{\"deviceId\":\"$cli_device\",\"localPath\":\"$work/cli-new\"}" >/dev/null
+cli_new_sync() { local out; for _ in 1 2 3 4 5 6; do out=$(cli sync --folder "$newf" 2>&1) || true; [[ "$out" != *"Another device is syncing"* ]] && return 0; sleep 5; done; echo "$out" >&2; }
+cli_new_sync
+[[ "$(cat "$work/cli-new/new-from-phone.txt" 2>/dev/null)" == "made on the phone" ]] && pass "async-cli gets it" || fail "cli got new file"
+echo "from the computer, into the phone's folder" > "$work/cli-new/new-from-cli.txt"
+cli_new_sync
+r=$(sync_phone "$newf")
+[[ "$(on_phone /storage/emulated/0/ASyncNew/new-from-cli.txt)" == "from the computer, into the phone's folder" ]] \
+  && pass "down: async-cli's file arrived on the phone ($(jq -r .message <<<"$r"))" || fail "new folder download" "$r"
+
+# Add this phone to a folder: one made in the web UI, with async-cli's files in it.
+joinf=$(api POST /api/folders "{\"name\":\"Shared\",\"mode\":\"TwoWay\",\"encryption\":\"Transport\",\"kind\":\"Files\",\"storageBackendId\":$backend,\"rootPath\":\"shared\",\"intervalMinutes\":60}" | jq -r .id)
+mkdir -p "$work/cli-shared"
+echo "shared from the computer" > "$work/cli-shared/shared.txt"
+api PUT "/api/folders/$joinf/devices" "{\"deviceId\":\"$cli_device\",\"localPath\":\"$work/cli-shared\"}" >/dev/null
+cli sync --folder "$joinf" >/dev/null 2>&1 || true
+page=$(ctl "add-folder join")
+jq -e --argjson f "$joinf" '.joining and (.folders | any(.id == $f))' <<<"$page" >/dev/null \
+  && pass "Add to a folder… lists the account's folders the phone is not in: $(jq -c '[.folders[].name]' <<<"$page")" || fail "join options" "$page"
+ctl "add-folder-set folder $joinf" >/dev/null
+[[ "$(ctl add-folder-local)" == picking ]] || fail "join picker" "$(ctl picker)"
+ctl "picker-go /storage/emulated/0/ASyncJoined" >/dev/null
+ctl picker-use >/dev/null
+shot add-folder-join
+page=$(ctl add-folder-submit)
+jq -e '(.open | not)' <<<"$page" >/dev/null && pass "joined: $(jq -r .message <<<"$page")" || fail "join" "$page"
+wait_state '.folders | any(.name == "Shared" and .path == "/storage/emulated/0/ASyncJoined")' 30 && pass "Shared is on the dashboard" || fail "joined folder appears" "$(state)"
+r=$(sync_phone "$joinf")
+[[ "$(on_phone /storage/emulated/0/ASyncJoined/shared.txt)" == "shared from the computer" ]] \
+  && pass "the phone downloads the folder's files ($(jq -r .message <<<"$r"))" || fail "joined download" "$r"
+api GET "/api/folders/$joinf" | jq -e '.devices | length == 2' >/dev/null && pass "the web UI lists both devices in it" || fail "joined devices" "$(api GET "/api/folders/$joinf")"
+
+# "May add folders" off in the web UI: the app says where to allow it.
+api PATCH "/api/devices/$device" '{"mayAddFolders":false}' >/dev/null
+page=$(ctl "add-folder new")
+jq -e '.refusal | test("Allowed in the web UI under Devices")' <<<"$page" >/dev/null \
+  && pass "with \"May add folders\" off: \"$(jq -r .refusal <<<"$page")\"" || fail "refusal" "$page"
+shot add-folder-refused
+api PATCH "/api/devices/$device" '{"mayAddFolders":true}' >/dev/null
+page=$(ctl add-folder-reload)
+jq -e '.refusal == null and .loaded' <<<"$page" >/dev/null && pass "allowed again, Try again shows the form" || fail "reload" "$page"
+ctl add-folder-close >/dev/null
+# The owner removes them from the web UI as usual (the restart check counts the phone's folders).
+api DELETE "/api/folders/$newf" >/dev/null && api DELETE "/api/folders/$joinf" >/dev/null && pass "the owner deletes both in the web UI" || fail "delete"
+wait_state '(.folders | any(.name == "Phone new" or .name == "Shared")) | not' 30 && pass "and they leave the phone's dashboard" || fail "folders gone" "$(state)"
 
 section "restart"
 adb shell am force-stop "$pkg"

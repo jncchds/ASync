@@ -27,7 +27,7 @@ public record FolderDto(
     int PruneIntervalDays = MaintenanceDefaults.PruneIntervalDays, int CheckIntervalDays = MaintenanceDefaults.CheckIntervalDays,
     int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent,
     MaintenanceStatusDto? LastPrune = null, MaintenanceStatusDto? LastCheck = null,
-    DateTime? RecoveryKeyCreatedAt = null, string? RecoveryKey = null, FolderUsageDto? Usage = null);
+    DateTime? RecoveryKeyCreatedAt = null, string? RecoveryKey = null, FolderUsageDto? Usage = null, string? AddedFromDevice = null);
 
 /// <summary>Defaults of a Backup folder's housekeeping schedule (days between runs; 0 = off).</summary>
 public static class MaintenanceDefaults
@@ -123,6 +123,34 @@ public record LeaseDto(string LeaseId, DateTime ExpiresAt);
 
 /// <summary>For Transport-encrypted repositories: the key that opens the server key file (base64, 32 bytes).</summary>
 public record RepositoryKeyDto(string ServerKey);
+
+// ── Folders a device adds itself (task 18; the device's "May add folders") ──────
+
+/// <summary>A storage back-end the device's owner may put folders on: what the device may know of it (no settings, no secrets).</summary>
+public record DeviceStorageOptionDto(int Id, string Name, StorageBackendType Type, bool Shared);
+
+/// <summary>One of the owner's folders this device is not part of, which it could join. <paramref name="Devices"/>: the names of the devices in it.</summary>
+public record DeviceJoinableFolderDto(
+    int FolderId, string Name, SyncMode Mode, FolderEncryption Encryption, FolderKind Kind, string StorageBackendName, string RootPath,
+    bool RepositoryReady, string[] Devices);
+
+/// <summary>
+/// What a device may do about folders (<c>GET /api/sync/folders/options</c>). With <paramref name="MayAddFolders"/> false the
+/// lists are empty and <paramref name="Refusal"/> says where it is allowed.
+/// </summary>
+public record DeviceFolderOptionsDto(bool MayAddFolders, string? Refusal, List<DeviceStorageOptionDto> Storages, List<DeviceJoinableFolderDto> Folders);
+
+/// <summary>
+/// A device creating a folder of its owner (<c>POST /api/sync/folders</c>), with itself attached at <paramref name="LocalPath"/>
+/// (<paramref name="Direction"/> for Mirror). The folder follows exactly the rules of the web UI's.
+/// </summary>
+public record DeviceCreateFolderRequest(SaveFolderRequest Folder, string LocalPath, MirrorDirection? Direction = null);
+
+/// <summary>The folder a device created, as it sees it; <paramref name="RecoveryKey"/> (Transport Backup) is shown once.</summary>
+public record DeviceFolderCreatedDto(DeviceFolderDto Folder, string? RecoveryKey = null);
+
+/// <summary>A device joining one of its owner's folders (<c>POST /api/sync/folders/{id}/join</c>).</summary>
+public record DeviceJoinFolderRequest(string LocalPath, MirrorDirection? Direction = null, long? ExpectedRevision = null);
 
 // ── Storage gateway ───────────────────────────────────────────────────────────
 

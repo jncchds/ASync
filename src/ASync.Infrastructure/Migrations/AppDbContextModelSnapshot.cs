@@ -238,6 +238,9 @@ namespace ASync.Infrastructure.Migrations
                     b.Property<DateTime?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("MayAddFolders")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -340,6 +343,13 @@ namespace ASync.Infrastructure.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByDeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CreatedByDeviceName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<string>("Encryption")
                         .IsRequired()

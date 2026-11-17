@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  BROWSE_HINTS, BROWSE_LABELS, errorMessage, getDevices, getEnrollments, renameDevice, revokeDevice, revokeEnrollment, testDevicePush,
+  BROWSE_HINTS, BROWSE_LABELS, errorMessage, getDevices, getEnrollments, renameDevice, revokeDevice, revokeEnrollment, setDeviceMayAddFolders, testDevicePush,
   type Device, type Enrollment,
 } from '../api'
 import { useSyncEvents, type SyncEvent } from '../hooks/useSyncEvents'
@@ -35,6 +35,14 @@ export default function Devices() {
     const name = prompt('Device name', device.name)?.trim()
     if (!name || name === device.name) return
     try { await renameDevice(device.id, name); await load() } catch (err) { setError(errorMessage(err)) }
+  }
+
+  const toggleAddFolders = async (device: Device, allowed: boolean) => {
+    setError('')
+    // Shown at once; the list is reloaded either way (also by the device.status event).
+    setDevices(list => list?.map(d => d.id === device.id ? { ...d, mayAddFolders: allowed } : d) ?? null)
+    try { await setDeviceMayAddFolders(device.id, allowed) } catch (err) { setError(errorMessage(err)) }
+    await load()
   }
 
   const revoke = async (device: Device) => {
@@ -77,18 +85,26 @@ export default function Devices() {
         />
       )}
 
+      {active.length > 0 && (
+        <p className="hint">
+          <strong>Adds folders:</strong> the device may create folders of yours and add itself to your folders from its app,
+          on storage you may use. Nothing more: not other devices, storage settings or your account. On for phones and
+          computers added with a one-time code or approved here; off for devices added with a reusable code (scripted agents).
+        </p>
+      )}
+
       {devices === null ? <div className="loading">Loading…</div> : active.length === 0 ? (
         <p className="empty">No devices yet. Use <strong>Add device</strong> to connect a phone, computer or server.</p>
       ) : (
         <div className="table-wrap">
           <table className="stack">
             <thead>
-              <tr><th>Name</th><th>Platform</th><th>Version</th><th>Last seen</th><th>Wake-ups</th><th>Added</th><th></th></tr>
+              <tr><th>Name</th><th>Platform</th><th>Version</th><th>Last seen</th><th>Wake-ups</th><th title="May add folders from its app">Adds folders</th><th></th></tr>
             </thead>
             <tbody>
               {active.map(d => (
                 <tr key={d.id}>
-                  <td className="title-cell"><span>{d.name}</span></td>
+                  <td className="title-cell"><span>{d.name}<span className="muted small-text" style={{ display: 'block', fontWeight: 400 }} title={formatDate(d.createdAt)}>added {new Date(d.createdAt).toLocaleDateString()}</span></span></td>
                   <td data-label="Platform"><span className="pill">{PLATFORM_LABELS[d.platform]}</span></td>
                   <td data-label="Version" className="muted nowrap"><span>{d.appVersion ?? '—'}</span></td>
                   <td data-label="Last seen" className="nowrap" title={d.lastSeenAt ? formatDate(d.lastSeenAt) : undefined}>
@@ -116,7 +132,15 @@ export default function Devices() {
                       </span>
                     ) : <span className="muted">{d.platform === 'Android' ? 'Own schedule' : '—'}</span>}
                   </td>
-                  <td data-label="Added" className="muted nowrap" title={formatDate(d.createdAt)}><span>{new Date(d.createdAt).toLocaleDateString()}</span></td>
+                  <td data-label="Adds folders" className="nowrap">
+                    <label className="checkbox" title={d.mayAddFolders
+                      ? `${d.name} may create folders of yours and add itself to your folders from its app.`
+                      : `${d.name} cannot add folders; its app says to allow it here.`}>
+                      <input type="checkbox" checked={!!d.mayAddFolders} aria-label={`${d.name} may add folders`}
+                        onChange={e => toggleAddFolders(d, e.target.checked)} />
+                      <span>{d.mayAddFolders ? 'Allowed' : 'Off'}</span>
+                    </label>
+                  </td>
                   <td className="actions-cell">
                     <div className="row-actions">
                       <button className="secondary small" onClick={() => rename(d)}>Rename</button>

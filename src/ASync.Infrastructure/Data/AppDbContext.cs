@@ -81,6 +81,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(f => f.Encryption).HasConversion<string>().HasMaxLength(20);
             e.Property(f => f.Kind).HasConversion<string>().HasMaxLength(20);
             e.Property(f => f.RetentionJson).HasColumnType("jsonb");
+            e.Property(f => f.CreatedByDeviceName).HasMaxLength(100);
             // Database defaults give existing folders the schedule; the sentinel lets 0 ("off") be stored.
             e.Property(f => f.PruneIntervalDays).HasDefaultValue(MaintenanceDefaults.PruneIntervalDays).HasSentinel(-1);
             e.Property(f => f.CheckIntervalDays).HasDefaultValue(MaintenanceDefaults.CheckIntervalDays).HasSentinel(-1);

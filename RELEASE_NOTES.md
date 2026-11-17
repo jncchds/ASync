@@ -2,6 +2,19 @@
 
 ## v0.1.5 — 2026-11-17
 
+- feat: **Add folders from the apps.** The Android and desktop apps have *New folder…* (name; Two-way, Mirror or
+  Backup; the Mirror direction; end-to-end encryption for backups; which of your storage back-ends; the directory on it,
+  filled in from the name; how often it runs; and where it lives on the device, chosen with the phone's folder picker,
+  All files access included) and *Add to a folder…* (one of your folders this device is not in yet, then where it lives
+  here). A new end-to-end backup goes straight into choosing its passphrase; a standard one shows its recovery key once.
+  The folder follows the same rules as in the web UI (no overlapping directories, only storage you may use), shows up
+  there at once marked "added from <device>", and is edited or removed there as usual. Each device has *Adds folders* on
+  the *Devices* page: on for phones and computers added with a one-time code or approved in the browser, off for devices
+  added with a reusable code (scripted agents) and for devices added before this version; with it off, the app says
+  "Allowed in the web UI under Devices". A device can only ever add itself: never other devices, storage settings or
+  your account.
+- fix: a CLI agent in Docker no longer offers its `/config` volume (which holds the device's key) as a place to start
+  browsing from the web UI.
 - feat: **Choose a device's folder from the web instead of typing its path.** *Browse…* next to *Folder on the device*
   (attaching a device to a folder, or changing where it syncs) lets the device itself list its folders, live: home,
   Desktop, Documents, Pictures…, the drives on Windows, mounted disks on Linux and macOS, a phone's internal storage and

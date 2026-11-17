@@ -51,6 +51,12 @@ public class Folder
     public string? LastCheckBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    /// <summary>
+    /// Set when a device created the folder (task 18, "added from &lt;device&gt;" in the web UI): its id and its name then
+    /// (kept as it was: the device may be renamed or removed later). Null = made in the web UI.
+    /// </summary>
+    public Guid? CreatedByDeviceId { get; set; }
+    public string? CreatedByDeviceName { get; set; }
 
     public AppUser? User { get; set; }
     public StorageBackend? StorageBackend { get; set; }

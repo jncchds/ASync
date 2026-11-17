@@ -6,7 +6,8 @@ namespace ASync.Contracts;
 
 public record DeviceDto(
     Guid Id, string Name, DevicePlatform Platform, string? AppVersion,
-    DateTime CreatedAt, DateTime? LastSeenAt, DateTime? RevokedAt, DevicePushDto? Push = null, BrowseAvailability? Browse = null);
+    DateTime CreatedAt, DateTime? LastSeenAt, DateTime? RevokedAt, DevicePushDto? Push = null, BrowseAvailability? Browse = null,
+    bool MayAddFolders = false);
 
 // ── Push (wake-ups, M4-2) ─────────────────────────────────────────────────────
 
@@ -36,7 +37,11 @@ public static class PushWake
     public const string Browse = "browse";
 }
 
-public record RenameDeviceRequest(string Name);
+/// <summary>
+/// A person changing one of their devices (<c>PATCH /api/devices/{id}</c>): its name, and whether it may add folders
+/// itself (<see cref="DeviceDto.MayAddFolders"/>). Null = unchanged.
+/// </summary>
+public record UpdateDeviceRequest(string? Name = null, bool? MayAddFolders = null);
 
 // ── Enrollment codes (QR / typed code), made by a signed-in user ──────────────
 public record CreateEnrollmentRequest(bool Reusable = false, int? ValidMinutes = null, string? Label = null);

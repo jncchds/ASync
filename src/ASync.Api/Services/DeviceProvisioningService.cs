@@ -62,7 +62,8 @@ public class DeviceProvisioningService(
         if (token?.User is null || !token.IsUsable(Now))
             return ServiceResult<EnrolledDto>.Fail("This code is not valid. It may have expired or been used already.");
 
-        var device = NewDevice(token.UserId, req.Name, req.Platform, req.PublicKey, req.AppVersion);
+        // A reusable code provisions scripted CLI agents: those don't add folders unless the person allows it.
+        var device = NewDevice(token.UserId, req.Name, req.Platform, req.PublicKey, req.AppVersion, mayAddFolders: !token.Reusable);
         try
         {
             await devices.EnrollAsync(token, device);
@@ -120,7 +121,7 @@ public class DeviceProvisioningService(
         Device? device = null;
         if (req.Approve)
         {
-            device = NewDevice(userId, pending.Name, pending.Platform, pending.PublicKey, pending.AppVersion);
+            device = NewDevice(userId, pending.Name, pending.Platform, pending.PublicKey, pending.AppVersion, mayAddFolders: true);
             pending.Status = DeviceCodeStatus.Approved;
         }
         else
@@ -202,10 +203,11 @@ public class DeviceProvisioningService(
 
     /// <summary>With its push registration (<see cref="Push.PushService.ToDto"/>) when <paramref name="push"/> is given.</summary>
     public static DeviceDto ToDto(Device d, Push.PushService? push) =>
-        new(d.Id, d.Name, d.Platform, d.AppVersion, d.CreatedAt, d.LastSeenAt, d.RevokedAt, push?.ToDto(d));
+        new(d.Id, d.Name, d.Platform, d.AppVersion, d.CreatedAt, d.LastSeenAt, d.RevokedAt, push?.ToDto(d), MayAddFolders: d.MayAddFolders);
 
-    private Device NewDevice(int userId, string name, DevicePlatform platform, string publicKey, string? appVersion) => new()
+    private Device NewDevice(int userId, string name, DevicePlatform platform, string publicKey, string? appVersion, bool mayAddFolders) => new()
     {
+        MayAddFolders = mayAddFolders,
         Id = Guid.CreateVersion7(),
         UserId = userId,
         Name = name.Trim(),

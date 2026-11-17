@@ -99,6 +99,37 @@ internal sealed class FakeAgent : IAgentConnector, IAgentSession
         return Answer($"init-encryption {folderId}", "ABCD-EFGH-JKMN-PQRS");
     }
 
+    /// <summary>What <c>folder-options</c> answers (task 18).</summary>
+    public DeviceFolderOptionsDto FolderOptions { get; set; } = new(true, null,
+        [new DeviceStorageOptionDto(7, "NAS", StorageBackendType.Sftp, false), new DeviceStorageOptionDto(8, "Server disk", StorageBackendType.Local, true)],
+        [new DeviceJoinableFolderDto(5, "Photos", SyncMode.TwoWay, FolderEncryption.Transport, FolderKind.Files, "NAS", "photos", true, ["laptop"]),
+         new DeviceJoinableFolderDto(6, "Music", SyncMode.Mirror, FolderEncryption.Transport, FolderKind.Files, "NAS", "music", true, []),
+         new DeviceJoinableFolderDto(9, "Vault", SyncMode.Backup, FolderEncryption.EndToEnd, FolderKind.Files, "NAS", "vault", true, ["laptop"])]);
+
+    public DeviceCreateFolderRequest? LastCreate { get; private set; }
+    public string? CreatedRecoveryKey { get; set; }
+    /// <summary>The error create-folder and join-folder answer (null: they succeed).</summary>
+    public Exception? AddFails { get; set; }
+
+    public Task<DeviceFolderOptionsDto> FolderOptionsAsync(CancellationToken ct) => Answer("folder-options", FolderOptions);
+
+    public Task<FolderAddedDto> CreateFolderAsync(DeviceCreateFolderRequest request, CancellationToken ct)
+    {
+        LastCreate = request;
+        if (AddFails is { } e) { Calls.Add("create-folder"); return Task.FromException<FolderAddedDto>(e); }
+        return Answer($"create-folder {request.Folder.Name} {request.Folder.Mode} {request.Folder.Encryption} {request.Folder.StorageBackendId} {request.Folder.RootPath} " +
+                      $"{request.Folder.IntervalMinutes} {request.LocalPath} {request.Direction?.ToString() ?? "-"}",
+            new FolderAddedDto(42, $"\"{request.Folder.Name}\" was created.", CreatedRecoveryKey));
+    }
+
+    public Task<FolderAddedDto> JoinFolderAsync(int folderId, string path, MirrorDirection? direction, CancellationToken ct)
+    {
+        if (AddFails is { } e) { Calls.Add("join-folder"); return Task.FromException<FolderAddedDto>(e); }
+        return Answer($"join-folder {folderId} {path} {direction?.ToString() ?? "-"}", new FolderAddedDto(folderId, "joined"));
+    }
+
+    public Task<string> LeaveFolderAsync(int folderId, CancellationToken ct) => Answer($"leave-folder {folderId}", "left");
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 

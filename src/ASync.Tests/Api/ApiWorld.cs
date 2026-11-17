@@ -38,6 +38,9 @@ public sealed class ApiWorld : IAsyncLifetime
 
     private readonly string _database = $"async_api_{Guid.NewGuid():N}";
     private readonly TempDir _storage = new();
+
+    /// <summary>Where Local back-ends may live (Storage:LocalRoots).</summary>
+    public string StorageRoot => _storage.Path;
     public Factory Server { get; private set; } = null!;
 
     public HttpClient Client { get; private set; } = null!;
@@ -114,9 +117,9 @@ public sealed class ApiWorld : IAsyncLifetime
     }
 
     /// <summary>Enrolls a device for the person with an enrollment code and signs it in (challenge + signature).</summary>
-    private async Task<(Guid Id, string Token)> EnrollAsync(string personToken, string name)
+    public async Task<(Guid Id, string Token)> EnrollAsync(string personToken, string name, bool reusable = false)
     {
-        var code = await PostAsync<EnrollmentCreatedDto>("api/devices/enrollments", new CreateEnrollmentRequest(), personToken);
+        var code = await PostAsync<EnrollmentCreatedDto>("api/devices/enrollments", new CreateEnrollmentRequest(Reusable: reusable), personToken);
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var enrolled = await PostAsync<EnrolledDto>("api/device-auth/enroll",
             new EnrollRequest(code.Code, name, DevicePlatform.Linux, Convert.ToBase64String(key.ExportSubjectPublicKeyInfo())), null);

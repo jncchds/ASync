@@ -330,7 +330,10 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         {
             AllowMassDeletion = _options.AllowMassDeletion, LocalTrees = _options.LocalTrees, Conditions = _options.Conditions,
             SettleTime = _options.SettleTime, RunAtStart = _options.RunAtStart, RunOnInterval = _options.RunOnInterval,
-            Browser = _options.Browse is { } scope ? new DeviceBrowser(scope, () => BrowsingAllowed) : null,
+            // The config directory (the device's key; the Docker image's /config volume) is never offered as a starting point.
+            Browser = _options.Browse is { } scope
+                ? new DeviceBrowser(scope is DesktopBrowseScope desktop ? desktop.Hiding(_store.Root) : scope, () => BrowsingAllowed)
+                : null,
         };
         agent.StatusChanged += () => Publish(StatusEvent());
         agent.BrowseRequested += () => Interlocked.Exchange(ref _lastBrowseTicks, DateTimeOffset.UtcNow.UtcTicks);
@@ -735,6 +738,65 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         _logger.LogInformation("\"{Name}\": end-to-end encryption set up on this device.", folder.Name);
         await agent.ReloadAsync(ct); // RepositoryReady: the folder's worker starts again and backs up
         return recovery;
+    }
+
+    // ── Adding folders from the device (task 18) ──────────────────────────────
+
+    /// <summary>The server's refusal as it is (403 "turned off", overlapping roots, a changed folder…), an unreachable server, an older server.</summary>
+    private static async Task<T> AskServerAsync<T>(Func<Task<T>> call)
+    {
+        try { return await call(); }
+        // An older server has no such route: a bare 404/405 (ours always say why).
+        catch (ApiException e) when (e.Status is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.MethodNotAllowed
+                                     && e.Message.StartsWith("The server answered", StringComparison.Ordinal))
+        {
+            throw new ControlException("The server cannot add folders from devices yet: update it.");
+        }
+        catch (ApiException e) { throw new ControlException(e.Message); }
+        catch (HttpRequestException e) { throw new ControlException($"Cannot reach the server, so nothing was changed: {e.Message}"); }
+    }
+
+    public Task<DeviceFolderOptionsDto> FolderOptionsAsync(CancellationToken ct)
+    {
+        var (_, api) = Running();
+        return AskServerAsync(() => api.GetFolderOptionsAsync(ct));
+    }
+
+    public async Task<FolderAddedDto> CreateFolderAsync(DeviceCreateFolderRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.LocalPath)) throw new ControlException("Choose where the folder lives on this device.");
+        if (_options.LocalTrees.Validate(request.LocalPath) is { } invalid) throw new ControlException(invalid);
+        var (agent, api) = Running();
+        var created = await AskServerAsync(() => api.CreateFolderAsync(request, ct));
+        _logger.LogInformation("Created the folder \"{Name}\" ({Mode}) from this device at {Path}.", created.Folder.Name, created.Folder.Mode, created.Folder.LocalPath);
+        await agent.ReloadAsync(ct);
+        var folder = created.Folder;
+        var message = folder is { Mode: SyncMode.Backup, Encryption: FolderEncryption.EndToEnd }
+            ? $"\"{folder.Name}\" was created. Set up its encryption to start the backups."
+            : $"\"{folder.Name}\" was created and {(folder.Mode == SyncMode.Backup ? "backs up" : "syncs")} {folder.LocalPath}.";
+        return new FolderAddedDto(folder.FolderId, message, created.RecoveryKey);
+    }
+
+    public async Task<FolderAddedDto> JoinFolderAsync(int folderId, string path, MirrorDirection? direction, CancellationToken ct)
+    {
+        if (_options.LocalTrees.Validate(path) is { } invalid) throw new ControlException(invalid);
+        var (agent, api) = Running();
+        var joined = await AskServerAsync(() => api.JoinFolderAsync(folderId, new DeviceJoinFolderRequest(path, direction), ct));
+        _logger.LogInformation("Joined the folder \"{Name}\" at {Path}.", joined.Name, joined.LocalPath);
+        await agent.ReloadAsync(ct);
+        var message = joined.Encryption == FolderEncryption.EndToEnd
+            ? joined.RepositoryReady ? $"This device is now part of \"{joined.Name}\". Unlock it to back up." : $"This device is now part of \"{joined.Name}\". Set up its encryption to start."
+            : $"This device now {(joined.Mode == SyncMode.Backup ? "backs up" : "syncs")} \"{joined.Name}\" at {joined.LocalPath}.";
+        return new FolderAddedDto(joined.FolderId, message);
+    }
+
+    public async Task<string> LeaveFolderAsync(int folderId, CancellationToken ct)
+    {
+        var (agent, api) = Running();
+        var folder = await FolderAsync(api, folderId, ct);
+        await AskServerAsync(async () => { await api.LeaveFolderAsync(folderId, ct); return true; });
+        await agent.ReloadAsync(ct);
+        return $"This device no longer syncs \"{folder.Name}\". Its files here and on the server stay.";
     }
 
     public Task<string> CancelAsync(int? folderId, CancellationToken ct)

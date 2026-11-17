@@ -76,6 +76,24 @@ public static class Format
         _ => "Backup",
     };
 
+    /// <summary>A folder's mode without a device's direction (a folder to join).</summary>
+    public static string Mode(SyncMode mode) => mode switch
+    {
+        SyncMode.TwoWay => "Two-way",
+        SyncMode.Mirror => "Mirror",
+        _ => "Backup",
+    };
+
+    public static string StorageType(StorageBackendType type) => type switch
+    {
+        StorageBackendType.Local => "server disk",
+        StorageBackendType.S3 => "S3",
+        StorageBackendType.WebDav => "WebDAV",
+        StorageBackendType.Sftp => "SFTP",
+        StorageBackendType.Smb => "SMB",
+        _ => type.ToString(),
+    };
+
     public static string State(AgentState state) => state switch
     {
         AgentState.Connected => "Connected",

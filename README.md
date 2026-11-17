@@ -55,6 +55,8 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
     folders also get a direction for each device. Devices can be paused.
   - **Browse…** next to the local folder picks it on the device itself instead of typing the path: see
     [Choosing a device's folder from the web](#choosing-a-devices-folder-from-the-web).
+  - Folders can also be created from the apps, which then show *added from <device>*: see
+    [Adding folders from the apps](#adding-folders-from-the-apps).
   - If someone else changed a folder while you were editing it, you are asked to reload instead of
     overwriting their change.
   - End-to-end encrypted folders show the command that sets them up on a device.
@@ -143,6 +145,41 @@ Nothing is stored: the server passes the listing from the device to your browser
 (not other people, admins included, and not devices themselves). To turn it off for a device: *Settings → Allow browsing
 folders from the web* in the desktop or Android app, or `async-cli browsing --off`; `async-cli run --no-browse` or
 `ASYNC_ALLOW_BROWSE=0` (e.g. in the Docker image's environment) keeps it off for that agent, whatever the setting.
+An agent's own config directory (the Docker image's `/config`, which holds the device's key) is never offered as a
+starting point.
+
+### Adding folders from the apps
+
+<p>
+  <img src="docs/screenshots/android-add-folder-new-light.png" alt="New folder on the phone" width="24%">
+  <img src="docs/screenshots/android-add-folder-join-dark.png" alt="Adding the phone to one of your folders, dark" width="24%">
+  <img src="docs/screenshots/desktop-add-folder-light.png" alt="New folder in the desktop app" width="44%">
+</p>
+
+You don't need a computer to start syncing a new folder from your phone. The Android and desktop apps have:
+
+- **New folder…** above the folder cards: a name; *Two-way*, *Mirror* (and which side is the original) or *Backup*;
+  end-to-end encryption for backups; which of your storage to put it on; the directory there (filled in from the name);
+  how often it runs; and where it lives on the device, chosen with the folder picker (on a phone with
+  [All files access](#folders-anywhere-on-the-phone) anywhere on the phone, otherwise with Android's picker). A new
+  end-to-end backup asks for its passphrase right away and shows its recovery key once; a standard backup shows its
+  recovery key once.
+- **Add to a folder…**: pick one of your folders this device is not part of yet (it shows its mode, storage and
+  devices), then where it lives here. An end-to-end folder then asks for its passphrase to unlock it.
+
+The folder follows the same rules as in the web UI (no folder inside another on the same storage, only storage you may
+use) and appears there at once, marked *added from <device>*; retention, excludes and the other settings, and deleting
+it, are done in the web UI as usual.
+
+<p>
+  <img src="docs/screenshots/light-17-devices-adds-folders.png" alt="The Devices page with the Adds folders switch" width="64%">
+</p>
+
+**Which devices may do it** is up to you: the *Devices* page has *Adds folders* per device. It is on for phones and
+computers you added with a one-time code or approved in the browser, and off for devices added with a reusable code
+(scripted agents) and for devices added before this version. When it is off, the app says *Allowed in the web UI under
+Devices*. A device can only ever add *itself* to your folders, never another device, and it never sees your storage's
+settings or passwords, other people's folders, or your account.
 
 ## Known limits
 
@@ -359,7 +396,9 @@ same one as `async-cli service install`), so it carries on with the window close
   LaunchAgent on macOS, a logon task on Windows; a stopped one is started by itself). Then enter the server's address
   and either the code from *Devices → Add device* (pasting the `async://pair…` link of its QR code fills in both), or
   choose *Approve in the browser*: the app shows a code and opens the server's approval page.
-- **Folders:** attach folders to the device in the web UI and they appear in the app at once, with their mode, whether
+- **Folders:** create one with *New folder…*, add the computer to one of yours with *Add to a folder…* (see
+  [Adding folders from the apps](#adding-folders-from-the-apps)), or attach folders to the device in the web UI: they
+  appear in the app at once, with their mode, whether
   they are end-to-end encrypted, the local folder, what they are doing (with files and bytes while syncing), the last
   result, the next run, and whether the server considers the device overdue or failing for them. *Sync now*, *Pause*,
   *Open folder* and *Change folder…* (a folder picker) per folder; *Sync all now* and *Pause all* for everything.
@@ -452,8 +491,9 @@ no web UI buttons there.
   phone shows a short code to enter in the web UI there (*Devices → Approve*). The phone's key is made in
   the Android Keystore (in its secure hardware where it has some) and never leaves it; what the app stores about the
   device is encrypted with another Keystore key.
-- **Folders:** attach a folder to the phone in the web UI on your computer (any local path will do: the phone asks), then
-  *Choose folder…* on the phone picks where it lives: anywhere on the phone with *All files access* (see
+- **Folders:** create one on the phone with *New folder…*, or add the phone to one of yours with *Add to a folder…* (see
+  [Adding folders from the apps](#adding-folders-from-the-apps)). Or attach a folder to the phone in the web UI on your
+  computer (any local path will do: the phone asks), then *Choose folder…* on the phone picks where it lives: anywhere on the phone with *All files access* (see
   [Folders anywhere on the phone](#folders-anywhere-on-the-phone)), or with Android's own folder picker (internal
   storage, an SD card, a USB drive, or another app's storage, but not their top level or Download). Two-way, Mirror and Backup folders work there; *Sync now*, pause and resume, live progress,
   unlocking end-to-end folders, and the settings (theme, sign out) as on the desktop. A **new end-to-end folder** is set up

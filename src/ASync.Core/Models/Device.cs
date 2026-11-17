@@ -21,6 +21,14 @@ public class Device
     public DateTime? RevokedAt { get; set; }
 
     /// <summary>
+    /// Whether the device may add folders itself (task 18): create a folder of its owner with itself attached, join one of
+    /// the owner's folders, leave one. The person switches it on the Devices page. On for devices enrolled with a one-time
+    /// code or the device-code flow (phones, desktops), off for reusable codes (scripted CLI agents) and for devices from
+    /// before the setting. Never more than that: no other devices, no storage back-ends, no account.
+    /// </summary>
+    public bool MayAddFolders { get; set; }
+
+    /// <summary>
     /// Where the server can wake this device (M4-2): a UnifiedPush endpoint the device's distributor (ntfy, say) gave it.
     /// Null = no push; the device relies on its own scheduling. The URL is a capability: anyone holding it can wake the
     /// app, so it is never shown in full. Later also relay/APNs/FCM tokens (<see cref="PushType"/>).

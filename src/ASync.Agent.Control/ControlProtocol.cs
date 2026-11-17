@@ -73,6 +73,23 @@ public static class ControlProtocol
         /// directory and tells the server. <see cref="AgentStatusDto.Browsing"/> shows the setting.
         /// </summary>
         public const string SetBrowsing = "set-browsing";
+
+        // Added for adding folders from the apps (task 18, still protocol 1).
+
+        /// <summary>
+        /// What this device may do about folders: <see cref="ControlResponse.FolderOptions"/> (the storage back-ends it may
+        /// create folders on, the owner's folders it could join, or why it may not).
+        /// </summary>
+        public const string FolderOptions = "folder-options";
+        /// <summary>
+        /// Create a folder of the owner with this device attached (<c>newFolder</c>). The answer's <see cref="ControlResponse.FolderId"/>
+        /// is the new folder, <see cref="ControlResponse.RecoveryKey"/> a Transport Backup folder's recovery key (shown once).
+        /// </summary>
+        public const string CreateFolder = "create-folder";
+        /// <summary>Attach this device to one of the owner's folders (<c>folderId</c>, <c>path</c>, <c>direction</c> for Mirror).</summary>
+        public const string JoinFolder = "join-folder";
+        /// <summary>Detach this device from a folder (<c>folderId</c>); the folder and its data stay.</summary>
+        public const string LeaveFolder = "leave-folder";
     }
 }
 
@@ -99,6 +116,10 @@ public sealed record ControlRequest
     public RunConditionsDto? Conditions { get; init; }
     /// <summary><c>set-browsing</c>: allow browsing from the web UI.</summary>
     public bool? Enabled { get; init; }
+    /// <summary><c>create-folder</c>: the folder and where it lives on this device.</summary>
+    public DeviceCreateFolderRequest? NewFolder { get; init; }
+    /// <summary><c>join-folder</c>: which way a Mirror folder copies on this device.</summary>
+    public MirrorDirection? Direction { get; init; }
 }
 
 public sealed record ControlResponse
@@ -116,6 +137,10 @@ public sealed record ControlResponse
     public PendingEnrollmentDto? Enrollment { get; init; }
     /// <summary><c>init-encryption</c>: the new folder's recovery key (shown once; never logged).</summary>
     public string? RecoveryKey { get; init; }
+    /// <summary><c>folder-options</c>: what this device may do about folders.</summary>
+    public DeviceFolderOptionsDto? FolderOptions { get; init; }
+    /// <summary><c>create-folder</c>, <c>join-folder</c>: the folder.</summary>
+    public int? FolderId { get; init; }
 }
 
 /// <summary>A line of the event stream.</summary>
@@ -143,6 +168,9 @@ public sealed record ControlEvent
     public FolderStatusDto? Folder { get; init; }
     public FolderRunDto? Result { get; init; }
 }
+
+/// <summary>A folder this device created or joined: its id, what happened (for people) and a new Transport Backup folder's recovery key.</summary>
+public sealed record FolderAddedDto(int FolderId, string Message, string? RecoveryKey = null);
 
 public sealed record HelloDto(int Protocol, string AgentVersion, int ProcessId, AgentMode Mode, string ConfigDirectory);
 

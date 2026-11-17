@@ -106,6 +106,22 @@ public sealed class ControlClient : IAsyncDisposable
     public async Task<string> SetBrowsingAsync(bool enabled, CancellationToken ct = default) =>
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.SetBrowsing, Enabled = enabled }, ct)).Message ?? "";
 
+    public async Task<DeviceFolderOptionsDto> FolderOptionsAsync(CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.FolderOptions }, ct)).FolderOptions
+        ?? throw new InvalidDataException("No folder options in the answer.");
+
+    public async Task<FolderAddedDto> CreateFolderAsync(DeviceCreateFolderRequest request, CancellationToken ct = default) =>
+        Added(await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.CreateFolder, NewFolder = request }, ct));
+
+    public async Task<FolderAddedDto> JoinFolderAsync(int folderId, string path, MirrorDirection? direction, CancellationToken ct = default) =>
+        Added(await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.JoinFolder, FolderId = folderId, Path = path, Direction = direction }, ct));
+
+    public async Task<string> LeaveFolderAsync(int folderId, CancellationToken ct = default) =>
+        (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.LeaveFolder, FolderId = folderId }, ct)).Message ?? "";
+
+    private static FolderAddedDto Added(ControlResponse r) =>
+        new(r.FolderId ?? throw new InvalidDataException("No folder in the answer."), r.Message ?? "", r.RecoveryKey);
+
     public async Task<string> CancelAsync(int? folderId, CancellationToken ct = default) =>
         (await SendAsync(new ControlRequest { Op = ControlProtocol.Ops.Cancel, FolderId = folderId }, ct)).Message ?? "";
 

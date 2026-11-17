@@ -57,7 +57,7 @@ public class FolderService(
         f.CreatedAt, f.PruneIntervalDays, f.CheckIntervalDays, f.CheckReadDataPercent,
         f.LastPruneAt is { } pruned ? new MaintenanceStatusDto(pruned, f.LastPruneOk == true, f.LastPruneMessage, f.LastPruneBy) : null,
         f.LastCheckAt is { } checkedAt ? new MaintenanceStatusDto(checkedAt, f.LastCheckOk == true, f.LastCheckMessage, f.LastCheckBy) : null,
-        f.RecoveryKeyCreatedAt);
+        f.RecoveryKeyCreatedAt, AddedFromDevice: f.CreatedByDeviceName);
 
     public static DeviceFolderDto ToDeviceDto(Folder f, FolderDevice m) => new(
         f.Id, f.Name, f.Mode, f.Encryption, f.Kind, f.IntervalMinutes, f.Excludes, Retention(f), f.VersionsKeepDays, f.TrashKeepDays,
@@ -76,8 +76,26 @@ public class FolderService(
     /// <summary>A new folder, and the recovery key of the repository made for it (shown to the person once; null when none was made).</summary>
     public record CreatedFolder(Folder Folder, string? RecoveryKey);
 
-    public async Task<ServiceResult<CreatedFolder>> CreateAsync(int userId, SaveFolderRequest req, CancellationToken ct)
+    /// <summary>
+    /// The device that creates a folder itself (task 18): attached at once at <paramref name="LocalPath"/>, in the same
+    /// save as the folder, and named as where the folder came from.
+    /// </summary>
+    public record FirstDevice(Device Device, string LocalPath, MirrorDirection? Direction);
+
+    /// <summary>
+    /// Creates a folder of <paramref name="userId"/>: the web UI's, or a device's (<paramref name="firstDevice"/>, which must
+    /// belong to that person and be allowed to; the caller checks <see cref="DeviceMayAddFolders"/>). The same rules for both.
+    /// </summary>
+    public async Task<ServiceResult<CreatedFolder>> CreateAsync(int userId, SaveFolderRequest req, CancellationToken ct, FirstDevice? firstDevice = null)
     {
+        if (firstDevice is not null)
+        {
+            if (firstDevice.Device.UserId != userId || firstDevice.Device.RevokedAt is not null)
+                return ServiceResult<CreatedFolder>.Fail("Choose one of your devices.");
+            // Before anything is made on the storage: a refused membership must not leave a repository behind.
+            if (ValidateMembership(req.Mode, firstDevice.LocalPath, firstDevice.Direction) is { } badMembership)
+                return ServiceResult<CreatedFolder>.Fail(badMembership);
+        }
         var backend = await backends.GetAsync(req.StorageBackendId);
         if (backend is null || !StorageBackendService.CanUse(backend, userId))
             return ServiceResult<CreatedFolder>.Fail("Choose one of your storage back-ends.");
@@ -121,8 +139,16 @@ public class FolderService(
             Revision = 1,
             CreatedAt = Now,
             UpdatedAt = Now,
+            CreatedByDeviceId = firstDevice?.Device.Id,
+            CreatedByDeviceName = firstDevice?.Device.Name,
         };
         Apply(folder, req);
+        if (firstDevice is { } first)
+            folder.Devices.Add(new FolderDevice
+            {
+                DeviceId = first.Device.Id, Device = first.Device, LocalPath = first.LocalPath.Trim(),
+                Direction = folder.Mode == SyncMode.Mirror ? first.Direction : null, AttachedAt = Now,
+            });
 
         string? recoveryKey = null;
         if (folder.Mode == SyncMode.Backup && folder.Encryption == FolderEncryption.Transport)
@@ -157,6 +183,12 @@ public class FolderService(
         if (adoptWith is not null)
             logger.LogInformation("Folder {FolderId} took over the existing repository at {Root} on back-end {BackendId}.",
                 folder.Id, folder.RootPath, folder.StorageBackendId);
+        if (firstDevice is not null)
+            logger.LogInformation("Folder {FolderId} ({Mode}) was created by device {DeviceId} for user {UserId}.",
+                folder.Id, folder.Mode, firstDevice.Device.Id, userId);
+        // The owner's other pages, and the device that made it (its agent loads the new folder).
+        await notifier.ToDevicesAsync(folder.Devices.Select(d => d.DeviceId), SyncEvents.ConfigChanged);
+        await notifier.ToUserAsync(userId, SyncEvents.ConfigChanged);
         return ServiceResult<CreatedFolder>.Ok(new CreatedFolder(folder, recoveryKey));
     }
 
@@ -324,7 +356,7 @@ public class FolderService(
         var device = await devices.GetAsync(req.DeviceId);
         if (device is null || device.UserId != folder.UserId || device.RevokedAt is not null)
             return ServiceResult<Folder>.Fail("Choose one of your devices.");
-        if (ValidateMembership(folder, req.LocalPath, req.Direction) is { } invalid) return ServiceResult<Folder>.Fail(invalid);
+        if (ValidateMembership(folder.Mode, req.LocalPath, req.Direction) is { } invalid) return ServiceResult<Folder>.Fail(invalid);
 
         var membership = folder.Devices.FirstOrDefault(d => d.DeviceId == req.DeviceId);
         if (membership is null)
@@ -358,7 +390,7 @@ public class FolderService(
         if (req.ExpectedRevision is long expected && expected != folder.Revision) return ServiceResult<Folder>.Fail(Conflict);
         var path = req.LocalPath?.Trim() ?? membership.LocalPath;
         var direction = req.Direction ?? membership.Direction;
-        if (ValidateMembership(folder, path, direction) is { } invalid) return ServiceResult<Folder>.Fail(invalid);
+        if (ValidateMembership(folder.Mode, path, direction) is { } invalid) return ServiceResult<Folder>.Fail(invalid);
         membership.LocalPath = path;
         membership.Direction = folder.Mode == SyncMode.Mirror ? direction : null;
         if (req.Paused is bool paused)
@@ -371,11 +403,53 @@ public class FolderService(
         return ServiceResult<Folder>.Ok(folder);
     }
 
-    private static string? ValidateMembership(Folder folder, string? localPath, MirrorDirection? direction)
+    private static string? ValidateMembership(SyncMode mode, string? localPath, MirrorDirection? direction)
     {
         if (string.IsNullOrWhiteSpace(localPath) || localPath.Length > 1000) return "Choose the folder's location on the device.";
-        if (folder.Mode == SyncMode.Mirror && direction is null) return "Choose whether this device uploads or downloads.";
+        if (mode == SyncMode.Mirror && direction is null) return "Choose whether this device uploads or downloads.";
         return null;
+    }
+
+    // ── Devices adding folders themselves (task 18) ───────────────────────────
+
+    /// <summary>What a device whose "May add folders" is off is told (403).</summary>
+    public const string DeviceMayNotAddFolders =
+        "Adding folders from this device is turned off. Allowed in the web UI under Devices (\"May add folders\").";
+
+    /// <summary>Null when the device may add, join and leave folders; otherwise why not.</summary>
+    public static string? DeviceMayAddFolders(Device? device) =>
+        device is null || device.RevokedAt is not null ? "This device was removed from the account."
+        : !device.MayAddFolders ? DeviceMayNotAddFolders
+        : null;
+
+    public const string AlreadyMember = "This device already syncs this folder.";
+
+    /// <summary>
+    /// The device joins one of its owner's folders: <see cref="AttachDeviceAsync"/> for itself only, refusing a folder it is
+    /// already part of (its own settings change with <see cref="UpdateMembershipAsync"/>).
+    /// </summary>
+    public Task<ServiceResult<Folder>> JoinAsync(Folder folder, Device device, DeviceJoinFolderRequest req)
+    {
+        if (folder.UserId != device.UserId) return Task.FromResult(ServiceResult<Folder>.Fail("Choose one of your folders."));
+        if (folder.Devices.Any(d => d.DeviceId == device.Id)) return Task.FromResult(ServiceResult<Folder>.Fail(AlreadyMember));
+        return AttachDeviceAsync(folder, new AttachDeviceRequest(device.Id, req.LocalPath ?? "", req.Direction, ExpectedRevision: req.ExpectedRevision));
+    }
+
+    /// <summary>The owner's folders a device may join (it is not part of them yet), and the back-ends it may create folders on.</summary>
+    public async Task<DeviceFolderOptionsDto> OptionsAsync(Device? maybe)
+    {
+        if (DeviceMayAddFolders(maybe) is { } refusal || maybe is not { } device) return new DeviceFolderOptionsDto(false, DeviceMayAddFolders(maybe), [], []);
+        var storages = (await backends.GetVisibleAsync(device.UserId))
+            .Where(b => StorageBackendService.CanUse(b, device.UserId))
+            .OrderBy(b => b.IsShared).ThenBy(b => b.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(b => new DeviceStorageOptionDto(b.Id, b.Name, b.Type, b.IsShared))
+            .ToList();
+        var joinable = (await folders.GetForUserAsync(device.UserId))
+            .Where(f => f.Devices.All(d => d.DeviceId != device.Id))
+            .Select(f => new DeviceJoinableFolderDto(f.Id, f.Name, f.Mode, f.Encryption, f.Kind, f.StorageBackend?.Name ?? "", f.RootPath, f.RepositoryReady,
+                [.. f.Devices.Where(d => d.Device?.RevokedAt is null).Select(d => d.Device?.Name ?? "").Order(StringComparer.CurrentCultureIgnoreCase)]))
+            .ToList();
+        return new DeviceFolderOptionsDto(true, null, storages, joinable);
     }
 
     public async Task RecordReportAsync(FolderDevice membership, SyncReportRequest report)
