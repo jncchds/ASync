@@ -352,7 +352,7 @@ Listing accounts and calendars from the web is the same phone setting as browsin
   TestFlight yet), and the sideloaded build cannot be woken by the server. See [Background sync on iOS](#background-sync-on-ios).
 - On an iPhone, *Hidden* photos, *Shared Albums* and a burst's other photos are not backed up, a restore brings edits back as the
   original (their render stays in the snapshot), and a *Chosen albums* selection is chosen again on a new or wiped iPhone (iOS
-  gives its albums new ids). Photo backup was tried on the simulator, not yet with a real iCloud library.
+  gives its albums new ids). Photo backup was tried on the simulator (CI), not yet on an iPhone or with a real iCloud library.
 
 What comes next is listed in [AGENTS.md](AGENTS.md) under "Milestones and current stage" (the mobile apps).
 

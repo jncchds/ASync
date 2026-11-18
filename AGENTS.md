@@ -3271,6 +3271,19 @@ contacts and calendars part is `scripts/smoke-android-collections.sh`): see its 
      8–10's storage permission and legacy storage, real USB drives and SD cards (the emulator's virtual SD card stands in),
      an OEM Settings without the per-app page (the fallback page).
      Next: the VFS on the desktops (Cloud Files, File Provider, FUSE), photos/contacts/calendars, iOS.
+   - **M4-11 iOS photos (task 23, done):** see "Photos and videos" → "iOS photos (task 23)": PhotoKit behind `IPhotoKit`, the
+     mapping (ids, user and smart albums, roles, per-resource times, sizes), streamed reads, iCloud-only originals left for a
+     later run (never taken for deleted, the folder's Wi-Fi rule and a local setting), limited access with the system's picker, a
+     debounced change observer, restores with Live Photo pairs and albums; no server, Contracts or format change. Verified in CI
+     run 44223187756 (iOS 26.5 simulator, `scripts/smoke-ios-photos.sh`): every photo check, among them the album list over the
+     hub, a backup checked offline with async-cli (byte-identical originals, `ios-photokit` sidecars with both albums and the
+     location), real limited access, the observer's own run, an older snapshot keeping a photo taken out of its album, restores
+     with the photos there and into a wiped library, twice without duplicates. Runs 44200303312, 44204556721, 44209926263,
+     44214575368 and 44218918486 found the simulator's permission problem (TCC auth version 2, see the gotchas), the simulator's own
+     sample photos and iOS's launch-time limited-access alert. Task 22's "task result" check failed in runs 3 to 6 (the hub event
+     ran the folder first, or `lastTask` was read before the task wrote it): a race in that check, not in the photo work. Not
+     exercised: a real iPhone, a real iCloud library, Live Photos, edits and RAW on a device (the Linux tests cover their mapping
+     and restore), deleting a photo (iOS asks for confirmation).
    - **M4-10 iOS background work (task 22, done):** see "iOS background work (task 22)": BGTaskScheduler refresh and processing
      tasks from `BackgroundPlanner`, the agent's own interval off, background time around runs, run conditions from
      NWPathMonitor/UIDevice/Low Power Mode, the reminder (provisional notification authorization), the shared background card in
