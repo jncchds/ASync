@@ -318,11 +318,27 @@ internal static class CollectionsAutomation
         return JsonSerializer.Serialize(new { deleted }, Json);
     }
 
-    private static string DumpContacts() => JsonSerializer.Serialize(All().Select(c => new
+    private static string DumpContacts() => JsonSerializer.Serialize(new
     {
-        c.Identifier, given = c.GivenName, family = c.FamilyName, org = c.OrganizationName, photo = c.ImageDataAvailable,
-        phones = c.PhoneNumbers.Select(p => new { p.Label, value = p.Value.StringValue }), emails = c.EmailAddresses.Select(e => e.Value.ToString()),
-    }), Json);
+        contacts = All().Select(c => new
+        {
+            c.Identifier, given = c.GivenName, family = c.FamilyName, org = c.OrganizationName, photo = c.ImageDataAvailable,
+            phones = c.PhoneNumbers.Select(p => new { p.Label, value = p.Value.StringValue }), emails = c.EmailAddresses.Select(e => e.Value.ToString()),
+        }),
+        groups = (Contacts.GetGroups(null, out _) ?? []).Select(g => new
+        {
+            g.Name,
+            members = Members(g.Identifier),
+        }),
+    }, Json);
+
+    private static int Members(string groupId)
+    {
+        var n = 0;
+        using var request = new CNContactFetchRequest(new INativeObject[] { CNContactKey.Identifier }) { Predicate = CNContact.GetPredicateForContactsInGroup(groupId) };
+        Contacts.EnumerateContacts(request, out _, (CNContact _, ref bool _) => n++);
+        return n;
+    }
 
     private static string DumpCalendar()
     {

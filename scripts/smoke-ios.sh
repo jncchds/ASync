@@ -22,8 +22,11 @@
 #   `xcrun simctl push` to the suspended app; photos and videos (task 23, scripts/smoke-ios-photos.sh: test media added with
 #   `simctl addmedia`, the permission's explanation and iOS's question, limited access, the album list over the hub, a backup
 #   of one album checked offline with async-cli, a favourite reading nothing again, the change observer's own run, an older
-#   snapshot keeping a photo taken out of the album, restores into the library with and without the photos there); the app
-#   restarted (identity and folders survive, it signs in again).
+#   snapshot keeping a photo taken out of the album, restores into the library with and without the photos there); contacts
+#   and calendars (task 24, scripts/smoke-ios-collections.sh: the explanations, access granted, contacts and events seeded
+#   through the frameworks, the live lists over the hub, backups checked offline with async-cli, a changed contact's own run,
+#   everything deleted and restored twice without duplicates, limited contacts access); the app restarted (identity and
+#   folders survive, it signs in again).
 #
 # Needs: macOS with Xcode and a simulator runtime, the .NET SDK with the ios workload, jq, python3, Homebrew's PostgreSQL
 # (PG_BIN=…/bin, default: brew --prefix postgresql@16). From the repository root:
@@ -393,6 +396,9 @@ answer=$(ctl "bg-wake test")
 # after the app went to the background; a change made on the server meanwhile arrives.
 answer=$(ctl "bg-simulate refresh")
 note "iOS's own simulated task launch: $answer (it needs a pending request, which the simulator refuses)"
+# The task's own result, not an earlier one: the hub's event may bring the file before the task runs (12 s on), and the task
+# writes lastTask only when its runs end, so the check waits for a new "Refresh at …" (task 24: the old single read raced).
+task_before=$(bg | jq -r '.lastTask // ""')
 ctl "bg-run refresh 12 $sync_id" >/dev/null
 to_back
 echo "made on the server while the iPhone app was in the background" >"$work/cli-docs/from-background.txt"
@@ -404,6 +410,8 @@ else
 fi
 sleep 3
 in_front
+task_reported() { local t; t=$(bg | jq -r '.lastTask // ""'); [[ "$t" == "Refresh at "* && "$t" != "$task_before" ]]; }
+wait_for 90 task_reported || true
 jq -e '.lastTask | test("^Refresh at .*: done .*Phone docs")' <<<"$(bg)" >/dev/null && pass "the task reported done: $(bg | jq -r .lastTask)" || fail "task result" "$(bg | jq -r .lastTask)"
 
 # A real (simulated) push to the suspended app: xcrun simctl push, a change waiting on the server.
@@ -431,6 +439,10 @@ wait_for 30 test -f "$docs/Sync/pushed.txt" && pass "opening the app syncs (push
 # Photos and videos (task 23): its own file, sourced here (it uses these helpers and the enrolled iPhone).
 # shellcheck source=scripts/smoke-ios-photos.sh
 source "$root/scripts/smoke-ios-photos.sh"
+
+# Contacts and calendars (task 24): its own file too.
+# shellcheck source=scripts/smoke-ios-collections.sh
+source "$root/scripts/smoke-ios-collections.sh"
 
 section "restart"
 launch 2
@@ -460,6 +472,19 @@ if [[ -n "$shots" ]]; then
   ctl photos-ask >/dev/null
   sleep 3
   shot_system photos-permission-dialog
+  # The same for contacts and calendars (task 24), each from a fresh launch so the questions do not stack.
+  xcrun simctl privacy "$udid" reset contacts "$bundle" >/dev/null 2>&1 || true
+  xcrun simctl privacy "$udid" reset calendar "$bundle" >/dev/null 2>&1 || true
+  launch 11
+  ctl "notifications off" >/dev/null
+  ctl "pim-ask contacts" >/dev/null
+  sleep 3
+  shot_system contacts-permission-dialog
+  launch 12
+  ctl "notifications off" >/dev/null
+  ctl "pim-ask calendars" >/dev/null
+  sleep 3
+  shot_system calendars-permission-dialog
 fi
 
 # The very last: iOS's notification question (the dashboard prompt's Allow asks it); simctl cannot answer it.
