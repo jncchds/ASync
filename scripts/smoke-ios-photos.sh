@@ -118,16 +118,82 @@ tcc_write() { # AUTH_VALUE RUN: the photos row set while the simulator is shut d
   echo "app: $(photos | jq -c '{access, authorization, addOnly}')" >>"$logs/privacy.log"
 }
 tcc_rows "before"
+system_log() { # NAME: what tccd and the photo library daemons said in the last minutes
+  xcrun simctl spawn "$udid" log show --last 4m --style compact \
+    --predicate 'process == "tccd" OR process == "assetsd" OR process == "photolibraryd" OR subsystem == "com.apple.TCC" OR subsystem BEGINSWITH "com.apple.photos"' \
+    >"$logs/privacy-$1.log" 2>&1 || true
+}
 xcrun simctl privacy "$udid" grant photos "$bundle" >>"$logs/privacy.log" 2>&1 || fail "simctl privacy grant photos" "$(tail -3 "$logs/privacy.log")"
 tcc_rows "after simctl privacy grant photos"
 launch 3
 echo "app: $(photos | jq -c '{access, authorization, addOnly}')" >>"$logs/privacy.log"
+granted=""
 if wait_for 30 access_is Full; then
-  pass "full access granted (xcrun simctl privacy … grant photos, before the app asked)"
+  granted="xcrun simctl privacy … grant photos"
 else
-  note "simctl's grant left PhotoKit at $(photos | jq -r .authorization): writing the TCC database"
-  tcc_write 2 3b
-  wait_for 30 access_is Full && pass "full access (TCC auth_value 2)" || { fail "photos access" "$(photos) $(cat "$logs/privacy.log")"; api DELETE "/api/folders/$pf" >/dev/null; return 0; }
+  system_log grant
+  note "simctl's grant left PhotoKit at $(photos | jq -r .authorization) (tccd's view: logs/privacy-grant.log): the TCC row with the app's code requirement"
+  # tccd may match an app to a row only through its designated requirement (csreq), which simctl leaves empty.
+  requirement=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')
+  echo "designated requirement: $requirement" >>"$logs/privacy.log"
+  if [[ -n "$requirement" ]] && csreq -r="$requirement" -b "$work/csreq.bin" >>"$logs/privacy.log" 2>&1; then
+    xcrun simctl shutdown "$udid"
+    sqlite3 "$tcc_db" "UPDATE access SET auth_value = 2, csreq = readfile('$work/csreq.bin') WHERE client = '$bundle' AND service = 'kTCCServicePhotos';" >>"$logs/privacy.log" 2>&1
+    tcc_rows "with csreq"
+    xcrun simctl boot "$udid"
+    xcrun simctl bootstatus "$udid" -b >/dev/null
+    launch 3b
+    ctl "notifications off" >/dev/null
+    wait_state '.page == "DashboardViewModel" and .state == "Connected"' 60 || true
+    echo "app: $(photos | jq -c '{access, authorization, addOnly}')" >>"$logs/privacy.log"
+    wait_for 20 access_is Full && granted="the TCC row with the app's code requirement"
+  fi
+fi
+if [[ -z "$granted" ]]; then
+  system_log csreq
+  # iOS's own question, answered through the Simulator app's accessibility (macOS sees the simulated screen's elements).
+  xcrun simctl privacy "$udid" reset photos "$bundle" >>"$logs/privacy.log" 2>&1 || true
+  open -a Simulator --args -CurrentDeviceUDID "$udid" >>"$logs/privacy.log" 2>&1 || true
+  sleep 10
+  launch 3c
+  ctl "notifications off" >/dev/null
+  ctl photos-ask >/dev/null
+  sleep 4
+  xcrun simctl io "$udid" screenshot --type=png "$logs/photos-question.png" >/dev/null 2>&1 || true
+  clicked=$(osascript <<'OSA' 2>&1
+tell application "Simulator" to activate
+delay 1
+tell application "System Events"
+  tell process "Simulator"
+    set frontmost to true
+    repeat with w in windows
+      repeat with e in (entire contents of w)
+        try
+          if (role of e is "AXButton") and ((name of e is "Allow Full Access") or (description of e is "Allow Full Access")) then
+            click e
+            return "clicked"
+          end if
+        end try
+      end repeat
+    end repeat
+  end tell
+end tell
+return "not found"
+OSA
+)
+  echo "osascript: $clicked" >>"$logs/privacy.log"
+  sleep 3
+  echo "app: $(photos | jq -c '{access, authorization, addOnly}')" >>"$logs/privacy.log"
+  wait_for 20 access_is Full && granted="iOS's question answered through the Simulator's accessibility ($clicked)"
+fi
+tcc_rows "granted: ${granted:-no}"
+if [[ -n "$granted" ]]; then
+  pass "full access: $granted"
+else
+  system_log end
+  fail "photos access (simctl's grant, the TCC row with csreq and the question clicked through the Simulator all left PhotoKit undetermined)" "$(photos) $(cat "$logs/privacy.log")"
+  api DELETE "/api/folders/$pf" >/dev/null
+  return 0
 fi
 
 tcc_write 3 4
