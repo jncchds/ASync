@@ -108,6 +108,8 @@ public static class FileProviderDomains
         _runtime = runtime;
         if (!Enabled || SharedDirectory is not { } shared) return;
         runtime.FoldersChanged += () => FoldersMaybeChanged(runtime, shared);
+        // Signing out raises no FoldersChanged after the identity is gone (task 25's eighth Mac run: the domain stayed).
+        runtime.IdentityChanged += () => FoldersMaybeChanged(runtime, shared);
         runtime.RemoteFolderChanged += id => Changed(id == 0 ? null : id);
         runtime.FolderRan += r => { if (!r.Skipped) Changed(r.FolderId); };
         CFNotificationCenter.Darwin.AddObserver(IosAppGroup.ChangedNotification, null!, (_, _) => SyncWritten(), CFNotificationSuspensionBehavior.DeliverImmediately);

@@ -467,6 +467,13 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     /// <summary>The folder list or the connection changed (and when a device starts or stops). Handlers must be quick.</summary>
     public event Action? FoldersChanged;
 
+    /// <summary>
+    /// The stored identity was saved (an enrollment) or forgotten (signing out), after the store has it. <see cref="FoldersChanged"/>
+    /// does not follow a sign-out: the device stops before its identity is deleted (iOS's File Provider removes its domain here).
+    /// Handlers must be quick.
+    /// </summary>
+    public event Action? IdentityChanged;
+
     /// <summary>The running device's folders (empty while not enrolled or starting).</summary>
     public IReadOnlyList<FolderState> Folders => _agent?.Folders ?? [];
 
@@ -1179,6 +1186,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
     {
         _identityChanged.Release();
         Publish(StatusEvent());
+        RaiseObserver(IdentityChanged);
     }
 
     public async Task<AgentStatusDto> EnrollAsync(string server, string code, string name, DevicePlatform platform, CancellationToken ct)
