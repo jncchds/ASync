@@ -88,8 +88,6 @@ public enum FileProviderCapabilities
     /// <summary>Not offered: the provider has no trash container; a deletion goes to the folder's trash on the server.</summary>
     Trashing = 16,
     Deleting = 32,
-    /// <summary>Remove the downloaded copy, keeping the item (<c>AllowsEvicting</c>): every file.</summary>
-    Evicting = 64,
     /// <summary>Create files and directories in it (<c>AllowsAddingSubItems</c>).</summary>
     AddingSubItems = 128,
 }
@@ -120,7 +118,8 @@ public static class FileProviderItems
     /// <summary>
     /// The item for one catalog entry. Capabilities come from the catalog's (which already say what the folder kind allows:
     /// TwoWay files write, rename, move and delete; a TwoWay folder takes new items; Mirror and Backup items only read),
-    /// plus reading for everything and evicting for files.
+    /// plus reading for everything. (iOS has no evicting capability: the system removes downloaded copies itself, and the
+    /// person can in the Files app's "Remove Download".)
     /// </summary>
     public static FileProviderItem From(DocumentEntry entry, string? filename = null)
     {
@@ -141,11 +140,7 @@ public static class FileProviderItems
     {
         var c = FileProviderCapabilities.Reading;
         var d = entry.Capabilities;
-        if (!entry.IsDirectory)
-        {
-            c |= FileProviderCapabilities.Evicting;
-            if (d.HasFlag(DocumentCapabilities.Write)) c |= FileProviderCapabilities.Writing;
-        }
+        if (!entry.IsDirectory && d.HasFlag(DocumentCapabilities.Write)) c |= FileProviderCapabilities.Writing;
         if (d.HasFlag(DocumentCapabilities.CreateChildren) && entry.IsDirectory) c |= FileProviderCapabilities.AddingSubItems;
         if (d.HasFlag(DocumentCapabilities.Rename)) c |= FileProviderCapabilities.Renaming;
         if (d.HasFlag(DocumentCapabilities.Move)) c |= FileProviderCapabilities.Reparenting;

@@ -66,6 +66,10 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public string AppText => $"ASync {_shell.AppVersion}";
 
+    /// <summary>Why the Files app shows no ASync location (iOS builds without the app group), or null.</summary>
+    public string? FilesLocationNote => _shell.Platform.FilesLocationNote;
+    public bool HasFilesLocationNote => FilesLocationNote is not null;
+
     public bool CanSignOut => DeviceText is not null;
 
     /// <summary>"Sign out of this device" was pressed: the confirmation is showing.</summary>

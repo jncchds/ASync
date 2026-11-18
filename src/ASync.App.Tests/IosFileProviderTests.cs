@@ -183,13 +183,12 @@ public sealed class IosFileProviderTests : IAsyncLifetime
             FileProviderCapabilities.Reparenting, FileProviderCapabilities.Deleting), twoWayDir.Capabilities);
         var twoWayFile = (await _ops.ListAsync(DocumentId.PlainFolder(TwoWay, "dir"), ct: Ct)).Single();
         Assert.Equal(Caps(FileProviderCapabilities.Reading, FileProviderCapabilities.Writing, FileProviderCapabilities.Renaming,
-            FileProviderCapabilities.Reparenting, FileProviderCapabilities.Deleting, FileProviderCapabilities.Evicting), twoWayFile.Capabilities);
+            FileProviderCapabilities.Reparenting, FileProviderCapabilities.Deleting), twoWayFile.Capabilities);
         Assert.Equal(1, twoWayFile.Size);
         Assert.False(twoWayFile.Capabilities.HasFlag(FileProviderCapabilities.Trashing)); // no trash container: the server's trash
 
         Assert.Equal(FileProviderCapabilities.Reading, (await _ops.ListAsync(DocumentId.PlainFolder(Mirror), ct: Ct)).Single().Capabilities);
-        Assert.Equal(Caps(FileProviderCapabilities.Reading, FileProviderCapabilities.Evicting),
-            (await _ops.ListAsync(DocumentId.PlainFolder(Mirror, "album"), ct: Ct)).Single().Capabilities);
+        Assert.Equal(FileProviderCapabilities.Reading, (await _ops.ListAsync(DocumentId.PlainFolder(Mirror, "album"), ct: Ct)).Single().Capabilities);
 
         var snapshots = await _ops.ListAsync(DocumentId.Snapshots(Backup), ct: Ct);
         var snap = Assert.Single(snapshots);
@@ -197,7 +196,7 @@ public sealed class IosFileProviderTests : IAsyncLifetime
         Assert.Equal("b/3", snap.ParentIdentifier);
         Assert.Equal(FileProviderCapabilities.Reading, snap.Capabilities);
         var photo = Assert.Single(await _ops.ListAsync(DocumentId.InSnapshot(Backup, snapshot.Id), ct: Ct));
-        Assert.Equal(Caps(FileProviderCapabilities.Reading, FileProviderCapabilities.Evicting), photo.Capabilities);
+        Assert.Equal(FileProviderCapabilities.Reading, photo.Capabilities);
         Assert.Equal("s", photo.ContentVersion); // a snapshot's file never changes
     }
 

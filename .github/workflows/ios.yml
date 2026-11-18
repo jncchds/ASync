@@ -20,6 +20,7 @@ on:
   pull_request:
     paths:
       - 'src/ASync.App.iOS/**'
+      - 'src/ASync.App.iOS.FileProvider/**'
       - '.github/workflows/ios.yml'
       - 'scripts/*ios*.sh'
   workflow_dispatch:
@@ -58,7 +59,7 @@ jobs:
               echo "A new main: running."
             else
               changed=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$GITHUB_SHA" --paginate --jq '.files[].filename')
-              relevant=$(printf '%s\n' "$changed" | grep -E '^(src/ASync\.App\.iOS/|scripts/[^/]*ios[^/]*\.sh$|\.github/workflows/ios\.yml$|Directory\.(Packages|Build)\.props$)' || true)
+              relevant=$(printf '%s\n' "$changed" | grep -E '^(src/ASync\.App\.iOS(\.FileProvider)?/|scripts/[^/]*ios[^/]*\.sh$|\.github/workflows/ios\.yml$|Directory\.(Packages|Build)\.props$)' || true)
               if [ -z "$relevant" ]; then
                 mac=false
                 echo "Nothing of the iOS head or its build changed: no Mac (the check job compiles the head and runs its tests)."
@@ -84,8 +85,8 @@ jobs:
       - name: Compile the iOS head (scripts/check-ios.sh)
         run: scripts/check-ios.sh
 
-      - name: The iOS head's shared code (IosTests, IosBackgroundTests, IosPhotosTests)
-        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests|FullyQualifiedName~IosPhotosTests|FullyQualifiedName~IosCollectionsTests'
+      - name: The iOS head's and the File Provider extension's shared code
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests|FullyQualifiedName~IosPhotosTests|FullyQualifiedName~IosCollectionsTests|FullyQualifiedName~IosFileProviderTests'
 
   ios:
     needs: [decide, check]
@@ -96,7 +97,9 @@ jobs:
       contents: write   # attaching the .ipa to a release
     env:
       # `if:` cannot read secrets: the signing and TestFlight steps look at these.
-      HAS_IOS_SIGNING: ${{ secrets.IOS_DISTRIBUTION_P12 != '' && secrets.IOS_PROVISIONING_PROFILE != '' }}
+      # The app's profile and the File Provider extension's (ua.pp.chds.async.fileprovider): both with the app group
+      # group.ua.pp.chds.async and the Keychain group (task 25).
+      HAS_IOS_SIGNING: ${{ secrets.IOS_DISTRIBUTION_P12 != '' && secrets.IOS_PROVISIONING_PROFILE != '' && secrets.IOS_FILEPROVIDER_PROVISIONING_PROFILE != '' }}
       HAS_APPSTORE_API: ${{ secrets.APPSTORE_API_KEY_P8 != '' }}
     steps:
       - name: Checkout
@@ -138,8 +141,8 @@ jobs:
         run: dotnet workload install ios --version "$IOS_WORKLOAD_SET"
 
       # The shared iOS code on macOS itself (/var and /private/var, the real container layout of paths).
-      - name: Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests)
-        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests|FullyQualifiedName~IosPhotosTests|FullyQualifiedName~IosCollectionsTests'
+      - name: Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests|FullyQualifiedName~IosPhotosTests|FullyQualifiedName~IosCollectionsTests|FullyQualifiedName~IosFileProviderTests'
 
       - name: Build for the simulator
         run: scripts/package-ios.sh --simulator
@@ -167,6 +170,7 @@ jobs:
           IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
           IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
           IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          IOS_FILEPROVIDER_PROVISIONING_PROFILE: ${{ secrets.IOS_FILEPROVIDER_PROVISIONING_PROFILE }}
         run: |
           keychain="$RUNNER_TEMP/ios-signing.keychain-db"
           password=$(openssl rand -hex 16)
@@ -183,8 +187,11 @@ jobs:
           echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/async.mobileprovision"
           uuid=$(security cms -D -i "$RUNNER_TEMP/async.mobileprovision" | plutil -extract UUID raw -)
           cp "$RUNNER_TEMP/async.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$uuid.mobileprovision"
+          echo "$IOS_FILEPROVIDER_PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/fileprovider.mobileprovision"
+          fp_uuid=$(security cms -D -i "$RUNNER_TEMP/fileprovider.mobileprovision" | plutil -extract UUID raw -)
+          cp "$RUNNER_TEMP/fileprovider.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$fp_uuid.mobileprovision"
           identity=$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Apple Distribution[^"]*\)".*/\1/p' | head -1)
-          { echo "ASYNC_IOS_CODESIGN_KEY=$identity"; echo "ASYNC_IOS_PROVISION=$uuid"; } >> "$GITHUB_ENV"
+          { echo "ASYNC_IOS_CODESIGN_KEY=$identity"; echo "ASYNC_IOS_PROVISION=$uuid"; echo "ASYNC_IOS_FP_PROVISION=$fp_uuid"; } >> "$GITHUB_ENV"
 
       # With the push entitlement (aps-environment): the profile in IOS_PROVISIONING_PROFILE needs the Push Notifications
       # capability (the repository variable IOS_PUSH=0 builds without it, for a profile that has none).

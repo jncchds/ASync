@@ -38,10 +38,12 @@ public static class IosAgent
 
     /// <summary>
     /// The agent's store: Library/Application Support/async (not Documents, which the Files app shows; not .NET's
-    /// ApplicationData, which on iOS is Documents/.config). Excluded from backups: its sealing key and the device key stay on
-    /// this device, so a restored copy could not be read anyway.
+    /// ApplicationData, which on iOS is Documents/.config), in the app group's container when the build has the group (task
+    /// 25: the File Provider extension reads it; task 21's store is moved there once), in the app's own otherwise (unsigned
+    /// builds). Excluded from backups: its sealing key and the device key stay on this device, so a restored copy could not
+    /// be read anyway.
     /// </summary>
-    public static string ConfigDirectory => Path.Combine(Home, "Library", "Application Support", "async");
+    public static string ConfigDirectory => FileProviderDomains.StoreDirectory;
 
     public static string LogPath => Path.Combine(Home, "Library", "Logs", "async.log");
 
@@ -104,7 +106,11 @@ public static class IosAgent
                 .AddProvider(new RollingFileLoggerProvider(LogPath, maxBytes: 2 * 1024 * 1024, keep: 2))
                 .AddProvider(new ConsoleLoggerProvider())
                 .SetMinimumLevel(LogLevel.Information));
-            Trees = new IosTreeFactory(Home, new BookmarkStore(Path.Combine(ConfigDirectory, "bookmarks.json")), NSUrlBookmarks.Instance, DeviceNoun);
+            // Picked folders in other providers (iCloud Drive, other apps' File Providers) are read through NSFileCoordinator (task 25).
+            Trees = new IosTreeFactory(Home, new BookmarkStore(Path.Combine(ConfigDirectory, "bookmarks.json")), NSUrlBookmarks.Instance, DeviceNoun)
+            {
+                Coordination = NSFileCoordination.Instance,
+            };
             var runtime = new AgentRuntime(new AgentOptions
             {
                 ConfigDirectory = ConfigDirectory,
@@ -138,6 +144,8 @@ public static class IosAgent
             IosBackground.Attach(runtime, ConfigDirectory);
             IosPhotos.Attach(runtime);
             IosCollections.Attach(runtime);
+            // The Files app location (task 25): the domain, the account file and the change signals for the extension.
+            FileProviderDomains.Attach(runtime);
             NSNotificationCenter.DefaultCenter.AddObserver(UIKit.UIApplication.DidBecomeActiveNotification, _ => OnActive());
             NSNotificationCenter.DefaultCenter.AddObserver(UIKit.UIApplication.DidEnterBackgroundNotification, _ => OnBackground());
             // Bookmarks of folders that moved elsewhere or went away (after an hour: a form may still be using a new one).

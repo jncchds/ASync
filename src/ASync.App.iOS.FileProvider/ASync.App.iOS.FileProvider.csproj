@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="CodesignProvision">
+  <!--
+    The File Provider extension of the iOS app (task 25): the person's ASync folders in the Files app and every document
+    picker as the location "ASync — <server host>", files fetched on demand. An NSFileProviderReplicatedExtension (iOS 16+,
+    extension point com.apple.fileprovider-nonui) embedded in the app's PlugIns/, bundle id ua.pp.chds.async.fileprovider.
+    It reuses the client library's DocumentCatalog (as Android's documents provider) and talks to the server as the device
+    itself: the identity and the store come from the app group's container, the device key and the store's sealing key from
+    the app's Keychain group. See AGENTS.md "iOS File Provider (task 25)".
+    Small on purpose (an extension has a memory limit): no Avalonia, no agent, only the client library; invariant
+    globalization (no ICU data mapped); everything AOT with the interpreter only for what AOT cannot compile (as the app).
+    Shared/ is plain C# linked into ASync.App.Tests and tested on Linux; Keychain.cs and the app's Shared/IosSecrets.cs and
+    Shared/IosAppGroup.cs are linked from the app (one implementation of the sealed store and the shared files).
+    Info.plist and Entitlements.plist take no comments (the build's plist reader). Entitlements.plist (the app group and the
+    Keychain group) only applies when signed; without it the app does not register a domain, so the extension never runs.
+    Not in ASync.slnx (it needs the ios workload): built with the app on a Mac (scripts/package-ios.sh), compiled on Linux by
+    scripts/check-ios.sh.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <SupportedOSPlatformVersion>16.0</SupportedOSPlatformVersion>
+    <OutputType>Library</OutputType>
+    <IsAppExtension>true</IsAppExtension>
+    <RootNamespace>ASync.App.iOS.FileProvider</RootNamespace>
+    <AssemblyName>ASyncFileProvider</AssemblyName>
+    <ApplicationId>ua.pp.chds.async.fileprovider</ApplicationId>
+    <ApplicationTitle>ASync</ApplicationTitle>
+    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
+    <ApplicationVersion>$(Version)</ApplicationVersion>
+    <MtouchInterpreter>-all</MtouchInterpreter>
+    <TrimMode>partial</TrimMode>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <UseNativeHttpHandler>false</UseNativeHttpHandler>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false'">Entitlements.plist</CodesignEntitlements>
+    <!-- Its own profile (ua.pp.chds.async.fileprovider): the app's CodesignProvision, passed on the command line, would be the
+         wrong one, so the extension treats that property as its own and takes AsyncFileProviderProvision instead. -->
+    <CodesignProvision>$(AsyncFileProviderProvision)</CodesignProvision>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\ASync.App.iOS\Keychain.cs" Link="Linked\Keychain.cs" />
+    <Compile Include="..\ASync.App.iOS\Shared\IosSecrets.cs" Link="Linked\IosSecrets.cs" />
+    <Compile Include="..\ASync.App.iOS\Shared\IosAppGroup.cs" Link="Linked\IosAppGroup.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ASync.Client.Core\ASync.Client.Core.csproj" />
+  </ItemGroup>
+</Project>

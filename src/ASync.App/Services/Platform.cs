@@ -76,6 +76,13 @@ public interface IPlatformServices
     ICollectionAccess? Contacts => null;
     ICollectionAccess? Calendars => null;
 
+    /// <summary>
+    /// Why this platform's file manager shows no ASync location, when the build cannot have one (iOS: an unsigned or
+    /// re-signed build without the app group: "The Files app location needs a signed build"); null when it has one or the
+    /// platform has none.
+    /// </summary>
+    string? FilesLocationNote => null;
+
     ICollectionAccess? CollectionAccess(FolderKind kind) => kind == FolderKind.Contacts ? Contacts : kind == FolderKind.Calendars ? Calendars : null;
 }
 

@@ -26,6 +26,11 @@
     limited access iOS would ask again at every launch; the Photos screen offers its own Choose photos instead). PhotoKit in
     PhotoLibrary.cs, its mapping in Shared/IosPhotos.cs.
     AllowUnsafeBlocks: the quick action's method added to Avalonia's scene delegate (a function pointer, a block call).
+    The File Provider extension (task 25): src/ASync.App.iOS.FileProvider, embedded in PlugIns/ as ASyncFileProvider.appex
+    (the project reference below with IsAppExtension). Both Entitlements files hold the app group
+    (group.ua.pp.chds.async) the extension shares; FileProviderDomains.cs decides at start whether the build has it (the
+    unsigned build does not: no domain, the store stays in the app). The signed mode of package-ios.sh passes the extension's
+    own provisioning profile (AsyncFileProviderProvision, a property of the extension project).
   -->
   <PropertyGroup>
     <TargetFramework>net10.0-ios</TargetFramework>
@@ -65,6 +70,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\ASync.App.iOS.FileProvider\ASync.App.iOS.FileProvider.csproj">
+      <IsAppExtension>true</IsAppExtension>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
     <ProjectReference Include="..\ASync.App\ASync.App.csproj" />
     <ProjectReference Include="..\ASync.Agent\ASync.Agent.csproj" />
   </ItemGroup>

@@ -326,6 +326,7 @@ internal sealed class FakePlatform : IPlatformServices
     public FakeBackground? BackgroundServices { get; set; }
     public IBackgroundServices? Background => BackgroundServices;
     public string? ConditionsNote => Phone ? null : "This computer cannot tell metered networks apart.";
+    public string? FilesLocationNote { get; set; }
 
     /// <summary>Set for a phone with All files access (real paths in a temporary directory standing for the volumes).</summary>
     public FakeStorage? StorageAccess { get; set; }

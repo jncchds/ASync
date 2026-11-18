@@ -35,6 +35,9 @@ public sealed class IosPlatform(IosTreeFactory trees) : IPlatformServices
 
     public string DeviceNoun => IosAgent.DeviceNoun;
 
+    /// <summary>"The Files app location needs a signed build" when this build has no app group (task 25); null when it has.</summary>
+    public string? FilesLocationNote => FileProviderDomains.NoteOverride ?? FileProviderDomains.Decision.Note;
+
     /// <summary>Everything a phone needs is in the app; the web UI is for a computer.</summary>
     public bool OffersWebUi => false;
 

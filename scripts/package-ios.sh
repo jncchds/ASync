@@ -13,8 +13,12 @@
 #                                        profile's name or UUID). With the push entitlement (aps-environment, production:
 #                                        Entitlements.Push.plist, -p:AsyncPush=true): the App ID and the profile need the Push
 #                                        Notifications capability. ASYNC_IOS_PUSH=0 builds it without (a profile without push).
+#                                        ASYNC_IOS_FP_PROVISION: the File Provider extension's own profile
+#                                        (ua.pp.chds.async.fileprovider, with the app group and the Keychain group).
 #
 # The unsigned .ipa and the simulator build never carry aps-environment: the app then does not register for APNs at all.
+# Every mode embeds the File Provider extension (task 25) as PlugIns/ASyncFileProvider.appex; its size is printed. Unsigned,
+# neither the app nor the extension has the app group, so the app registers no domain (Settings says why).
 #
 # The version comes from VERSION (CFBundleShortVersionString and CFBundleVersion).
 set -euo pipefail
@@ -37,6 +41,13 @@ mkdir -p "$out"
 # (Xcode versions, native libraries) only show.
 build=(dotnet build "$project" -c Release -f net10.0-ios -nologo)
 
+# The extension in the built app, and its size (an extension has a memory limit; its binary is most of what it maps).
+appex_size() {
+  local appex="$app/PlugIns/ASyncFileProvider.appex"
+  [[ -d "$appex" ]] || { echo "error: the File Provider extension is not in $app/PlugIns" >&2; exit 1; }
+  echo "File Provider extension: $(du -sh "$appex" | cut -f1) ($(du -sh "$appex/ASyncFileProvider" 2>/dev/null | cut -f1) executable)"
+}
+
 case $mode in
   simulator)
     rid=iossimulator-$([[ "$(uname -m)" == arm64 ]] && echo arm64 || echo x64)
@@ -45,6 +56,7 @@ case $mode in
     app=src/ASync.App.iOS/bin/Release/net10.0-ios/$rid/ASync.app
     rm -rf "$out/simulator" && mkdir -p "$out/simulator"
     cp -R "$app" "$out/simulator/ASync.app"
+    appex_size
     (cd "$out/simulator" && ditto -c -k --keepParent ASync.app "../ASync-$version-simulator.app.zip")
     echo "$out/ASync-$version-simulator.app.zip ($rid)"
     ;;
@@ -56,6 +68,8 @@ case $mode in
     mkdir -p "$staging/Payload"
     cp -R "$app" "$staging/Payload/ASync.app"
     rm -rf "$staging/Payload/ASync.app/_CodeSignature" "$staging/Payload/ASync.app/embedded.mobileprovision"
+    rm -rf "$staging/Payload/ASync.app/PlugIns/"*.appex/_CodeSignature "$staging/Payload/ASync.app/PlugIns/"*.appex/embedded.mobileprovision
+    app=$staging/Payload/ASync.app appex_size
     ipa="$PWD/$out/ASync-$version-unsigned.ipa"
     rm -f "$ipa"
     (cd "$staging" && zip -qry "$ipa" Payload)
@@ -65,9 +79,11 @@ case $mode in
   signed)
     : "${ASYNC_IOS_CODESIGN_KEY:?set ASYNC_IOS_CODESIGN_KEY to the signing identity}"
     : "${ASYNC_IOS_PROVISION:?set ASYNC_IOS_PROVISION to the provisioning profile}"
+    : "${ASYNC_IOS_FP_PROVISION:?set ASYNC_IOS_FP_PROVISION to the File Provider extension profile}"
     dotnet publish "$project" -c Release -f net10.0-ios -r ios-arm64 -nologo \
       -p:ArchiveOnBuild=false -p:BuildIpa=true -p:IpaPackageDir="$PWD/$out/signed" \
       -p:CodesignKey="$ASYNC_IOS_CODESIGN_KEY" -p:CodesignProvision="$ASYNC_IOS_PROVISION" \
+      -p:AsyncFileProviderProvision="$ASYNC_IOS_FP_PROVISION" \
       -p:AsyncPush="$([[ "${ASYNC_IOS_PUSH:-1}" == 0 ]] && echo false || echo true)"
     ipa=$(find "$out/signed" -name '*.ipa' | head -1)
     mv "$ipa" "$out/ASync-$version.ipa"
