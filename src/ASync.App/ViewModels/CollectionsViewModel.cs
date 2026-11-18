@@ -81,6 +81,7 @@ public sealed partial class CollectionsViewModel : ObservableObject
 
     public string AccessText => Access switch
     {
+        MediaAccess.Partial when _access?.PartialText is { } partial => partial,
         MediaAccess.Full or MediaAccess.Partial => IsCalendars ? "ASync may read the calendars on this phone." : "ASync may read the contacts on this phone.",
         MediaAccess.Unsupported => $"This {_shell.Platform.DeviceNoun} has no {Noun} ASync can read.",
         _ => $"ASync may not read the {Noun} yet.",
@@ -97,6 +98,11 @@ public sealed partial class CollectionsViewModel : ObservableObject
           "end-to-end). ASync asks to add contacts only when you restore a backup.";
 
     public string AllowText => IsCalendars ? "Allow access to calendars" : "Allow access to contacts";
+
+    /// <summary>The platform's own words below the explanation (iOS: "Allow Full Access", notes not backed up); null for none.</summary>
+    public string? PlatformNote => _access?.Note;
+
+    public bool HasPlatformNote => PlatformNote is not null;
 
     private void OnAccessChanged()
     {

@@ -299,6 +299,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             PhotoAccessText = (CollectionAccess?.Access ?? MediaAccess.Unsupported) switch
             {
                 MediaAccess.None => $"ASync may not read the {CollectionTexts.Noun(f.Kind)} yet: open {ChooseCollectionsText} to allow it.",
+                MediaAccess.Partial => CollectionAccess?.PartialText,
                 MediaAccess.Unsupported => $"This {shell.Platform.DeviceNoun} has no {CollectionTexts.Noun(f.Kind)}: {f.Kind} folders are backed up by phones.",
                 _ => null,
             };

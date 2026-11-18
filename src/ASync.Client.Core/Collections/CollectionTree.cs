@@ -44,7 +44,7 @@ public sealed class CollectionTree : ILocalTree
 
     // ── Contacts ─────────────────────────────────────────────────────────────
 
-    /// <param name="source">Recorded in account.json: which provider it came from (<c>android-contacts</c>, later <c>ios-contacts</c>).</param>
+    /// <param name="source">Recorded in account.json: which provider it came from (<c>android-contacts</c>, <c>ios-contacts</c>).</param>
     /// <param name="cache">Sizes of the contacts by version (the folder's state directory); null keeps none (every contact generated).</param>
     public static CollectionTree Contacts(IContactsSource contacts, CollectionSelectionDto? selection, string source = "", GeneratedSizeCache? cache = null)
     {
@@ -79,7 +79,7 @@ public sealed class CollectionTree : ILocalTree
 
     // ── Calendars ────────────────────────────────────────────────────────────
 
-    /// <param name="source">Recorded in calendar.json (<c>android-calendar</c>, later <c>ios-eventkit</c>).</param>
+    /// <param name="source">Recorded in calendar.json (<c>android-calendar</c>, <c>ios-eventkit</c>).</param>
     /// <param name="now">Unix ms: what "events since" counts back from.</param>
     public static CollectionTree Calendars(ICalendarSource calendars, CollectionSelectionDto? selection, long now, string source = "")
     {

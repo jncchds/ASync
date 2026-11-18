@@ -29,6 +29,12 @@ public interface ICollectionAccess
 
     /// <summary>The permission may have changed (a dialog was answered, the app came back to the front).</summary>
     event Action? Changed;
+
+    /// <summary>The platform's own words below the explanation (iOS: which answer to choose, what iOS keeps from apps); null for none.</summary>
+    string? Note => null;
+
+    /// <summary>What partial access means here (iOS 18's limited contacts); null: the generic text.</summary>
+    string? PartialText => null;
 }
 
 public static class CollectionTexts

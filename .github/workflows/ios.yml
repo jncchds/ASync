@@ -85,7 +85,7 @@ jobs:
         run: scripts/check-ios.sh
 
       - name: The iOS head's shared code (IosTests, IosBackgroundTests, IosPhotosTests)
-        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests|FullyQualifiedName~IosPhotosTests'
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests|FullyQualifiedName~IosPhotosTests|FullyQualifiedName~IosCollectionsTests'
 
   ios:
     needs: [decide, check]
@@ -138,14 +138,19 @@ jobs:
         run: dotnet workload install ios --version "$IOS_WORKLOAD_SET"
 
       # The shared iOS code on macOS itself (/var and /private/var, the real container layout of paths).
-      - name: Unit tests (IosTests, IosBackgroundTests, IosPhotosTests)
-        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests|FullyQualifiedName~IosPhotosTests'
+      - name: Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests)
+        run: dotnet test src/ASync.App.Tests/ASync.App.Tests.csproj -c Release --filter 'FullyQualifiedName~IosTests|FullyQualifiedName~IosBackgroundTests|FullyQualifiedName~IosPhotosTests|FullyQualifiedName~IosCollectionsTests'
 
       - name: Build for the simulator
         run: scripts/package-ios.sh --simulator
 
       - name: PostgreSQL for the smoke test's server
         run: brew list postgresql@16 >/dev/null 2>&1 || brew install postgresql@16
+
+      # Into the server's wwwroot, which the smoke test publishes: its web UI screenshots of the iPhone's lists (scripts/web-shot.mjs).
+      - name: The web UI (for the smoke test's web screenshots)
+        working-directory: src/async-ui
+        run: npm ci --no-audit --no-fund && npm run build
 
       # The server runs natively here (no Docker on macOS runners): a CI-only exception, see scripts/smoke-ios.sh.
       - name: Smoke test on the simulator

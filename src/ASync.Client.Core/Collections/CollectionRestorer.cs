@@ -58,7 +58,8 @@ public sealed class CollectionRestorer(Repo repository)
         foreach (var group in groups)
         {
             var account = targetId is not null ? accounts.FirstOrDefault(a => a.Id == targetId)
-                : group.Info is { } info ? accounts.FirstOrDefault(a => a.Id == info.Id) : null;
+                : group.Info is { } info ? accounts.FirstOrDefault(a => a.Id == info.Id) ?? Single(accounts.Where(a => !a.ReadOnly && a.Name == info.Name && a.Type == info.Type))
+                : null;
             if (account is null || account.ReadOnly)
             {
                 Note(errors, account is null
@@ -124,7 +125,9 @@ public sealed class CollectionRestorer(Repo repository)
         foreach (var group in groups)
         {
             var calendar = targetId is not null ? all.FirstOrDefault(c => c.Id == targetId)
-                : group.Info is { } info ? all.FirstOrDefault(c => c.Id == info.Id) : null;
+                : group.Info is { } info ? all.FirstOrDefault(c => c.Id == info.Id)
+                    ?? Single(all.Where(c => !c.ReadOnly && c.Name == info.Name && c.AccountName == info.Account && c.AccountType == info.AccountType))
+                : null;
             if (calendar is null || calendar.ReadOnly)
             {
                 Note(errors, calendar is null
@@ -185,6 +188,16 @@ public sealed class CollectionRestorer(Repo repository)
             ? await WalkAsync(snapshot, ".vcf", CollectionLayout.AccountFile, errors, ct)
             : await WalkAsync(snapshot, ".ics", CollectionLayout.CalendarFile, errors, ct);
         return [.. groups.Select(g => (g.Directory, g.Info, g.Files.Count))];
+    }
+
+    /// <summary>
+    /// The one account or calendar of that name and type, when the id the snapshot names is not on the phone: iOS gives containers and
+    /// calendars new identifiers on another iPhone or after a reset, while "iCloud" stays "iCloud". Two candidates: none (not guessed).
+    /// </summary>
+    private static T? Single<T>(IEnumerable<T> candidates) where T : class
+    {
+        var list = candidates.Take(2).ToList();
+        return list.Count == 1 ? list[0] : null;
     }
 
     private static void Note(List<string> errors, string message)

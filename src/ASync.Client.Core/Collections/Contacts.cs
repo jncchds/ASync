@@ -4,7 +4,7 @@ namespace ASync.Client.Core.Collections;
 
 // ── The address book, platform-neutral (task 20) ──────────────────────────────
 //
-// What a phone's contacts provider gives (Android's ContactsContract; iOS's Contacts framework later) in a shape close to vCard 4.0
+// What a phone's contacts provider gives (Android's ContactsContract; iOS's Contacts framework since task 24) in a shape close to vCard 4.0
 // (RFC 6350), so VCard.Write is a plain mapping and a platform adapter maps its own fields in both directions. See AGENTS.md "Extra
 // data sources".
 
@@ -70,7 +70,7 @@ public sealed record Contact
 public sealed record ContactSummary(string Id, string ShortId, string AccountId, string? DisplayName, string? Version, long Modified);
 
 /// <summary>
-/// A device's address book: Android's ContactsContract (<c>AndroidContactsSource</c>), iOS's Contacts framework later, a fake in the tests.
+/// A device's address book: Android's ContactsContract (<c>AndroidContactsSource</c>), iOS's Contacts framework (<c>IosContactsSource</c>), a fake in the tests.
 /// Reading is synchronous and may block (called from a backup run, off the UI thread); implementations must be safe from several
 /// threads. Nothing here knows about folders, snapshots or the server.
 /// </summary>

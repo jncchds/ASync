@@ -458,11 +458,27 @@ public static class ICalendar
         return (new DateTimeOffset(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), offset).ToUnixTimeMilliseconds(), false, null);
     }
 
-    /// <summary>What makes two events "the same" for a restore that finds one already there under another UID: title, start, length, rule.</summary>
+    /// <summary>
+    /// What makes two events "the same" for a restore that finds one already there under another UID: title, start, length, rule. The
+    /// rule compares in a normal form (<see cref="NormalizeRule"/>): a calendar gives a series back in its own words (iOS's EventKit
+    /// writes no INTERVAL=1 or WKST, and UNTIL as it likes), and a second restore must still find it.
+    /// </summary>
     public static string ContentKey(CalendarEvent e)
     {
         var length = e.End is { } end ? (end - e.Start) / 1000 : ParseDuration(e.Duration) ?? 0;
         return string.Join('\u001f', (e.Title ?? "").Trim().ToLowerInvariant(), Invariant.S(e.Start), Invariant.S(length), e.AllDay ? "1" : "0",
-            (e.RRule ?? "").Trim().ToUpperInvariant());
+            NormalizeRule(e.RRule));
+    }
+
+    /// <summary>An RRULE in a form that compares equal however it was written: parts sorted, INTERVAL=1 and WKST left out, UNTIL to its date.</summary>
+    public static string NormalizeRule(string? rrule)
+    {
+        if (string.IsNullOrWhiteSpace(rrule)) return "";
+        var lines = Lines(rrule).Select(line => string.Join(';', line.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(p => p.ToUpperInvariant())
+            .Where(p => p != "INTERVAL=1" && !p.StartsWith("WKST=", StringComparison.Ordinal))
+            .Select(p => p.StartsWith("UNTIL=", StringComparison.Ordinal) && p.Length > 14 ? p[..14] : p)
+            .Order(StringComparer.Ordinal)));
+        return string.Join('\n', lines.Order(StringComparer.Ordinal));
     }
 }

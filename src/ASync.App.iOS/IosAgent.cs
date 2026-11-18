@@ -77,6 +77,7 @@ public static class IosAgent
     {
         AppOpened();
         IosPhotos.Access.NotifyChanged(); // the permission may have changed in Settings
+        IosCollections.AppActive();
         _foreground ??= new Timer(_ =>
         {
             if (_runtime is not { FoldersLoaded: true } runtime) return;
@@ -124,12 +125,19 @@ public static class IosAgent
                 // Photos folders back up PhotoKit (task 23); its albums are listed for the web UI under the same browsing setting.
                 Media = IosPhotos.Create(ConfigDirectory, Home),
                 MediaSource = IosPhotoMapping.Source,
+                // Contacts and Calendars folders back up the Contacts framework and EventKit (task 24); their lists go to the web UI
+                // like the albums.
+                Contacts = CreateCollections(),
+                Calendars = IosCollections.Calendars,
+                ContactsSource = IosContactMapping.Source,
+                CalendarsSource = IosEventMapping.Source,
             }, loggers);
             IosDeviceConditions.Instance.Start();
             runtime.Start();
             _runtime = runtime;
             IosBackground.Attach(runtime, ConfigDirectory);
             IosPhotos.Attach(runtime);
+            IosCollections.Attach(runtime);
             NSNotificationCenter.DefaultCenter.AddObserver(UIKit.UIApplication.DidBecomeActiveNotification, _ => OnActive());
             NSNotificationCenter.DefaultCenter.AddObserver(UIKit.UIApplication.DidEnterBackgroundNotification, _ => OnBackground());
             // Bookmarks of folders that moved elsewhere or went away (after an hour: a form may still be using a new one).
@@ -151,6 +159,12 @@ public static class IosAgent
                 catch (Exception e) { Console.Error.WriteLine($"ASync: the agent stopped: {e}"); }
             });
         }
+    }
+
+    private static ASync.Client.Core.Collections.IContactsSource CreateCollections()
+    {
+        IosCollections.Create(ConfigDirectory);
+        return IosCollections.Contacts;
     }
 
     private static void ExcludeFromBackup(string directory)
