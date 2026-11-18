@@ -118,7 +118,18 @@ public static class FileProviderDomains
     /// <summary>The account or the folder list changed (the agent says so with every status: compared by a signature).</summary>
     private static void FoldersMaybeChanged(AgentRuntime runtime, string shared)
     {
-        var identity = runtime.Api?.Identity ?? TryLoadIdentity(runtime);
+        // The store says whether the device is enrolled (as on Android): the signed-in client may still hold the identity for
+        // a moment after a sign-out (task 25's seventh Mac run: the domain stayed).
+        DeviceIdentity? stored;
+        try { stored = runtime.Store.LoadIdentity(); }
+        catch (Exception e)
+        {
+            // Not readable now (the iPhone not unlocked since it started): not a sign-out; nothing changes until it is.
+            Interlocked.Exchange(ref _signature, "");
+            Problem($"store: {e.Message}");
+            return;
+        }
+        var identity = stored is null ? null : runtime.Api?.Identity ?? stored;
         var now = $"{identity?.DeviceId}|{runtime.RevokedMessage is not null}|{runtime.FoldersLoaded}|" +
                   string.Join(",", runtime.Folders.Select(f => $"{f.Folder.FolderId}:{f.Folder.Revision}"));
         if (Interlocked.Exchange(ref _signature, now) == now) return;
@@ -128,8 +139,10 @@ public static class FileProviderDomains
             {
                 if (runtime.DeviceRunning)
                 {
-                    // Starting, or stopping after a sign-out: look again at the next event (the signature must not stick).
+                    // Starting, or stopping after a sign-out: look again at the next event (the signature must not stick),
+                    // and in a few seconds in case no event follows.
                     Interlocked.Exchange(ref _signature, "");
+                    _ = Task.Delay(TimeSpan.FromSeconds(3)).ContinueWith(_ => FoldersMaybeChanged(runtime, shared), TaskScheduler.Default);
                     return;
                 }
                 SharedAccount.Delete(shared);
@@ -148,12 +161,6 @@ public static class FileProviderDomains
             Changed(null);
         }
         catch (Exception e) { Problem($"account: {e.Message}"); }
-    }
-
-    private static DeviceIdentity? TryLoadIdentity(AgentRuntime runtime)
-    {
-        try { return runtime.Store.LoadIdentity(); }
-        catch (Exception) { return null; }
     }
 
     // ── Domains ───────────────────────────────────────────────────────────────

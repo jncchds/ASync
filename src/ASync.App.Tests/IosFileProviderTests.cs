@@ -194,6 +194,7 @@ public sealed class IosFileProviderTests : IAsyncLifetime
         var snap = Assert.Single(snapshots);
         Assert.Equal($"s/3/{snapshot.Id}", snap.Identifier);
         Assert.Equal("b/3", snap.ParentIdentifier);
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2} \d{2}\.\d{2} · [0-9a-f]{8}$", snap.Filename); // no ":" (the Files app shows it as "/")
         Assert.Equal(FileProviderCapabilities.Reading, snap.Capabilities);
         var photo = Assert.Single(await _ops.ListAsync(DocumentId.InSnapshot(Backup, snapshot.Id), ct: Ct));
         Assert.Equal(FileProviderCapabilities.Reading, photo.Capabilities);

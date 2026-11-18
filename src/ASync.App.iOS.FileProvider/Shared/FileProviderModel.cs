@@ -124,7 +124,9 @@ public static class FileProviderItems
     public static FileProviderItem From(DocumentEntry entry, string? filename = null)
     {
         var id = entry.Id;
-        var name = filename ?? entry.Name;
+        // A snapshot's directory is named "yyyy-MM-dd HH:mm · id": the Files app shows ":" as "/" (the old Mac separator), so
+        // on iOS its time reads "HH.mm". Only the name shown: the identifier stays the snapshot's.
+        var name = filename ?? (id.Kind == DocumentKind.Snapshot && id.Path.Length == 0 ? entry.Name.Replace(':', '.') : entry.Name);
         var content = entry.IsDirectory ? "d"
             : id.Kind == DocumentKind.Snapshot ? "s" // a snapshot's file never changes
             : Hash(string.Create(CultureInfo.InvariantCulture, $"{entry.Size}|{entry.Modified?.ToUnixTimeMilliseconds()}"));
