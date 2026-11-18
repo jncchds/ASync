@@ -15,6 +15,7 @@ Branch `task/25-ios-file-provider` (based on local `main` f143f22). Design and f
 - Task 21's open item: picked folders in other providers read through `NSFileCoordinator` (`CoordinatedTree`, placeholders).
 - `check-ios.sh` compiles the extension; `package-ios.sh` embeds it (its own profile when signed); `ios.yml` runs the new tests
   and installs `IOS_FILEPROVIDER_PROVISIONING_PROFILE` when signing; `scripts/smoke-ios-files.sh`.
+- New in the agent: `AgentRuntime.IdentityChanged` (after an enrollment and after signing out).
 - Fix in the client library: `DocumentCatalog.Fetch` could keep a finished fetch registered forever (stale listings; Android too).
 
 ## Decisions
@@ -33,15 +34,18 @@ Branch `task/25-ios-file-provider` (based on local `main` f143f22). Design and f
 - 44293065292: Linux tests caught the `DocumentCatalog.Fetch` race → fixed.
 - 44293848227: everything of the Files part passed; the domain stayed after sign-out → fixed; task 22's "task result" check failed
   once (a known race: the hub ran the folder first).
-- 44302049537: RESULT8.
+- 44302049537: the Files part passed; the domain still stayed after sign-out (no event after a forget) → `AgentRuntime.IdentityChanged`.
+- **44313745951: success — every check of smoke-ios.sh passed** (Files part, sign-out removing the domain, task 22–24 parts,
+  unsigned .ipa built: 47 MB, extension 43 MB / 30 MB executable).
 
 ## Tests
 - `ASync.App.Tests`: 354 pass on Linux (41 `IosFileProviderTests`, a Settings view test); `ASync.Tests` DocumentsTests 41 pass;
-  `dotnet build ASync.slnx` and `scripts/check-ios.sh` without warnings.
+  `dotnet build ASync.slnx` and `scripts/check-ios.sh` without warnings; `AgentEnrollmentTests` (8, one new for `IdentityChanged`).
 - Not run locally: actionlint/shellcheck (running downloaded binaries was refused here).
 
 ## Open items
 - Not verified: a real iPhone, a signed build, locked read-only items in a device's replica, silent pushes reaching the app.
 - Not built: search, recents and thumbnails in the Files app; macOS File Provider (the shared code is ready for it).
-- The `.appex` is 90 MB on disk; the process footprint after a 5 MB fetch was 41 MB.
+- The `.appex` is 43 MB in the device build (90 MB in the simulator's); the process footprint after a 5 MB fetch was 41 MB
+  (phys_footprint measured from the Mac on the simulator).
 - Drop `_AsyncEmbedFileProvider` once the pinned ios workload has dotnet/macios' `Returns` fix.

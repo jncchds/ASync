@@ -2544,8 +2544,8 @@ store's move, its resumption, its fallback, the sealed store read through the mo
 tree, a picked folder reading through the coordination), `BackgroundTests` (the Settings line on an iPhone without the group).
 `scripts/smoke-ios-files.sh` on the simulator: see "Verified on the simulator" below.
 
-**Verified on the simulator** (`scripts/smoke-ios-files.sh`, ios.yml, iOS 26.5, iPhone 17; runs 44258823162 … RUN8, see below):
-the extension embedded (`PlugIns/ASyncFileProvider.appex`, 90 MB on disk); the app first launched as a build without the group
+**Verified on the simulator** (`scripts/smoke-ios-files.sh`, ios.yml, iOS 26.5, iPhone 17; runs 44258823162 … 44313745951; the last one passed every check of smoke-ios.sh):
+the extension embedded (`PlugIns/ASyncFileProvider.appex`: 90 MB in the simulator build, 43 MB with a 30 MB executable in the device build of the unsigned .ipa, which is 47 MB in all); the app first launched as a build without the group
 (`ASYNC_NO_APP_GROUP=1`): no domain, the store in the app, Settings' line; launched with it: the app group and the Keychain group
 honoured by ad hoc signing, task 21's store moved, the device still enrolled with its folders, the domain "ASync — 127.0.0.1"
 registered with a user-visible URL under `Library/CloudStorage`; through coordinated reads and writes from the app (which make the
@@ -2553,7 +2553,7 @@ system call the extension): the root lists the folders, a TwoWay folder its file
 extension is byte-identical with async-cli's, a file saved through the provider reaches the server and the other device, a write
 into the Mirror folder is refused (nothing reaches the server; the Files app shows the item with an upload error), the Backup folder
 lists its snapshot and a file of it reads back, a change made on the server is signalled (the generation moves) and the new content
-arrives; the extension's process measured from the Mac: **phys_footprint 41 MB** (footprint 38 MB) after the 5 MB fetch;
+arrives; signing out removes the domain; the extension's process measured from the Mac: **phys_footprint 41 MB** (footprint 38 MB) after the 5 MB fetch;
 `Environment.WorkingSet` answers 0 inside the extension, so its own file only records the managed heap (about 2 MB). Screenshots:
 `docs/screenshots/ios-files-root-*.png`, `ios-files-folder-*`, `ios-files-snapshot-*`, `ios-files-settings-unsigned-*`.
 
