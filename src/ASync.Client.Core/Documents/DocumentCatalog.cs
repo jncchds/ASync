@@ -63,8 +63,8 @@ public sealed record DocumentListing(IReadOnlyList<DocumentEntry> Entries, strin
 }
 
 /// <summary>
-/// The person's ASync folders as documents, for the Android documents provider (BCL only, so it is unit-tested with local
-/// storage): browse, read (cached or ranged), and for TwoWay folders create, write, rename, delete, copy and move, all
+/// The person's ASync folders as documents, for the Android documents provider and the iOS File Provider extension (BCL
+/// only, so it is unit-tested with local storage): browse, read (cached or ranged), and for TwoWay folders create, write, rename, delete, copy and move, all
 /// through <see cref="PlainStore"/> exactly as a sync would (versions kept, deletions to the trash, other devices told).
 /// Backup folders are read-only: one directory per snapshot, newest first, with its tree.
 /// <para>

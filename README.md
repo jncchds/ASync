@@ -792,9 +792,42 @@ To build it: `dotnet workload install android`, an Android SDK (`ANDROID_HOME`) 
   Live Photos, edits, RAW and iCloud originals.
 - **Contacts and calendars** (*New folder… → Contacts / Calendars*): see [Backing up contacts and calendars](#backing-up-contacts-and-calendars),
   with what iOS keeps from apps (notes, writing guests).
-- **Not yet:** ASync's folders in the Files app. Files of iCloud Drive that are not
-  downloaded to the iPhone yet are not fetched. Tried on the iOS simulator only (in CI), not on an iPhone yet; the camera
-  scanner and real background slots can only be tried on one.
+- **In the Files app:** your folders and backups as the location **ASync — <your server>**, files fetched when opened (iOS 16
+  and later, a signed build): see [ASync in the iOS Files app](#async-in-the-ios-files-app).
+- **Picked folders in iCloud Drive or another app's storage** work also when their files are not downloaded to the iPhone: ASync
+  asks the provider for them (and waits while they download) instead of failing.
+- **Not yet:** tried on the iOS simulator only (in CI), not on an iPhone yet; the camera scanner and real background slots can
+  only be tried on one.
+
+### ASync in the iOS Files app
+
+<p>
+  <img src="docs/screenshots/ios-files-root-light.png" alt="ASync's folders in the Files app" width="24%">
+  <img src="docs/screenshots/ios-files-folder-light.png" alt="A two-way folder in the Files app" width="24%">
+  <img src="docs/screenshots/ios-files-snapshot-dark.png" alt="A backup snapshot, dark" width="24%">
+  <img src="docs/screenshots/ios-files-settings-unsigned-light.png" alt="Settings of a build without the Files app location" width="24%">
+</p>
+
+As on Android, your ASync folders show in the iPhone's **Files** app and in every app's file picker ("attach", "open", "save to",
+"Save to Files"), without syncing them to the iPhone first: files are fetched when you open them.
+- **Finding it:** in *Files*, *Browse* → **ASync — <your server>** under *Locations* (if it is not listed: *⋯ → Edit* and turn it
+  on). It is there once the iPhone is enrolled and goes away when you sign out; if the iPhone was removed from your account, it
+  says so ("Open ASync to enroll it again").
+- **Two-way folders:** browse, open, save, create, rename, move and delete. Changes go to the server exactly as a sync's would:
+  an overwritten file keeps its old content as a version, a deleted one goes to the folder's trash (both restorable in the web UI
+  under *Files*), your other devices pick the change up, and if the folder is also synced to a folder on this iPhone, that copy
+  catches up the next time ASync runs.
+- **Mirror folders** are read-only here (the device that uploads them decides what is in them), and so are **backups**: one folder
+  per snapshot, newest first, named by date, time and short id. Copy a file out to change or restore it. End-to-end encrypted
+  backups open once they are unlocked in the app.
+- **Large files** are streamed to the iPhone when opened, never held whole in memory; iOS keeps the files you opened and removes
+  them again when it needs the space (or *Remove Download* in the Files app). Opening a file needs the server.
+- **Changes from other devices** show by themselves while ASync can be woken (its connection while open, a silent push in a build
+  signed for push) and otherwise the next time ASync runs or the Files app asks again (opening the folder).
+- **What it needs:** a build signed with a paid Apple developer account (the App Store, TestFlight or your own signing), with
+  the app group `group.ua.pp.chds.async` for the app and its extension. The sideloaded `ASync-<version>-unsigned.ipa` cannot
+  have it (SideStore and AltStore re-sign with a free Apple ID, which gives an app no app group of this name): everything else
+  works as before, and *Settings* says "The Files app location needs a signed build".
 
 ### Background sync on iOS
 
