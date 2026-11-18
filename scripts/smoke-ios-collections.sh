@@ -122,9 +122,11 @@ web_shot() { # FOLDER-NAME OTHER-FOLDER-NAME SHOT-NAME
   local mode js
   js=$(cat <<EOF
 (async () => {
-  const edit = [...document.querySelectorAll('button')].filter(b => b.textContent.trim() === 'Edit').find(b => {
+  const find = () => [...document.querySelectorAll('tr button')].filter(b => b.textContent.trim() === 'Edit').find(b => {
     let e = b; while (e && !e.textContent.includes('$1')) e = e.parentElement; return e && !e.textContent.includes('$2'); });
-  if (!edit) return 'no Edit button';
+  let edit = find();
+  for (let i = 0; !edit && i < 30; i++) { await new Promise(r => setTimeout(r, 500)); edit = find(); }
+  if (!edit) return 'no Edit button on the device row';
   edit.click();
   await new Promise(r => setTimeout(r, 5000));
   document.querySelector('form')?.scrollIntoView({ block: 'start' });

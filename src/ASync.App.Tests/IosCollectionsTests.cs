@@ -609,6 +609,7 @@ public sealed class IosCollectionsTests : IDisposable
         var moved = Assert.Single(series.Exceptions);
         Assert.Equal(("Standup (moved)", KyivMs(2026, 10, 26, 10)), (moved.Title, moved.OriginalStart));
         Assert.Equal("Europe/Kyiv;20261102T100000", series.ExDate);
+        Assert.Equal(3, CalendarSource().Calendars().Single().Events); // the web UI's count too
 
         // A moved single event of another series' date is not taken: it is no occurrence the other series lacks.
         _kit.Put(new EKEventData

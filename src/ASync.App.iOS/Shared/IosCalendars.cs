@@ -459,9 +459,12 @@ public sealed class IosCalendarSource(IEventKit kit, Func<long>? now = null, Act
         Need();
         var calendars = Offered();
         var from = _now() - CollectionLimits.DefaultPastDays * 86400000L;
-        var counts = Occurrences([.. calendars.Select(c => c.Id)], from, Until)
-            .GroupBy(o => (o.CalendarId, o.ExternalId is { Length: > 0 } x ? x : o.EventId))
-            .GroupBy(g => g.Key.CalendarId).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        // Counted as the backup would write them: a moved occurrence with an identifier of its own is no event of its own.
+        var to = Until;
+        var cache = new Dictionary<string, EKEventData?>(StringComparer.Ordinal);
+        var counts = IosEventMapping.Events(Occurrences([.. calendars.Select(c => c.Id)], from, to),
+                id => cache.TryGetValue(id, out var e) ? e : cache[id] = kit.Event(id), Device, from, to)
+            .GroupBy(e => e.CalendarId).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         return [.. calendars.Select(c => IosEventMapping.Calendar(c, counts.GetValueOrDefault(c.Id))).OrderBy(c => c.Name, StringComparer.Ordinal).ThenBy(c => c.Id, StringComparer.Ordinal)];
     }
 
