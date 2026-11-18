@@ -53,6 +53,12 @@
 	<string>ASync backs up the photos and videos you choose, as they are, to your own ASync server. It never changes or deletes anything in your library.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>ASync puts photos and videos back into your library when you restore them from a backup.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>ASync backs up the contacts of the accounts you choose to your own ASync server, and adds them back when you restore a backup. It never changes or deletes a contact.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>ASync backs up the events of the calendars you choose to your own ASync server, and adds them back when you restore a backup. It never changes or deletes an event.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>ASync backs up the events of the calendars you choose to your own ASync server, and adds them back when you restore a backup. It never changes or deletes an event.</string>
 	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>

@@ -34,7 +34,8 @@ namespace ASync.App.iOS;
 /// <c>bg-wake &lt;reason&gt;</c> (a silent
 /// push handled in the app), <c>bg-reminder &lt;days&gt;</c>, <c>notify-permission</c> (the system's question), <c>editconditions
 /// &lt;folder&gt;</c>.</para>
-/// <para>Photos (task 23): <c>photos…</c>, see <see cref="PhotosAutomation"/>.</para>
+/// <para>Photos (task 23): <c>photos…</c>, see <see cref="PhotosAutomation"/>. Contacts and calendars (task 24): <c>pim…</c>, see
+/// <see cref="CollectionsAutomation"/>.</para>
 /// </summary>
 internal static class Automation
 {
@@ -342,8 +343,8 @@ internal static class Automation
                 Folder(shell, arg).EditConditionsCommand.Execute(null);
                 return "ok";
             default:
-                // Photos (task 23): PhotosAutomation.
-                return await PhotosAutomation.RunAsync(op, arg, shell) ?? $"unknown command \"{op}\"";
+                // Photos (task 23): PhotosAutomation; contacts and calendars (task 24): CollectionsAutomation.
+                return await PhotosAutomation.RunAsync(op, arg, shell) ?? await CollectionsAutomation.RunAsync(op, arg, shell) ?? $"unknown command \"{op}\"";
         }
     }
 

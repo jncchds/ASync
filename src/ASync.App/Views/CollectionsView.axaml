@@ -12,6 +12,7 @@
         <StackPanel Name="Permission" Spacing="10" IsVisible="{Binding NeedsPermission}">
           <TextBlock FontWeight="SemiBold" Text="{Binding PermissionQuestion}" TextWrapping="Wrap" />
           <TextBlock Name="Explanation" Text="{Binding Explanation}" TextWrapping="Wrap" />
+          <TextBlock Name="PlatformNote" Classes="muted small" Text="{Binding PlatformNote}" TextWrapping="Wrap" IsVisible="{Binding HasPlatformNote}" />
           <Button Name="AllowCollections" Content="{Binding AllowText}" Command="{Binding AllowCommand}"
                   HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <Button Classes="secondary" Content="Open the app's settings" Command="{Binding OpenSettingsCommand}"

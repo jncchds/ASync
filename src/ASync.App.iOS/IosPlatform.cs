@@ -157,6 +157,11 @@ public sealed class IosPlatform(IosTreeFactory trees) : IPlatformServices
     /// <summary>PhotoKit's permission, the limited-library picker and the iCloud downloads setting (task 23).</summary>
     public IPhotoAccess? Photos => IosPhotos.Access;
 
+    // Contacts and calendars (task 24): the Contacts framework and EventKit.
+    public ICollectionAccess? Contacts => IosCollections.ContactsAccess;
+
+    public ICollectionAccess? Calendars => IosCollections.CalendarsAccess;
+
     /// <summary>Background App Refresh, the notification permission, Apple's push and the reminder (task 22).</summary>
     public IBackgroundServices? Background => IosBackground.Services;
 
