@@ -56,7 +56,11 @@ public sealed record DocumentEntry(DocumentId Id, string Name, bool IsDirectory,
 /// <param name="Info">A note to show above the listing (read-only folder…).</param>
 /// <param name="Error">Why the listing is empty (cannot reach the server, locked…).</param>
 /// <param name="Loading">The listing is still being fetched; a change notification follows.</param>
-public sealed record DocumentListing(IReadOnlyList<DocumentEntry> Entries, string? Info = null, string? Error = null, bool Loading = false);
+public sealed record DocumentListing(IReadOnlyList<DocumentEntry> Entries, string? Info = null, string? Error = null, bool Loading = false)
+{
+    /// <summary>What made the listing fail, when it was an exception (iOS's File Provider maps its type to the system's errors).</summary>
+    public Exception? Failure { get; init; }
+}
 
 /// <summary>
 /// The person's ASync folders as documents, for the Android documents provider (BCL only, so it is unit-tested with local
@@ -224,7 +228,7 @@ public sealed class DocumentCatalog
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return new DocumentListing([], Error: Describe(e));
+            return new DocumentListing([], Error: Describe(e)) { Failure = e };
         }
     }
 

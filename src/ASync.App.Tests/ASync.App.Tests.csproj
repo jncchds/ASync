@@ -27,6 +27,9 @@
     <!-- The iOS head's plain C# (folder locations, bookmark trees, the sealed store, the browse scope, pairing links): tested
          here, built into src/ASync.App.iOS (which only builds on a Mac). -->
     <Compile Include="..\ASync.App.iOS\Shared\*.cs" LinkBase="Linked\iOS" />
+    <!-- The File Provider extension's plain C# (identifiers, items, pages, anchors, the change log, the operations, the host):
+         tested here, built into src/ASync.App.iOS.FileProvider (task 25). -->
+    <Compile Include="..\ASync.App.iOS.FileProvider\Shared\*.cs" LinkBase="Linked\iOS.FileProvider" />
     <!-- The local tree contract, run here against the iOS bookmark tree. -->
     <Compile Include="..\ASync.Tests\Local\LocalTreeContract.cs" Link="Linked\LocalTreeContract.cs" />
   </ItemGroup>
