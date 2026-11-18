@@ -215,15 +215,36 @@ public static class IosEventMapping
             .Select(g => g.DistinctBy(o => o.OccurrenceDate ?? o.Start).ToList())
             .ToList();
         static bool Recurring(List<EKEventData> g) => g.Any(o => o.Rules.Count > 0 && !o.IsDetached);
-        // Detached occurrences that came under an identifier of their own: into the series with their UID in the same calendar.
-        foreach (var orphan in groups.Where(g => !Recurring(g) && g.All(o => o.IsDetached)).ToList())
+        // Detached occurrences listed under an identifier (and, on the iPhone's own calendars, a UID) of their own — seen on the
+        // simulator: into the series of the same calendar with their UID, else the one series whose rule has their original date
+        // and lists no occurrence then.
+        var lo = from + Margin;
+        var hi = to - Margin;
+        var expected = new Dictionary<List<EKEventData>, HashSet<long>?>();
+        HashSet<long>? Expected(List<EKEventData> series)
         {
-            var o = orphan[0];
-            if (groups.FirstOrDefault(g => g != orphan && Recurring(g) && g[0].CalendarId == o.CalendarId && Key(g[0]) == Key(o)) is { } series)
+            if (expected.TryGetValue(series, out var set)) return set;
+            var head = Head(series, first, device);
+            var list = head.Basis.Rules.Count == 1 && hi > lo ? Occurrences(head, device, lo, hi) : null;
+            return expected[series] = list?.ToHashSet();
+        }
+        foreach (var orphan in groups.Where(g => !Recurring(g) && g.Count == 1 && LooksDetached(g[0])).ToList())
+        {
+            var o = orphan[0] with { IsDetached = true };
+            var same = groups.Where(g => g != orphan && Recurring(g) && g[0].CalendarId == o.CalendarId).ToList();
+            var series = same.FirstOrDefault(g => Key(g[0]) == Key(o));
+            if (series is null)
             {
-                series.AddRange(orphan);
-                groups.Remove(orphan);
+                var candidates = same.Where(g =>
+                {
+                    var original = Original(o, g[0].AllDay, device);
+                    return Expected(g) is { } e && e.Contains(original) && g.All(x => Original(x, g[0].AllDay, device) != original);
+                }).Take(2).ToList();
+                series = candidates.Count == 1 ? candidates[0] : null;
             }
+            if (series is null) continue;
+            series.Add(o);
+            groups.Remove(orphan);
         }
         var result = new List<CalendarEvent>();
         foreach (var g in groups)
@@ -242,16 +263,42 @@ public static class IosEventMapping
         return [.. result.OrderBy(e => e.Id, StringComparer.Ordinal)];
     }
 
+    /// <summary>Deleted occurrences are inferred only this far inside the listed window (a moved one near its edge could look deleted).</summary>
+    private const long Margin = 7L * 86400000;
+
+    /// <summary>A detached occurrence: EventKit says so, or it starts at another time than it originally did.</summary>
+    private static bool LooksDetached(EKEventData o) => o.IsDetached || o.OccurrenceDate is { } od && od != o.Start;
+
+    /// <summary>An occurrence's original start as the model keeps it (all-day: midnight UTC of its date).</summary>
+    private static long Original(EKEventData o, bool allDay, TimeZoneInfo device) =>
+        allDay ? DayStart(o.OccurrenceDate ?? o.Start, device) : o.OccurrenceDate ?? o.Start;
+
+    private sealed record SeriesHead(EKEventData Basis, long SeriesStart, bool AllDay, TimeZoneInfo Zone);
+
+    /// <summary>What a series is: its basis (a regular occurrence with the rule) and its first start (<c>eventWithIdentifier</c>).</summary>
+    private static SeriesHead Head(List<EKEventData> g, Func<string, EKEventData?> first, TimeZoneInfo device)
+    {
+        var regular = g.Where(o => !o.IsDetached).OrderBy(o => o.OccurrenceDate ?? o.Start).ToList();
+        var head = first(regular[0].EventId);
+        var basis = head is { IsDetached: false, Rules.Count: > 0 } ? head : regular.FirstOrDefault(o => o.Rules.Count > 0) ?? regular[0];
+        var seriesStart = head is not null ? head.OccurrenceDate ?? head.Start : basis.OccurrenceDate ?? basis.Start;
+        return new SeriesHead(basis, seriesStart, basis.AllDay, basis.AllDay ? TimeZoneInfo.Utc : Zone(basis.TimeZone ?? device.Id));
+    }
+
+    /// <summary>The original starts the series' (single) rule has in [lo, hi), as the model keeps them; null when not computed.</summary>
+    private static List<long>? Occurrences(SeriesHead h, TimeZoneInfo device, long lo, long hi)
+    {
+        var rule = h.Basis.Rules[0];
+        var startLocal = h.AllDay ? DateTimeOffset.FromUnixTimeMilliseconds(DayStart(h.SeriesStart, device)).UtcDateTime : IosRecurrence.Local(h.SeriesStart, h.Zone);
+        return IosRecurrence.Occurrences(rule with { Until = rule.Until is { } u && h.AllDay ? DayEnd(u + 1000, device) - 1 : rule.Until },
+            startLocal, h.Zone, lo, hi);
+    }
+
     private static CalendarEvent Series(List<EKEventData> g, Func<string, EKEventData?> first, TimeZoneInfo device, long from, long to, Action<string>? log)
     {
         var listed = g.OrderBy(o => o.OccurrenceDate ?? o.Start).ToList();
-        var regular = listed.Where(o => !o.IsDetached).ToList();
-        var head = first(g[0].EventId);
-        var basis = head is { IsDetached: false, Rules.Count: > 0 } ? head : regular.FirstOrDefault(o => o.Rules.Count > 0) ?? regular[0];
-        var seriesStart = head is not null ? head.OccurrenceDate ?? head.Start : basis.OccurrenceDate ?? basis.Start;
-        var allDay = basis.AllDay;
-        var zone = allDay ? TimeZoneInfo.Utc : Zone(basis.TimeZone ?? device.Id);
-        var rule = basis.Rules[0];
+        var h = Head(g, first, device);
+        var (basis, seriesStart, allDay, zone) = (h.Basis, h.SeriesStart, h.AllDay, h.Zone);
         var seconds = allDay
             ? (DayEnd(basis.End, device) - DayStart(basis.Start, device)) / 1000
             : Math.Max(0, (basis.End - basis.Start) / 1000);
@@ -264,21 +311,18 @@ public static class IosEventMapping
         };
         if (basis.Rules.Count > 1) log?.Invoke($"\"{basis.Title}\" repeats by {basis.Rules.Count} rules: deleted occurrences are not inferred.");
 
-        long Original(EKEventData o) => allDay ? DayStart(o.OccurrenceDate ?? o.Start, device) : o.OccurrenceDate ?? o.Start;
+        long Original(EKEventData o) => IosEventMapping.Original(o, allDay, device);
         var exceptions = listed.Where(o => o.IsDetached)
             .Select(o => Plain(o, device, $"{basis.EventId}@{Original(o).ToString(CultureInfo.InvariantCulture)}", "") with { OriginalStart = Original(o) })
             .ToList();
 
         // Deleted occurrences: what the rule has, well inside the listed window, that EventKit does not list.
-        const long Margin = 7L * 86400000;
         var lo = from + Margin;
         var hi = to - Margin;
         string? exDate = null;
         if (basis.Rules.Count == 1 && hi > lo)
         {
-            var startLocal = allDay ? DateTimeOffset.FromUnixTimeMilliseconds(master.Start).UtcDateTime : IosRecurrence.Local(seriesStart, zone);
-            var expected = IosRecurrence.Occurrences(rule with { Until = rule.Until is { } u && allDay ? DayEnd(u + 1000, device) - 1 : rule.Until },
-                startLocal, zone, lo, hi);
+            var expected = Occurrences(h, device, lo, hi);
             var seen = listed.Select(Original).Where(t => t >= lo && t < hi).ToHashSet();
             if (expected is null) log?.Invoke($"\"{basis.Title}\": its rule ({master.RRule}) is not computed here: deleted occurrences are not inferred.");
             else if (seen.Any(t => !expected.Contains(t)))

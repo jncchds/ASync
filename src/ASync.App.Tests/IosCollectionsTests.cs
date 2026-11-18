@@ -117,7 +117,7 @@ public sealed class IosCollectionsTests : IDisposable
     [Theory]
     [InlineData("_$!<Mobile>!$_", IosContactMapping.LabelKind.Phone, "cell", null)]
     [InlineData("iPhone", IosContactMapping.LabelKind.Phone, "cell", "iPhone")]
-    [InlineData("_$!<AppleWatch>!$_", IosContactMapping.LabelKind.Phone, "cell", "Apple Watch")]
+    [InlineData("Apple Watch", IosContactMapping.LabelKind.Phone, "cell", "Apple Watch")]
     [InlineData("_$!<HomeFAX>!$_", IosContactMapping.LabelKind.Phone, "home,fax", null)]
     [InlineData("_$!<OtherFAX>!$_", IosContactMapping.LabelKind.Phone, "fax", null)]
     [InlineData("_$!<Main>!$_", IosContactMapping.LabelKind.Phone, "", "Main")]
@@ -137,7 +137,7 @@ public sealed class IosCollectionsTests : IDisposable
     [Theory]
     [InlineData("cell", null, IosContactMapping.LabelKind.Phone, "_$!<Mobile>!$_")]
     [InlineData("cell", "iPhone", IosContactMapping.LabelKind.Phone, "iPhone")]
-    [InlineData("cell", "Apple Watch", IosContactMapping.LabelKind.Phone, "_$!<AppleWatch>!$_")]
+    [InlineData("cell", "Apple Watch", IosContactMapping.LabelKind.Phone, "Apple Watch")]
     [InlineData("work,fax", null, IosContactMapping.LabelKind.Phone, "_$!<WorkFAX>!$_")]
     [InlineData("fax", null, IosContactMapping.LabelKind.Phone, "_$!<OtherFAX>!$_")]
     [InlineData("work,cell", null, IosContactMapping.LabelKind.Phone, "_$!<Mobile>!$_")]
@@ -590,6 +590,33 @@ public sealed class IosCollectionsTests : IDisposable
         var series = CalendarSource().Events().Single(e => e.Uid == "uid-standup@example.com");
         Assert.Equal("Standup (moved)", Assert.Single(series.Exceptions).Title);
         Assert.Equal("Europe/Kyiv;20261102T100000", series.ExDate);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Events_ADetachedOccurrenceWithItsOwnUid_JoinsTheSeriesByItsDate(bool unflagged)
+    {
+        // Seen on the iOS 26 simulator: a moved occurrence of a local calendar's series comes with an identifier and a UID of its own.
+        SeedCalendar();
+        var standup = SeedEvents();
+        standup.DetachedId = "OTHER-EVENT";
+        standup.DetachedExternalId = "uid-of-its-own";
+        standup.DetachedUnflagged = unflagged;
+        var events = CalendarSource().Events();
+        Assert.Equal(3, events.Count);
+        var series = events.Single(e => e.Uid == "uid-standup@example.com");
+        var moved = Assert.Single(series.Exceptions);
+        Assert.Equal(("Standup (moved)", KyivMs(2026, 10, 26, 10)), (moved.Title, moved.OriginalStart));
+        Assert.Equal("Europe/Kyiv;20261102T100000", series.ExDate);
+
+        // A moved single event of another series' date is not taken: it is no occurrence the other series lacks.
+        _kit.Put(new EKEventData
+        {
+            EventId = "LONE", CalendarId = Cal, Title = "Lone", Start = KyivMs(2026, 11, 9, 12), End = KyivMs(2026, 11, 9, 13), OccurrenceDate = KyivMs(2026, 11, 9, 10),
+            TimeZone = "Europe/Kyiv",
+        });
+        Assert.Contains(CalendarSource().Events(), e => e.Id == "LONE");
     }
 
     [Fact]

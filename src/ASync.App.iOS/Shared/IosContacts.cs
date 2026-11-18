@@ -160,13 +160,14 @@ public static class IosContactMapping
 
     // ── Labels ──────────────────────────────────────────────────────────────
 
-    /// <summary>The framework's own labels are <c>_$!&lt;Name&gt;!$_</c> (CNLabelHome, CNLabelPhoneNumberMobile, …); a few are plain words.</summary>
-    public static string SystemLabel(string name) => name is "iPhone" or "iCloud" ? name : $"_$!<{name}>!$_";
+    /// <summary>The framework's own labels are <c>_$!&lt;Name&gt;!$_</c> (CNLabelHome, CNLabelPhoneNumberMobile, …); a few are plain words (<c>iPhone</c>, <c>iCloud</c>, <c>Apple Watch</c>: seen on iOS 26).</summary>
+    public static string SystemLabel(string name) => name switch { "iPhone" or "iCloud" => name, "AppleWatch" => "Apple Watch", _ => $"_$!<{name}>!$_" };
 
     /// <summary>The name of a system label (<c>_$!&lt;Home&gt;!$_</c> → <c>Home</c>), or null for the person's own label.</summary>
     public static string? SystemName(string? label) =>
         label is null ? null
         : label is "iPhone" or "iCloud" ? label
+        : label is "Apple Watch" ? "AppleWatch"
         : label.StartsWith("_$!<", StringComparison.Ordinal) && label.EndsWith(">!$_", StringComparison.Ordinal) && label.Length > 8 ? label[4..^4]
         : null;
 

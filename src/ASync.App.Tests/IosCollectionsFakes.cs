@@ -110,6 +110,9 @@ internal sealed class FakeEventKit : IEventKit
         public Dictionary<long, EKEventData> Detached { get; } = [];
         /// <summary>A detached occurrence listed under an identifier of its own (seen with some Exchange calendars).</summary>
         public string? DetachedId;
+        /// <summary>…and a UID of its own, not flagged detached (the iPhone's own calendars on the iOS 26 simulator).</summary>
+        public string? DetachedExternalId;
+        public bool DetachedUnflagged;
     }
 
     private int _next;
@@ -150,7 +153,7 @@ internal sealed class FakeEventKit : IEventKit
     {
         var m = item.Master;
         if (item.Detached.TryGetValue(original, out var d))
-            return d with { EventId = item.DetachedId ?? m.EventId, ExternalId = m.ExternalId, CalendarId = m.CalendarId, OccurrenceDate = original, IsDetached = true, Rules = [] };
+            return d with { EventId = item.DetachedId ?? m.EventId, ExternalId = item.DetachedExternalId ?? m.ExternalId, CalendarId = m.CalendarId, OccurrenceDate = original, IsDetached = !item.DetachedUnflagged, Rules = [] };
         var length = m.End - m.Start;
         return m with { Start = original, End = original + length, OccurrenceDate = original };
     }

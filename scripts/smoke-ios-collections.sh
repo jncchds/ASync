@@ -95,6 +95,7 @@ seed=$(ctl pim-seed)
 jq -e '.contacts == 3 and (.calendar | length > 0) and (.series | length > 0)' <<<"$seed" >/dev/null \
   && pass "seeded through the frameworks: Alice (photo, iPhone and custom labels), Bob, Smoke Bakery in \"Smoke friends\"; a calendar with Smoke holiday (all-day), Smoke standup (weekly, one moved, one deleted), Smoke dentist (an alarm)" \
   || fail "seed" "$seed"
+ctl pim-raw >"$logs/eventkit-occurrences.json" 2>&1 || true # how EventKit lists the seeded events (for the record)
 smoke_cal=$(jq -r .calendar <<<"$seed")
 monday=$(jq -r .monday <<<"$seed")
 day() { python3 -c 'import sys,datetime;print((datetime.date.fromisoformat(sys.argv[1])+datetime.timedelta(days=int(sys.argv[2]))).strftime("%Y%m%d"))' "$monday" "$1"; }
@@ -167,8 +168,8 @@ adir=$(dirname "${alice:-$work/pim-contacts/none/x}")
 if [[ -n "$alice" ]]; then
   u=$(unfold "$alice")
   ok=1
-  for line in "VERSION:4.0" "FN:Alice Smoke" "N:Smoke;Alice;;;" "NICKNAME:Al" "BDAY:19850415" "TEL;TYPE=cell:+380 50 111 2233" "X-ABLABEL:iPhone" \
-              "X-ABLABEL:Dacha" "EMAIL;TYPE=home:alice@example.com" "ORG:Smoke Labs" "TITLE:Engineer" "IMPP:skype:alice.smoke" \
+  for line in "VERSION:4.0" "FN:Alice Smoke" "N:Smoke;Alice;;;" "NICKNAME:Al" "BDAY:19850415" "TEL;TYPE=cell:+380 50 111 2233" "item1.TEL;TYPE=cell:+380 50 444 5566" "item1.X-ABLABEL:iPhone" \
+              "item2.TEL:+380 44 777 8899" "item2.X-ABLABEL:Dacha" "EMAIL;TYPE=home:alice@example.com" "ORG:Smoke Labs" "TITLE:Engineer" "IMPP:skype:alice.smoke" \
               "IMPP:x-social-twitter:alicesmoke" "RELATED;TYPE=spouse;VALUE=text:Bob Smoke" "CATEGORIES:Smoke friends"; do
     grep -qxF -- "$line" <<<"$u" || { ok=0; fail "Alice's card: no $line" "$u"; break; }
   done

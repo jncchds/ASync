@@ -138,6 +138,13 @@ internal static class CollectionsAutomation
                 return await Task.Run(() => arg.StartsWith("cal", StringComparison.Ordinal) ? WipeCalendar() : WipeContacts());
             case "pim-dump":
                 return await Task.Run(() => arg.StartsWith("cal", StringComparison.Ordinal) ? DumpCalendar() : DumpContacts());
+            case "pim-raw":
+            {
+                // What EventKit lists for the smoke calendar, as it lists it (the logs: how occurrences come).
+                var cal = IosCollections.EventStore.Calendars().First(c => c.Title == SmokeCalendar);
+                var now = DateTimeOffset.UtcNow;
+                return JsonSerializer.Serialize(IosCollections.EventStore.Occurrences([cal.Id], now.AddYears(-1).ToUnixTimeMilliseconds(), now.AddYears(1).ToUnixTimeMilliseconds()), Json);
+            }
             case "pim-labels":
                 return JsonSerializer.Serialize(ContactsBridge.LabelConstants(), Json);
             default:
