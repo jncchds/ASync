@@ -176,10 +176,12 @@ fi
 printf '%s\n' "$(fps)" >"$logs/fp-state-2.json"
 ctl fp-log >"$logs/fileprovider-log-tail.txt" || true
 
-# Screenshots: the Files app at the ASync location, a folder, a snapshot (shareddocuments:// opens it at a path).
+# Screenshots: the Files app at the ASync location, a folder, a snapshot (shareddocuments:// opens it at a path). Once the
+# Files app is in front ASync is suspended and answers nothing: it comes back to the front before each.
+files_at() { in_front; ctl "fp-open $1" >/dev/null || true; sleep 5; }
 if [[ -n "$shots" ]]; then
-  ctl "fp-open " >/dev/null; sleep 4; shot_system files-root
-  ctl "fp-open Phone docs" >/dev/null; sleep 4; shot_system files-folder
-  [[ -n "${snapshot_dir:-}" ]] && { ctl "fp-open Picked/$snapshot_dir" >/dev/null; sleep 4; shot_system files-snapshot; }
+  files_at ""; shot_system files-root
+  files_at "Phone docs"; shot_system files-folder
+  [[ -n "${snapshot_dir:-}" ]] && { files_at "Picked/$snapshot_dir"; shot_system files-snapshot; }
   in_front
 fi

@@ -27,7 +27,6 @@ internal static class ExtensionRuntime
     private static FileClientStore? _store;
     private static (DateTime At, DeviceIdentity? Identity) _identity;
     private static AsyncApiClient? _api;
-    private static long _peak;
 
     public static string? GroupContainer { get; private set; }
 
@@ -118,18 +117,15 @@ internal static class ExtensionRuntime
     }
 
     /// <summary>
-    /// The process's footprint (resident size) at a moment, and the peak so far, into fileprovider/footprint.txt: the smoke
-    /// test reads it next to the system's own measure of the process.
+    /// The managed heap at a moment, into fileprovider/footprint.txt (Environment.WorkingSet answers 0 on iOS: the process's real
+    /// footprint is measured from the Mac by the smoke test, with `footprint`).
     /// </summary>
     public static void Footprint(string moment)
     {
         try
         {
-            var now = Environment.WorkingSet;
-            var peak = Math.Max(Interlocked.Read(ref _peak), now);
-            Interlocked.Exchange(ref _peak, peak);
             File.WriteAllText(Path.Combine(Directory, "footprint.txt"),
-                $"{moment} working-set={now} peak={peak} managed={GC.GetTotalMemory(false)}\n");
+                $"{moment} managed={GC.GetTotalMemory(false)} gc-committed={GC.GetGCMemoryInfo().TotalCommittedBytes}\n");
         }
         catch (Exception) { /* only a measurement */ }
     }

@@ -314,13 +314,15 @@ internal sealed class ProviderItem(FileProviderItem item) : NSObject, INSFilePro
     public NSFileProviderItemVersion ItemVersion =>
         new(NSData.FromArray(FileProviderItems.Bytes(item.ContentVersion)), NSData.FromArray(FileProviderItems.Bytes(item.MetadataVersion)));
 
-    /// <summary>A Mirror folder's or a backup's files are not writable for the person either (the Files app shows them so).</summary>
+    /// <summary>
+    /// Always readable and writable for the owner: read-only items are expressed by the capabilities alone. A directory without
+    /// user-writable cannot be created in the replica (task 25's fourth Mac run: fileproviderd failed every Backup and Mirror
+    /// folder with "cannotSetMetadata", POSIX "Operation not permitted", and they never showed in the root).
+    /// </summary>
     [Export("fileSystemFlags")]
     public NSFileProviderFileSystemFlags FileSystemFlags =>
-        NSFileProviderFileSystemFlags.UserReadable
-        | (item.IsDirectory ? NSFileProviderFileSystemFlags.UserExecutable : 0)
-        | (item.Capabilities.HasFlag(item.IsDirectory ? FileProviderCapabilities.AddingSubItems : FileProviderCapabilities.Writing)
-            ? NSFileProviderFileSystemFlags.UserWritable : 0);
+        NSFileProviderFileSystemFlags.UserReadable | NSFileProviderFileSystemFlags.UserWritable
+        | (item.IsDirectory ? NSFileProviderFileSystemFlags.UserExecutable : 0);
 }
 
 /// <summary>
