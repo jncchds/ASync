@@ -319,9 +319,10 @@ public static class IosEventMapping
         long start, end;
         if (e.AllDay)
         {
+            // EventKit's own form: from local midnight of the first day to the last second of the last day.
             start = DeviceMidnight(e.Start, device);
-            var lastDay = e.Start + Math.Max(0, (seconds / 86400 - 1)) * 86400000L;
-            end = Math.Max(start, DeviceMidnight(lastDay, device));
+            var days = Math.Max(1, (seconds + 86399) / 86400);
+            end = Math.Max(start, DeviceMidnight(e.Start + days * 86400000L, device) - 1000);
         }
         else
         {
@@ -349,6 +350,7 @@ public static class IosEventMapping
         foreach (var line in (text ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var semi = line.IndexOf(';');
+            if (semi < 0 && line.StartsWith("TZID=", StringComparison.OrdinalIgnoreCase)) semi = line.IndexOf(':'); // TZID=zone:values
             var tz = zone;
             var list = line;
             if (semi > 0)
