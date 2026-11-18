@@ -3074,7 +3074,8 @@ tested on Linux against `FakeContacts` / `FakeEventKit`.
   `xmpp`, Skype → `skype`, …), **social profiles** as `IMPP:x-social-<service>:<user>` (vCard 4 has no property; a profile with only a
   URL becomes a labelled URL), the photo (`imageData`, else the thumbnail), the groups (`CNGroup`s with members) as CATEGORIES, the
   display name from `CNContactFormatter` (the person's name order).
-- **Labels** (`IosContactMapping.FromLabel` / `ToLabel`): the framework's own labels are `_$!<Name>!$_` (plain `iPhone` and `iCloud`):
+- **Labels** (`IosContactMapping.FromLabel` / `ToLabel`): the framework's own labels are `_$!<Name>!$_` (plain `iPhone`, `iCloud` and
+  `Apple Watch`, as the constants read on the iOS 26 simulator show):
   Mobile → `cell`, Home → `home`, Work → `work`, HomeFAX → `home,fax`, WorkFAX → `work,fax`, OtherFAX → `fax`, Pager → `pager`, Other →
   no type; iPhone → `cell` + X-ABLABEL `iPhone`, Apple Watch, Main, School, Homepage, iCloud and system relation names other than
   parent/child/friend/spouse → X-ABLABEL; custom labels as they are. Back: the system label a type and label came from, a label with a
@@ -3105,8 +3106,10 @@ tested on Linux against `FakeContacts` / `FakeEventKit`.
 - **Events come from occurrences.** EventKit has no "list the series" call: `eventsMatchingPredicate` lists occurrences (at most four
   years per predicate; the source asks in pieces of three, from "events since" — everything: from 1970 — to **five years ahead**, the
   horizon a never-ending series needs) and drops the deleted ones without saying so. `IosEventMapping.Events` builds the series back:
-  occurrences grouped by `eventIdentifier` (a detached occurrence listed under an identifier of its own joins the series with its
-  `calendarItemExternalIdentifier` in the same calendar); a single event as it is; a series as its master — the start of its first
+  occurrences grouped by `eventIdentifier`; **a detached occurrence listed under an identifier of its own** — on the iPhone's own
+  calendars (iOS 26 simulator, task 24's first CI run) it even has a `calendarItemExternalIdentifier` of its own — joins the series
+  with its UID in the same calendar, else the one series whose rule has its original date (`occurrenceDate`, which differs from its
+  start; `isDetached` is not relied on) and lists no occurrence then; a single event as it is; a series as its master — the start of its first
   occurrence (`eventWithIdentifier`), the length as DURATION, the rule as RRULE — with its **detached occurrences as exceptions**
   (RECURRENCE-ID = `occurrenceDate`; a cancelled one keeps STATUS:CANCELLED) and **deleted occurrences as EXDATE**: the rule's
   occurrences (`IosRecurrence.Occurrences`, wall time in the event's zone) that EventKit no longer lists, inferred only more than a week
@@ -3579,7 +3582,9 @@ Open questions:
   container with `unifyResults = false`, or a contact linked across accounts comes back as one unified card in the wrong container.
   EventKit lists occurrences, not series, at most four years per predicate, and never says which occurrences were deleted: the
   series and its EXDATEs are rebuilt (`IosEventMapping.Events`); `eventIdentifier` changes with syncs, the external identifier is the
-  UID. An all-day event's `endDate` is the last second of its last day. `EKEventStoreChanged` and `CNContactStoreDidChange` are
+  UID — except that a moved occurrence of a local calendar's series gets an identifier and a UID of its own (match it by its
+  `occurrenceDate`). `CNLabelPhoneNumberAppleWatch` is the plain "Apple Watch", not `_$!<…>!$_`. An open permission question
+  survives the app's relaunch on the simulator: restart the simulator before showing another. An all-day event's `endDate` is the last second of its last day. `EKEventStoreChanged` and `CNContactStoreDidChange` are
   posted for the app's own saves too (a restore triggers a backup that finds nothing new). An event store made before the
   permission was granted may not see the calendars: it is made again after the answer.
 - **iOS app delegate methods** that Avalonia's `AvaloniaAppDelegate` lacks are added with `[Export]` in our subclass
