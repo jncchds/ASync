@@ -78,9 +78,9 @@ internal static class FileProviderAutomation
 
     private static Task<NSUrl> UrlAsync(string identifier)
     {
+        if (!FileProviderDomains.Replicated) throw new PlatformNotSupportedException("The File Provider needs iOS 16.");
         var manager = FileProviderDomains.Manager() ?? throw new InvalidOperationException("No File Provider domain is registered.");
         var done = new TaskCompletionSource<NSUrl>();
-        if (!OperatingSystem.IsIOSVersionAtLeast(16) || OperatingSystem.IsMacCatalyst()) throw new PlatformNotSupportedException();
         manager.GetUserVisibleUrl(new NSString(identifier), (url, error) =>
         {
             if (url is not null) done.TrySetResult(url);

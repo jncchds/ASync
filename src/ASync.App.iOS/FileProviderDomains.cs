@@ -47,7 +47,7 @@ public static class FileProviderDomains
     /// <summary>iOS 16 or later, not Mac Catalyst: NSFileProviderReplicatedExtension and its domains.</summary>
     [SupportedOSPlatformGuard("ios16.0")]
     [UnsupportedOSPlatformGuard("maccatalyst")]
-    private static bool Replicated => OperatingSystem.IsIOSVersionAtLeast(16) && !OperatingSystem.IsMacCatalyst();
+    internal static bool Replicated => OperatingSystem.IsIOSVersionAtLeast(16) && !OperatingSystem.IsMacCatalyst();
 
     /// <summary>What happened at start and since (the automation's <c>fp-state</c>, the log).</summary>
     public static string Migration { get; private set; } = "";
