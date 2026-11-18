@@ -3442,7 +3442,10 @@ Open questions:
   photo permission: register only once access is granted. `modificationDate` moves with favourites and album changes: never use it
   as an original's time in the tree. A `requestData` error arrives at the end of the pieces, after `OpenRead` returned: whatever
   watches for "not available now" must watch the stream (`MediaTree.WatchedStream`). Pass NSNumbers to `NSPredicate` as `%@`.
-  `PHAssetResource.uniformTypeIdentifier` is obsolete on iOS 26 (use `contentType` there; the analyzer flags it).
+  `PHAssetResource.uniformTypeIdentifier` is obsolete on iOS 26 (use `contentType` there; the analyzer flags it). **Simulator
+  permission:** on iOS 26 PhotoKit asks TCC for `kTCCServicePhotos` with auth version 2, while `xcrun simctl privacy grant photos`
+  writes a version-1 row: the app then reads "not determined" (tccd's log: `authValue=1, authVersion=2`). The smoke test writes the
+  row into the simulator's `TCC.db` with `auth_version` 2 while it is shut down (`auth_value` 2 full, 3 limited).
 - **iOS app delegate methods** that Avalonia's `AvaloniaAppDelegate` lacks are added with `[Export]` in our subclass
   (`willFinishLaunching`, the remote-notification callbacks); scene-delegate methods cannot be added that way (Avalonia's scene
   delegate is internal and sealed): the quick action's is added to its Objective-C class at launch (`QuickActions`).

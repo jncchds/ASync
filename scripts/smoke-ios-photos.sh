@@ -95,10 +95,11 @@ shot photos-permission
 ctl back >/dev/null
 
 # Access as the person's answer would give it (simctl cannot tap iOS's question; the question itself is shown at the end of
-# smoke-ios.sh). Granted before anything asks: in task 23's first two Mac runs the app had asked first, and with the question
-# open PhotoKit's read/write status stayed "not determined" whatever `simctl privacy` or the TCC database said. simctl refuses
-# photos-limited: limited access is written into the simulator's TCC database with the simulator shut down (auth_value 3).
-# privacy.log has the TCC rows of each step.
+# smoke-ios.sh). On iOS 26 PhotoKit asks TCC for kTCCServicePhotos with auth version 2 and takes "not determined" from a row
+# of version 1, which is what `xcrun simctl privacy … grant photos` writes (task 23's Mac runs: tccd answered authValue=1,
+# authVersion=2 to the app's first query and granted the version-1 query PhotoKit ignores). So the row is written into the
+# simulator's TCC database with auth_version 2, with the simulator shut down: auth_value 2 = full, 3 = limited (simctl refuses
+# photos-limited). privacy.log has the TCC rows of each step, privacy-*.log what tccd and the photo daemons said.
 tcc_db="$HOME/Library/Developer/CoreSimulator/Devices/$udid/data/Library/TCC/TCC.db"
 sqlite3 "$tcc_db" ".schema access" >"$logs/tcc-schema.log" 2>&1 || true
 tcc_rows() {
@@ -106,9 +107,9 @@ tcc_rows() {
 }
 tcc_write() { # AUTH_VALUE RUN: the photos row set while the simulator is shut down, then booted and the app launched
   xcrun simctl shutdown "$udid"
-  sqlite3 "$tcc_db" "UPDATE access SET auth_value = $1, last_modified = CAST(strftime('%s','now') AS INTEGER) WHERE client = '$bundle' AND service = 'kTCCServicePhotos';
+  sqlite3 "$tcc_db" "UPDATE access SET auth_value = $1, auth_reason = 2, auth_version = 2, last_modified = CAST(strftime('%s','now') AS INTEGER) WHERE client = '$bundle' AND service = 'kTCCServicePhotos';
     INSERT OR IGNORE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags)
-    VALUES ('kTCCServicePhotos', '$bundle', 0, $1, 2, 1, 0);" >>"$logs/privacy.log" 2>&1
+    VALUES ('kTCCServicePhotos', '$bundle', 0, $1, 2, 2, 0);" >>"$logs/privacy.log" 2>&1
   tcc_rows "written: auth_value $1"
   xcrun simctl boot "$udid"
   xcrun simctl bootstatus "$udid" -b >/dev/null
@@ -132,22 +133,9 @@ if wait_for 30 access_is Full; then
   granted="xcrun simctl privacy … grant photos"
 else
   system_log grant
-  note "simctl's grant left PhotoKit at $(photos | jq -r .authorization) (tccd's view: logs/privacy-grant.log): the TCC row with the app's code requirement"
-  # tccd may match an app to a row only through its designated requirement (csreq), which simctl leaves empty.
-  requirement=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')
-  echo "designated requirement: $requirement" >>"$logs/privacy.log"
-  if [[ -n "$requirement" ]] && csreq -r="$requirement" -b "$work/csreq.bin" >>"$logs/privacy.log" 2>&1; then
-    xcrun simctl shutdown "$udid"
-    sqlite3 "$tcc_db" "UPDATE access SET auth_value = 2, csreq = readfile('$work/csreq.bin') WHERE client = '$bundle' AND service = 'kTCCServicePhotos';" >>"$logs/privacy.log" 2>&1
-    tcc_rows "with csreq"
-    xcrun simctl boot "$udid"
-    xcrun simctl bootstatus "$udid" -b >/dev/null
-    launch 3b
-    ctl "notifications off" >/dev/null
-    wait_state '.page == "DashboardViewModel" and .state == "Connected"' 60 || true
-    echo "app: $(photos | jq -c '{access, authorization, addOnly}')" >>"$logs/privacy.log"
-    wait_for 20 access_is Full && granted="the TCC row with the app's code requirement"
-  fi
+  note "simctl's grant (a TCC row of auth version 1) left PhotoKit at $(photos | jq -r .authorization): the row with auth version 2"
+  tcc_write 2 3b
+  wait_for 20 access_is Full && granted="a TCC row of auth version 2 (what PhotoKit asks for on iOS 26)"
 fi
 if [[ -z "$granted" ]]; then
   system_log csreq
