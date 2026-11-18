@@ -67,6 +67,9 @@
 - feat: **the version pill links to the GitHub repository** (web UI sidebar and sign-in page, the apps' top bar), and the
   web UI has **credits**: "by CHDS · built with Claude" under the sidebar and the sign-in card, a Credits card on the
   Account page; the apps' Settings → About says the same with a link to the source code.
+- ci: **the Docker Hub pages describe the images**: publishing a release fills each image's description with the README
+  adapted for Docker Hub (for `async-server` how to run the server, alerts, quotas and limits; for `async-cli` how to run an
+  agent; the rest as links to GitHub) and a short description.
 - docs: the design plan, task briefs (tasks 1–25), planning notes, worker drafts and test records the app was built from are kept in
   `docs/orchestration/`.
 

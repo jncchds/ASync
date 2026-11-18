@@ -3183,6 +3183,14 @@ name or a chosen one, read-only refused, RDATE reported; the change triggers' pl
     The tag must equal `v` + the `VERSION` file, or the build fails. The same tag makes the GitHub Release with
     the desktop, CLI and Android packages (below), published as soon as every test and package job has passed.
   - Image tags are `latest`, the `VERSION` value and `sha-…`.
+  - **Docker Hub descriptions** (tags only): each image's description is the README adapted for Docker Hub by
+    `.github/scripts/dockerhub-readme.mjs` (the same converter as the owner's other repositories, plus `--sections` and
+    `--title`): the README's introduction and the sections about that image (`async-server`: Run it, Alerts, Quotas and
+    storage health, Known limits, License; `async-cli`: Run an agent, License; the matrix's `readme-sections`), the other
+    sections as links to GitHub, relative links and images pointing to GitHub, a link to the repository, at most 25,000
+    bytes; plus a short description, through `peter-evans/dockerhub-description`. `DOCKERHUB_TOKEN` needs the "Read, Write,
+    Delete" scope for it (a "Read & Write" token pushes images but cannot edit descriptions). Renaming one of those README
+    sections fails the step until the matrix names it again.
   - Pushes to branches publish nothing. Pull requests run the tests and the end-to-end test, and a manual run
     (`workflow_dispatch`) builds the chosen ref.
   - **Job order:** `test`, `e2e` and `agent-desktop` (Windows, macOS) run first. `package`, `android` and
