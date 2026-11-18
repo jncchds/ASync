@@ -291,6 +291,20 @@ whole account as **one .vcf** and a whole calendar as **one .ics** too.
 
 Listing accounts and calendars from the web is the same phone setting as browsing folders and albums.
 
+**On an iPhone** it works the same way, with iOS's own words and a few limits iOS sets:
+- The accounts are where iOS keeps contacts: *iPhone* (on the phone only), *iCloud*, *Exchange* or another CardDAV account; the
+  calendars are listed with their account (iCloud, Exchange, the iPhone itself, subscribed calendars, which are backed up but not
+  restored into). The *Birthdays* calendar is left out: iOS makes it from the contacts.
+- When iOS asks, choose **Allow Full Access**. With *Limited Access* to contacts only the contacts you share with ASync are backed up
+  (change it in *Settings › Apps › ASync › Contacts*); calendars' *Add Events Only* is not enough to back anything up. iOS asks once:
+  afterwards *Allow* opens ASync's page in Settings. A restore needs no second question.
+- **Contacts' notes are not backed up**: iOS gives them only to apps Apple has approved for it. A card's iOS labels (*iPhone*, *Main*,
+  *Apple Watch*, your own) and social profiles are kept, and come back as iOS's own labels, also from an Android backup.
+- **Guests** are backed up with each event, but an app cannot put them back: a restore adds the events without them. Each event's
+  repetitions, the occurrences you moved or deleted, alerts and all-day days come back. Events are backed up up to five years ahead.
+- On a new iPhone the accounts and calendars have new identities: a restore goes into the one of the same name (iCloud, say), or
+  you choose where.
+
 ## Known limits
 
 - **Keep each folder's recovery key.** Day to day, backups with standard encryption are opened with a key
@@ -762,7 +776,7 @@ To build it: `dotnet workload install android`, an Android SDK (`ANDROID_HOME`) 
 </p>
 
 **Early (v0.1.6).** The same pages as the Android app, on iOS 15 and later, syncing also in the background as far as iOS allows
-(below), and backing up the photo library. Like on Android, the phone never needs its browser: the server is set up in the web UI on a computer.
+(below), and backing up the photo library, contacts and calendars. Like on Android, the phone never needs its browser: the server is set up in the web UI on a computer.
 - **Adding the iPhone:** scan the QR code of *Devices → Add device* with the app's *Scan the QR code* (or with the Camera
   app: it opens ASync), tap or paste its `async://pair` link, type the server address and the code, or *Approve on your
   computer* (a short code to enter in the web UI there). The device's key is made in the iPhone's **Secure Enclave** and
@@ -776,7 +790,9 @@ To build it: `dotnet workload install android`, an Android SDK (`ANDROID_HOME`) 
   computer, *Browse…* lists the app's own folder (picked folders are chosen on the iPhone).
 - **Photos and videos** (*New folder… → Photos & videos*): see [Backing up photos and videos](#backing-up-photos-and-videos), with
   Live Photos, edits, RAW and iCloud originals.
-- **Not yet:** contacts and calendars; ASync's folders in the Files app. Files of iCloud Drive that are not
+- **Contacts and calendars** (*New folder… → Contacts / Calendars*): see [Backing up contacts and calendars](#backing-up-contacts-and-calendars),
+  with what iOS keeps from apps (notes, writing guests).
+- **Not yet:** ASync's folders in the Files app. Files of iCloud Drive that are not
   downloaded to the iPhone yet are not fetched. Tried on the iOS simulator only (in CI), not on an iPhone yet; the camera
   scanner and real background slots can only be tried on one.
 

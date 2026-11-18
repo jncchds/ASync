@@ -2,6 +2,19 @@
 
 ## v0.1.6 — 2026-11-18
 
+- feat(ios): **the iPhone backs up its contacts and calendars.** *Contacts* and *Calendars* folders work on the iPhone as on
+  Android: everything, or the accounts (the iPhone itself, iCloud, Exchange, CardDAV) and calendars you choose in the web UI from
+  the iPhone's own lists, and for calendars how far back (two years by default). Each contact is a vCard with its photo, labels
+  (iOS's own, such as *iPhone* or *Main*, and yours), birthday and other dates, messaging and social profiles and groups; each event
+  an iCalendar file with its repetitions, the occurrences you moved or deleted, alerts and guests. Unchanged contacts are not read
+  again, so their photos cost nothing after the first backup. Changes are backed up within seconds while ASync is open, and
+  otherwise in iOS's background slots. *Restore into the contacts… / calendars…* adds them back into the account or calendar they
+  came from (on a new iPhone, the one of the same name, such as iCloud's), or one you choose, skipping what is there and never
+  changing or deleting anything. Limits set by iOS: contacts' notes are not backed up (only apps Apple approves may read them),
+  guests cannot be put back by an app (they stay in the backup), and with *Limited Access* only the contacts you share with ASync
+  are backed up. The Birthdays calendar is left out: it is made from the contacts.
+- fix(test): the iOS smoke test's background-task check waits for the task's own result instead of reading it once (it raced
+  when a server event ran the folder first).
 - feat(ios): **the iPhone backs up its photos and videos.** A *Photos & videos* folder works on the iPhone as on Android: all
   photos and videos or the albums you choose in the web UI from the iPhone's own list (your albums and system albums such as
   Favorites, Screenshots, Videos, Selfies, Live Photos, Portrait), without videos or screenshots if you like. Each photo is kept as

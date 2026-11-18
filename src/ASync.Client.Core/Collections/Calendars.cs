@@ -4,7 +4,7 @@ namespace ASync.Client.Core.Collections;
 
 // ── Calendars, platform-neutral (task 20) ─────────────────────────────────────
 //
-// What a phone's calendar provider gives (Android's CalendarContract; iOS's EventKit later) in a shape close to iCalendar (RFC 5545):
+// What a phone's calendar provider gives (Android's CalendarContract; iOS's EventKit since task 24) in a shape close to iCalendar (RFC 5545):
 // times as instants plus the zone they were made in, recurrence rules as iCalendar text, exceptions with the master. ICalendar.Write
 // is a plain mapping. See AGENTS.md "Extra data sources".
 
@@ -74,7 +74,7 @@ public sealed record CalendarEvent
 }
 
 /// <summary>
-/// A device's calendars: Android's CalendarContract (<c>AndroidCalendarSource</c>), iOS's EventKit later, a fake in the tests. Same
+/// A device's calendars: Android's CalendarContract (<c>AndroidCalendarSource</c>), iOS's EventKit (<c>IosCalendarSource</c>), a fake in the tests. Same
 /// threading rules as <see cref="IContactsSource"/>.
 /// </summary>
 public interface ICalendarSource

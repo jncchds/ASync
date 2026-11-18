@@ -113,6 +113,33 @@ has_sel() { pim "$1" | jq -e --argjson f "$2" --arg s "$3" '.folders[] | select(
 wait_for 30 has_sel calendars "$kf" "1 calendar: ASync smoke · events of the last 2 years" \
   && pass "ASync smoke chosen in the web UI; the iPhone's agent has it" || fail "selection on the iPhone" "$(pim calendars | jq -c .folders)"
 
+# The web UI's device form of each folder for the iPhone (its live list): headless Chrome signed in with a refresh cookie
+# (scripts/web-shot.mjs), when the web UI was built into the server (ios.yml builds it for the screenshots).
+web_shot() { # FOLDER-NAME OTHER-FOLDER-NAME SHOT-NAME
+  [[ -z "$shots" ]] && return 0
+  [[ -f "$work/server/wwwroot/index.html" ]] || { note "the web UI is not built into the server: no $3 screenshot"; return 0; }
+  local mode js
+  js=$(cat <<EOF
+(async () => {
+  const edit = [...document.querySelectorAll('button')].filter(b => b.textContent.trim() === 'Edit').find(b => {
+    let e = b; while (e && !e.textContent.includes('$1')) e = e.parentElement; return e && !e.textContent.includes('$2'); });
+  if (!edit) return 'no Edit button';
+  edit.click();
+  await new Promise(r => setTimeout(r, 5000));
+  document.querySelector('form')?.scrollIntoView({ block: 'start' });
+  return 'opened';
+})()
+EOF
+)
+  for mode in light dark; do
+    curl -fsS -c "$work/web-jar" -o /dev/null -X POST "$server/api/auth/login" -H "Content-Type: application/json" --data '{"username":"admin","password":"smoke-password-1"}'
+    node "$root/scripts/web-shot.mjs" "$server" /folders "$shots/ios-$3-$mode.png" --cookie "$(awk '$6 == "async_refresh" { print $7 }' "$work/web-jar")" \
+      --theme "$mode" --size 1280x1000 --wait 6 --js "$js" >>"$logs/web-shot.log" 2>&1 || note "web screenshot $3 ($mode): $(tail -1 "$logs/web-shot.log")"
+  done
+}
+web_shot "iPhone calendars" "iPhone contacts" calendars-web
+web_shot "iPhone contacts" "iPhone calendars" contacts-web
+
 r=$(sync_phone "$cf" 180)
 jq -e '.ok and (.message | test("[0-9]+ contacts in [0-9]+ account"))' <<<"$r" >/dev/null && pass "contacts backed up: $(jq -r .message <<<"$r")" || fail "contacts backup" "$r"
 r=$(sync_phone "$kf" 180)

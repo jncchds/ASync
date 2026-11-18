@@ -2253,8 +2253,10 @@ NSURL as the picker does), add-folder…, setup/unlock, signout, keyinfo, haskey
 
 **Photos** (task 23): PhotoKit into the `MediaTree` of task 19, see "Photos and videos" → "iOS photos (task 23)".
 
-**Not yet (and which task brings it):** contacts and calendars (task 24:
-Contacts and EventKit into task 20's collection trees), the File Provider extension (task 25, with the app group). The camera
+**Contacts and calendars** (task 24): the Contacts framework and EventKit into task 20's collection trees, see "Contacts and calendars"
+→ "iOS contacts and calendars (task 24)".
+
+**Not yet (and which task brings it):** the File Provider extension (task 25, with the app group). The camera
 scanner is only exercised on a device (the simulator has no camera; the simulator's Secure Enclave key worked in CI, the Keychain fallback
 stays for simulators without one); the unsigned .ipa has not been tried on a phone yet.
 
@@ -2398,7 +2400,7 @@ Implemented: the desktop agent service ("Agent service and control channel"), th
 (below), Android's WorkManager work, foreground service, battery prompt, local reminder and UnifiedPush ("Android
 background work (M4-2)"), MediaStore content triggers (task 19), iOS's BGTaskScheduler tasks, background time around runs,
 local reminder, quick action and APNs handling ("iOS background work (task 22)"), and the server's UnifiedPush and direct APNs
-wake-ups ("Push"), and the PhotoKit change observer while the iOS app runs (task 23). Planned: FCM, the relay, iOS 26's
+wake-ups ("Push"), and the PhotoKit, Contacts and EventKit change observers while the iOS app runs (tasks 23, 24). Planned: FCM, the relay, iOS 26's
 `BGContinuedProcessingTask`.
 
 - **Desktop:** the agent runs as a systemd unit, a launchd agent, or a logon task / Windows Service (implemented).
@@ -2413,7 +2415,9 @@ wake-ups ("Push"), and the PhotoKit change observer while the iOS app runs (task
     later. Apple throttles them and drops them if the app was force-quit.
   - A visible notification: the local reminder, and the server's overdue alert push (`loc-key`).
   - Opening the app (and the "Back up now" quick action or `async://sync`) runs every folder.
-  - New photos while the app runs: a `PHPhotoLibraryChangeObserver`, debounced, runs the Photos folders (task 23).
+  - New photos while the app runs: a `PHPhotoLibraryChangeObserver`, debounced, runs the Photos folders (task 23); changed
+    contacts or events: `CNContactStoreDidChange` / `EKEventStoreChanged`, debounced the same way, run the Contacts or Calendars
+    folders (task 24).
   - Later: iOS 26's `BGContinuedProcessingTask` for large backups the user starts.
 - **Android:** WorkManager with constraints, a foreground service during large transfers, and UnifiedPush
   (implemented, M4-2). FCM high-priority data messages for Google Play builds are planned (no Play/Firebase account yet).
@@ -3000,7 +3004,9 @@ membership's selection (like `MediaTree`), listed once when first used.
 **Restore** (`CollectionRestorer`, control op `restore-collections {folderId, snapshot?, target?}`, the card's *Restore into the
 contacts… / calendars…*: first the snapshot (as for photos, `collection-snapshots`) and where to — *The accounts / calendars they came
 from* (`target` null) or one of the phone's writable accounts / calendars): each directory of the snapshot is imported into the target,
-or into the account or calendar its JSON names when the phone still has it (otherwise that directory is reported, not guessed). An
+or into the account or calendar its JSON names when the phone still has it, else the one writable account of the same name and type (a
+calendar: of the same name and account; task 24, for iOS's new identifiers on another iPhone) — otherwise that directory is reported,
+not guessed. An
 entry already there is skipped — a contact with the same id and name, or the same name, phone numbers and email addresses; an event with
 the same UID (or id) and title, or the same title, start, length and rule — and **nothing on the phone is changed or deleted**: a restore
 only inserts (Android: a raw contact with its data rows in one batch, the photo as the photo row's blob; an event with its reminders and
@@ -3027,19 +3033,6 @@ collections}`, `collection-snapshots`, `restore-collections`, and `join-folder` 
 marked, read-only calendars marked, *Events since*); the Folders page shows what each phone backs up and the last backup's counts; the
 snapshot browser's account / calendar directories have *One .vcf* / *One .ics*.
 
-**iOS mapping notes (later, no server or format change):** `IContactsSource` over the Contacts framework: `CNContainer`s are the accounts
-(`identifier` → id; type local / Exchange / CardDAV → typeLabel; iCloud's is CardDAV), `CNContact.identifier` the contact id (`ShortId`
-with `:` / `/` → `_`), its `CNLabeledValue`s map to TYPE or X-ABLABEL exactly as here (`CNLabelHome`, `CNLabelPhoneNumberMobile` = `cell`,
-custom labels as labels), `imageData` → PHOTO, `CNGroup`s → CATEGORIES. iOS has no per-contact version: `Version` null (every contact
-generated and always read, deduplicated) or `CNChangeHistoryFetchRequest` tokens later. iOS 18's limited contacts access =
-`MediaAccess.Partial`. `ICalendarSource` over EventKit: `EKCalendar.calendarIdentifier` → id, `EKSource` → the account, `cgColor` → colour,
-`allowsContentModifications` false = read-only; `EKEvent.calendarItemExternalIdentifier` → UID (ids are unstable across syncs there, so
-UID is the key), `startDate` / `endDate` / `isAllDay` / `timeZone`, `recurrenceRules` → RRULE text, detached occurrences (EventKit lists
-them as events with `isDetached`) → exceptions with `occurrenceDate`, `alarms` (relative offset) → alarms, `attendees` (`EKParticipant`
-role / status / type) → attendees, `lastModifiedDate` → LastModified (so iOS events are incremental by time). The JSON's `source`
-becomes `ios-contacts` / `ios-eventkit`. Change triggers: `CNContactStoreDidChange` and `EKEventStoreChanged` while running, a
-BGProcessingTask otherwise.
-
 **Tests:** `ASync.Tests`: `CollectionBackupTests` (fakes in `Client/FakeCollections.cs`: a vCard written exactly as the format says —
 Unicode, escaping, folding at 75 octets, custom labels, photo — and read back to the same contact; vCard 3 of other programs; the
 contacts tree by account with account.json byte for byte; a second run generating no unchanged contact (no photo read) and seeing a
@@ -3058,6 +3051,123 @@ kind, a computer). `ASync.App.Tests`: `CollectionsTests` (the cards, the explana
 "since" with a vanished one kept, the restore's snapshot and target with WRITE asked only then and its progress, a refused WRITE not
 starting it, New folder and Add to a folder on a phone and not on a computer, the views at 360 px). `scripts/smoke-android.sh` (its
 contacts and calendars part is `scripts/smoke-android-collections.sh`): see its header and "Milestones".
+
+#### iOS contacts and calendars (task 24)
+
+The iPhone backs up its contacts and calendars exactly as Android does, with the same server, Contracts, selection, layout,
+`VCard` / `ICalendar` writers, `CollectionTree`, `CollectionRestorer`, hub list request and app screens; the JSON's `source` is
+`ios-contacts` / `ios-eventkit`, as the format anticipated. Code: `src/ASync.App.iOS/Collections.cs` (the frameworks: `ContactsBridge`,
+`EventKitBridge`, `IosCollectionAccess`, `IosCollections`), `Shared/IosContacts.cs` (`ICNContacts`, `IosContactMapping`,
+`ContactVersionStore`, `IosContactsSource`), `Shared/IosCalendars.cs` (`IEventKit`, `IosEventMapping`, `IosCalendarSource`),
+`Shared/IosRecurrence.cs` (EventKit rules ↔ RRULE, their occurrences), `Shared/IosCollectionTexts.cs` (all linked into ASync.App.Tests),
+`CollectionsAutomation.cs` (tests only). As for photos, the frameworks sit behind thin interfaces without decisions; every mapping is
+tested on Linux against `FakeContacts` / `FakeEventKit`.
+
+**Contacts** (`IosContactsSource` over `ICNContacts`):
+- **Accounts are `CNContainer`s** (`identifier` → id, `HashId` → short id): local → "iPhone", Exchange → "Exchange", CardDAV →
+  "CardDAV", and **iCloud**, which the framework only calls CardDAV: a CardDAV container named "iCloud" (or "Card", as some iOS
+  versions name it) is shown and stored as "iCloud". `type` in account.json: `local`, `exchange`, `carddav`. None is read-only.
+- **Contacts are `CNContact`s fetched per container with `unifyResults = false`**: each container's own record, not the unified card
+  the Contacts app shows (as Android's raw contacts). `identifier` is the id and the UID; the short id is it with `:` / `/` → `_`.
+  Fields: the name parts and phonetic names, nickname, organisation / department / job title, phones, emails, URLs, postal addresses,
+  birthday (`NSDateComponents`, year optional) and dates, relations, instant messaging (service → IMPP scheme: Jabber/GoogleTalk →
+  `xmpp`, Skype → `skype`, …), **social profiles** as `IMPP:x-social-<service>:<user>` (vCard 4 has no property; a profile with only a
+  URL becomes a labelled URL), the photo (`imageData`, else the thumbnail), the groups (`CNGroup`s with members) as CATEGORIES, the
+  display name from `CNContactFormatter` (the person's name order).
+- **Labels** (`IosContactMapping.FromLabel` / `ToLabel`): the framework's own labels are `_$!<Name>!$_` (plain `iPhone` and `iCloud`):
+  Mobile → `cell`, Home → `home`, Work → `work`, HomeFAX → `home,fax`, WorkFAX → `work,fax`, OtherFAX → `fax`, Pager → `pager`, Other →
+  no type; iPhone → `cell` + X-ABLABEL `iPhone`, Apple Watch, Main, School, Homepage, iCloud and system relation names other than
+  parent/child/friend/spouse → X-ABLABEL; custom labels as they are. Back: the system label a type and label came from, a label with a
+  system name (Android's "Main", "Father") as iOS's own, the closest type otherwise (anything with `cell` → Mobile, `fax` → the right
+  FAX). The raw constants are checked on the simulator (`pim-labels`).
+- **Not backed up: notes.** `CNContactNoteKey` needs Apple's `com.apple.developer.contacts.notes` entitlement (granted on request to
+  App Store apps); fetching it without throws, so it is never fetched and a restore adds no notes. Not restored either: the starred
+  flag (iOS keeps favourites elsewhere), non-Gregorian birthdays, previous family name.
+- **Decision: a version derived from the content, not `CNChangeHistoryFetchRequest`.** iOS keeps no per-contact version or modification
+  time. The change-history API is reachable from .NET, but a token only says what changed since the token; a backup still needs, per
+  contact, something to compare with the parent snapshot (also for a new folder, a lost token or a history iOS truncated), and the
+  token's persistence across restores, account changes and resets would be a second state to keep right. Instead the listing reads
+  every contact with every key but the full image (the thumbnail instead) and `IosContactMapping.Version` hashes the card without
+  the photo plus the thumbnail (iOS renders a new thumbnail whenever the photo or its crop changes). `ContactVersionStore`
+  (`ios-contact-versions.json` in the store) remembers when each contact got its version and gives that as its time in the tree, so a
+  changed contact has a new time and size together and an unchanged one keeps both: `BackupRunner` takes it from the parent snapshot
+  without generating it or reading its photo. Losing the file costs one full read.
+- **Access:** `CNAuthorizationStatus` authorized = Full, iOS 18's **limited** = Partial (only the shared contacts are listed and
+  backed up; the screen and card say so in iOS's words). The limited-access picker (`ContactAccessPicker`) is SwiftUI-only and not
+  reachable from .NET: the text points to Settings › Apps › ASync › Contacts. One permission covers adding: with limited access a
+  restore's new contacts join the shared ones.
+
+**Calendars** (`IosCalendarSource` over `IEventKit`):
+- **Calendars are event `EKCalendar`s**: `calendarIdentifier` → id (`HashId` short id), `EKSource` → the account (local → "iPhone";
+  a CalDAV source named iCloud → "iCloud"; Exchange, CalDAV, Subscribed), `CGColor` → `#rrggbb`, `allowsContentModifications` false →
+  read-only (subscribed and holiday calendars: backed up, not restored into). **Decision: the Birthdays calendar is not offered**: iOS
+  makes it from the contacts' birthdays (the Contacts folder keeps them) and nothing can be restored into it.
+- **Events come from occurrences.** EventKit has no "list the series" call: `eventsMatchingPredicate` lists occurrences (at most four
+  years per predicate; the source asks in pieces of three, from "events since" — everything: from 1970 — to **five years ahead**, the
+  horizon a never-ending series needs) and drops the deleted ones without saying so. `IosEventMapping.Events` builds the series back:
+  occurrences grouped by `eventIdentifier` (a detached occurrence listed under an identifier of its own joins the series with its
+  `calendarItemExternalIdentifier` in the same calendar); a single event as it is; a series as its master — the start of its first
+  occurrence (`eventWithIdentifier`), the length as DURATION, the rule as RRULE — with its **detached occurrences as exceptions**
+  (RECURRENCE-ID = `occurrenceDate`; a cancelled one keeps STATUS:CANCELLED) and **deleted occurrences as EXDATE**: the rule's
+  occurrences (`IosRecurrence.Occurrences`, wall time in the event's zone) that EventKit no longer lists, inferred only more than a week
+  inside the window (a moved occurrence near its edge could otherwise look deleted) and only when every listed occurrence is one the
+  rule has (otherwise the rule is computed differently from EventKit and nothing is inferred, logged), not for BYWEEKNO/BYYEARDAY rules
+  or several rules. A series edited "for future events" is two series in EventKit (the old one ends with UNTIL) and two files here.
+- Fields: UID = `calendarItemExternalIdentifier` (eventIdentifier changes with syncs, so the UID is the key; the file's short id is
+  16 hex of SHA-256 over the calendar and the UID), title, location, notes → DESCRIPTION, `timeZone` (floating timed events get the
+  device's zone), all-day events as DATE values (EventKit's local midnight to the last second of the last day → the model's UTC
+  midnights), status, availability → TRANSP, organizer and **attendees** (`EKParticipant` role / status / type → ROLE / PARTSTAT /
+  CUTYPE), alarms (relative offsets; absolute ones as minutes before the start), `lastModifiedDate` → LAST-MODIFIED and the file's
+  time (a series: its newest occurrence change). Not kept: an event's URL and structured location (no field in the model),
+  reminders (`EKReminder`: out of scope, they are not calendars).
+- **Decision: events are generated and read on every run** (`AlwaysRead`, as on Android), not skipped by `lastModifiedDate`: the
+  listing has every event whole anyway (no per-event read to save), an unchanged event gives the same bytes and deduplicates, and a
+  version from the modification time would miss changes that do not move it (an occurrence deleted from a series, the window sliding
+  past an old exception). The time is still each event's real modification time.
+- **Access:** EventKit's full access only (`EKAuthorizationStatus` 3: iOS 17's *Full Access*, earlier *Authorized*); *Add Events Only*
+  (4) reads nothing, so it counts as no access (the explanation says to choose *Allow Full Access*). iOS 17+ asks with
+  `requestFullAccessToEvents` (`NSCalendarsFullAccessUsageDescription`), iOS 15/16 with `requestAccess` (`NSCalendarsUsageDescription`).
+
+**Permissions, asked at the same moments as Android:** only the Contacts or Calendars screen's *Allow* asks (never at launch); iOS
+asks once, so afterwards *Allow* opens the app's page in Settings. iOS has no separate write permission: a restore needs no second
+question (`RequestWrite` = `RequestRead`), and the shared restore flow's "ask for WRITE" step passes at once. The screens show the
+platform's words (`ICollectionAccess.Note` and `PartialText`, new and optional: null on Android): which answer to choose, that notes
+stay on the iPhone, that guests cannot be put back, what limited access means. Info.plist: `NSContactsUsageDescription`,
+`NSCalendarsFullAccessUsageDescription`, `NSCalendarsUsageDescription`.
+
+**Change triggers:** `CNContactStoreDidChange` and `EKEventStoreChanged` (registered once access is granted; registering never asks)
+→ `PhotoChangeDebouncer` (5 quiet seconds, at most 60) → `AgentRuntime.Trigger` of every folder of that kind (automatic runs: their
+conditions apply). A restore's own additions trip them once more; that run finds the new entries unchanged. In the background the
+Contacts and Calendars folders are in task 22's BGTaskScheduler plan like every folder (`BackgroundPlanner.HasPlace`).
+
+**Restore** (`CollectionRestorer`): contacts through `CNSaveRequest.addContact(toContainerWithIdentifier:)`, then their groups by
+title (found in the container or made once; Exchange containers have no groups, their CATEGORIES stay in the file); events through
+`EKEventStore.save` with the rule (one RRULE: iOS stores no second rule, no RDATE or EXRULE — such an event is added and the rest
+reported) and alarms, then each EXDATE and cancelled exception removes that occurrence and each changed exception changes it
+(`span: thisEvent`). **Attendees and the organizer cannot be written by EventKit** (no API): they stay in the file. All-day events go
+in as EventKit keeps them (local midnight to the last second of the last day), timed events in their zone (UTC when they have
+none). Skipping what is there works as on Android, by content where ids differ: `ICalendar.ContentKey` now compares the rule in a
+normal form (`NormalizeRule`: parts sorted, INTERVAL=1, WKST and UNTIL's time left out), since EventKit gives a series back in its own
+words. **New in the restorer for both platforms:** when the account or calendar a directory names is not on the phone, the one
+writable account of the same name and type (or calendar of the same name and account) takes it — iOS gives containers and
+calendars new identifiers on another iPhone or after a reset, while "iCloud" stays "iCloud"; with none or several, the directory is
+reported as before.
+
+**Automation (tests only):** `pim…` commands (`CollectionsAutomation`): the screens (`pim-dialog`, `pim-state`, `pim-allow`, `pim-ask`,
+`pim-choose`, `pim-save`, `pim-force`, `pim-restore-choose|confirm|cancel`), the agent (`pim contacts|calendars`, `pim-set`,
+`pim-restore`), and the address book and calendars as another app changes them, through the frameworks (`pim-seed`, `pim-edit`,
+`pim-wipe`, `pim-dump`, `pim-labels`).
+
+**Tests:** `ASync.App.Tests`: `IosCollectionsTests` (labels both ways and every system label round trip, containers and iCloud,
+access, every contact field and groups, the card's lines with `ios-contacts`, unchanged contacts not read again and a changed or
+re-photographed one seen, the versions across processes, restores into the wiped container with the group made once and nothing
+duplicated, iCloud found by name on another iPhone or the account reported; rules ↔ RRULE, refused rules, occurrences at the same
+local time across DST, monthly and yearly forms, COUNT and UNTIL; ContentKey's normal form; a series with a moved and a deleted
+occurrence written line for line, all-day events and series, attendees and alarms, a split series, a detached occurrence under its own
+id, a rule computed differently inferring nothing; calendars and Birthdays, write-only access, the window and EventKit's pieces; the
+calendar tree with `ios-eventkit` and unchanged events stored once; restores with the series' changes, into a calendar of the same
+name or a chosen one, read-only refused, RDATE reported; the change triggers' plan and debounce; the texts). `scripts/smoke-ios.sh`
+(its contacts and calendars part is `scripts/smoke-ios-collections.sh`): see its header and "Milestones".
 
 ## Packaging and CI
 
@@ -3271,6 +3381,11 @@ contacts and calendars part is `scripts/smoke-android-collections.sh`): see its 
      8–10's storage permission and legacy storage, real USB drives and SD cards (the emulator's virtual SD card stands in),
      an OEM Settings without the per-app page (the fallback page).
      Next: the VFS on the desktops (Cloud Files, File Provider, FUSE), photos/contacts/calendars, iOS.
+   - **M4-12 iOS contacts and calendars (task 24, done):** see "Contacts and calendars" → "iOS contacts and calendars (task 24)":
+     the Contacts framework and EventKit behind `ICNContacts` / `IEventKit`, containers and calendars as the accounts, labels both
+     ways, content-derived contact versions (unchanged photos never read again), EventKit's occurrences turned back into series with
+     moved occurrences as exceptions and deleted ones as inferred EXDATEs, rules both ways, restores into the original, a same-named
+     or a chosen account or calendar; no server, Contracts or format change. CI_RESULTS_24
    - **M4-11 iOS photos (task 23, done):** see "Photos and videos" → "iOS photos (task 23)": PhotoKit behind `IPhotoKit`, the
      mapping (ids, user and smart albums, roles, per-resource times, sizes), streamed reads, iCloud-only originals left for a
      later run (never taken for deleted, the folder's Wi-Fi rule and a local setting), limited access with the system's picker, a
@@ -3460,6 +3575,13 @@ Open questions:
   permission:** on iOS 26 PhotoKit asks TCC for `kTCCServicePhotos` with auth version 2, while `xcrun simctl privacy grant photos`
   writes a version-1 row: the app then reads "not determined" (tccd's log: `authValue=1, authVersion=2`). The smoke test writes the
   row into the simulator's `TCC.db` with `auth_version` 2 while it is shut down (`auth_value` 2 full, 3 limited).
+- **Contacts and EventKit (task 24):** never fetch `CNContactNoteKey` (it throws without Apple's notes entitlement). Fetch per
+  container with `unifyResults = false`, or a contact linked across accounts comes back as one unified card in the wrong container.
+  EventKit lists occurrences, not series, at most four years per predicate, and never says which occurrences were deleted: the
+  series and its EXDATEs are rebuilt (`IosEventMapping.Events`); `eventIdentifier` changes with syncs, the external identifier is the
+  UID. An all-day event's `endDate` is the last second of its last day. `EKEventStoreChanged` and `CNContactStoreDidChange` are
+  posted for the app's own saves too (a restore triggers a backup that finds nothing new). An event store made before the
+  permission was granted may not see the calendars: it is made again after the answer.
 - **iOS app delegate methods** that Avalonia's `AvaloniaAppDelegate` lacks are added with `[Export]` in our subclass
   (`willFinishLaunching`, the remote-notification callbacks); scene-delegate methods cannot be added that way (Avalonia's scene
   delegate is internal and sealed): the quick action's is added to its Objective-C class at launch (`QuickActions`).
