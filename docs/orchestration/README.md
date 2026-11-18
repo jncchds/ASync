@@ -6,7 +6,7 @@ orchestrator session. This folder keeps the working documents of that process, a
 
 | Path | What it is |
 |---|---|
-| `briefs/task-NN.md` | The brief each worker started from (tasks 1–23; `b` = a second brief for the same task) |
+| `briefs/task-NN.md` | The brief each worker started from (tasks 1–24; `b` = a second brief for the same task) |
 | `briefs/wake-paragraph.md` | The paragraph appended to briefs so workers report back and wake the orchestrator |
 | `handoff-ios.md` | The handoff from the first orchestrator to the iOS orchestrator (2026-11-17) |
 | `notes/` | The project's planning notes and working agreements: the iOS plan and its decisions, the queued Android tasks, virtual file systems, web UI style, the merge and screenshot rules |
