@@ -301,6 +301,12 @@ internal sealed class ProviderItem(FileProviderItem item) : NSObject, INSFilePro
         if (f.HasFlag(FileProviderCapabilities.Reparenting)) c |= NSFileProviderItemCapabilities.Reparenting;
         if (f.HasFlag(FileProviderCapabilities.Deleting)) c |= NSFileProviderItemCapabilities.Deleting;
         if (f.HasFlag(FileProviderCapabilities.Trashing)) c |= NSFileProviderItemCapabilities.Trashing;
+        // The simulator only: an item without writing (a file) or adding sub-items (a directory) is locked in the replica
+        // ("m:rwxl"), and the simulator's replica on the Mac's disk refuses that flag: fileproviderd failed to create every Mirror
+        // and Backup folder ("cannotSetMetadata", POSIX "Operation not permitted"; task 25's fourth and fifth Mac runs). There
+        // they are offered as writable and the extension refuses the write itself (not permitted), as it does on a device too.
+        if (Runtime.Arch == Arch.SIMULATOR)
+            c |= item.IsDirectory ? NSFileProviderItemCapabilities.AddingSubItems : NSFileProviderItemCapabilities.Writing;
         return c;
     }
 

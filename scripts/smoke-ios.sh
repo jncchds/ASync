@@ -461,7 +461,8 @@ source "$root/scripts/smoke-ios-files.sh"
 section "restart"
 launch 2
 wait_state '.page == "DashboardViewModel" and .state == "Connected"' 60 && pass "after a restart: still enrolled, signed in again" || fail "restart" "$(state)"
-wait_state '.folders | length == 3' 30 && pass "the three folders are back" || fail "folders after restart" "$(state)"
+# Four since the Files app part (task 25) added the Mirror folder "Shared music".
+wait_state '.folders | length == 4' 30 && pass "the four folders are back" || fail "folders after restart" "$(state)"
 
 section "a pairing link opened through iOS"
 # Last: if iOS asked "Open in ASync?" here, the question would cover the screens after it (simctl cannot tap it).

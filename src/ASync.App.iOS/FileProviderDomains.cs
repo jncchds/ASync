@@ -126,7 +126,12 @@ public static class FileProviderDomains
         {
             if (identity is null)
             {
-                if (runtime.DeviceRunning) return; // starting
+                if (runtime.DeviceRunning)
+                {
+                    // Starting, or stopping after a sign-out: look again at the next event (the signature must not stick).
+                    Interlocked.Exchange(ref _signature, "");
+                    return;
+                }
                 SharedAccount.Delete(shared);
                 FileProviderSignals.Reset(shared);
                 TryDelete(Path.Combine(shared, "known.json"));
