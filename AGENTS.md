@@ -3388,7 +3388,15 @@ name or a chosen one, read-only refused, RDATE reported; the change triggers' pl
      the Contacts framework and EventKit behind `ICNContacts` / `IEventKit`, containers and calendars as the accounts, labels both
      ways, content-derived contact versions (unchanged photos never read again), EventKit's occurrences turned back into series with
      moved occurrences as exceptions and deleted ones as inferred EXDATEs, rules both ways, restores into the original, a same-named
-     or a chosen account or calendar; no server, Contracts or format change. CI_RESULTS_24
+     or a chosen account or calendar; no server, Contracts or format change. Verified in CI run 44245116136 (iOS 26.5 simulator,
+     `scripts/smoke-ios-collections.sh`, every one of the run's 125 checks): access through simctl's grants (no TCC workaround needed
+     here), the label constants, the live lists over the hub (Birthdays left out), both backups checked offline with async-cli (the
+     card's labels, photo and group; the standup's zone, rule, EXDATE and RECURRENCE-ID), a changed contact's own run reading only that
+     card, everything deleted and restored (the group, the series' changes, the alarm), a second restore adding nothing, real limited
+     contacts access, and task 22's "task result" check no longer racing. Runs 44233286871 and 44239395512 found a moved occurrence
+     listed with its own identifier and UID, the plain "Apple Watch" label and the list's count. Screenshots:
+     `docs/screenshots/ios-contacts-*.png`, `ios-calendars-*.png` (the web UI's lists: `*-web-*`). Not exercised: a real iPhone,
+     iCloud, Exchange or CardDAV accounts, iOS 15–16's calendar permission.
    - **M4-11 iOS photos (task 23, done):** see "Photos and videos" → "iOS photos (task 23)": PhotoKit behind `IPhotoKit`, the
      mapping (ids, user and smart albums, roles, per-resource times, sizes), streamed reads, iCloud-only originals left for a
      later run (never taken for deleted, the folder's Wi-Fi rule and a local setting), limited access with the system's picker, a
