@@ -55,9 +55,6 @@ public static class FileProviderDomains
     public static string? Registered => _registered;
     public static int Signals { get; private set; }
 
-    /// <summary>Tests only: the Settings line shown although the build has the group (a screenshot of the unsigned state).</summary>
-    public static string? NoteOverride { get; set; }
-
     private static (AppGroupDecision, string) Prepare()
     {
         var home = IosAgent.Home;
@@ -65,7 +62,8 @@ public static class FileProviderDomains
         var writable = false;
         try
         {
-            group = NSFileManager.DefaultManager.GetContainerUrl(IosAppGroup.GroupId)?.Path;
+            // Tests only: ASYNC_NO_APP_GROUP=1 (only simctl launch sets an app's environment) runs it as a build without the group.
+            group = Environment.GetEnvironmentVariable("ASYNC_NO_APP_GROUP") == "1" ? null : NSFileManager.DefaultManager.GetContainerUrl(IosAppGroup.GroupId)?.Path;
             if (group is not null)
             {
                 var probe = Path.Combine(group, "Library", ".async-probe");

@@ -1,14 +1,15 @@
 # Sourced by scripts/smoke-ios.sh (it needs that script's helpers, $udid, $device, $backend, $work, $bundle, $APP, the running
 # app, the TwoWay folder "Phone docs" ($sync_id) shared with async-cli and the Backup folder "Picked" ($picked_id)): the Files
-# app location (task 25, the File Provider extension). Checks the extension is embedded, the app group decision on the simulator
-# (ad hoc signing: are the app group and the Keychain group honoured?), the store moved into the group, the domain "ASync —
+# app location (task 25, the File Provider extension). Checks the extension is embedded; the app as far as here ran as a build without the app group
+# (ASYNC_NO_APP_GROUP=1: no domain, the store in the app, Settings' line); launched with it (ad hoc signing on the simulator: are
+# the app group and the Keychain group honoured?) the store moves into the group and the device stays enrolled, the domain "ASync —
 # <server host>" registered; then, as any app reaches a provider (the domain's user-visible URLs and NSFileCoordinator, which make
 # the system call the extension): the root lists the folders; a TwoWay folder lists its files without .async; a 5 MB file
 # fetched through the extension is byte-identical with async-cli's copy; a file written into the TwoWay folder reaches the server
 # and the other device; a Mirror folder refuses writes (nothing reaches the server); a Backup folder lists its snapshot and a
 # file of it reads back; a change made on the server signals the working set and the new content arrives; the extension's
 # memory footprint (its own measure and the Mac's `footprint` of the process). Screenshots: the Files app at the ASync root, a
-# folder, a snapshot, and the Settings line of an unsigned build.
+# folder, a snapshot, and the Settings line without the group.
 # shellcheck shell=bash disable=SC2015,SC2154
 
 section "the Files app location (File Provider, task 25)"
@@ -27,12 +28,35 @@ else
   fail "no PlugIns/ASyncFileProvider.appex in $APP" "$(ls "$APP/PlugIns" 2>&1)"
 fi
 
+# So far the app ran as a build without the app group (the unsigned .ipa): no domain, the store in the app's container, and
+# Settings says why.
+state_fp=$(fps)
+printf '%s\n' "$state_fp" >"$logs/fp-state-0.json"
+jq -e '(.shared | not) and .note == "The Files app location needs a signed build" and (.domains | length == 0) and (.store | test("/Data/Application/"))' \
+  <<<"$state_fp" >/dev/null && pass "without the app group: no domain, the store stays in the app, Settings says \"$(jq -r .note <<<"$state_fp")\"" \
+  || fail "the unsigned state" "$state_fp"
+if [[ -n "$shots" ]]; then
+  ctl settings >/dev/null
+  sleep 2
+  ctl "show FilesLocationNote" >/dev/null
+  sleep 1
+  shot files-settings-unsigned
+  ctl back >/dev/null
+fi
+folders_before=$(state | jq '.folders | length')
+
+# With the app group (as signed builds have it): the store moves, the device stays enrolled, the domain is registered.
+no_app_group=""
+launch 25
+ctl "notifications off" >/dev/null
+wait_state '.page == "DashboardViewModel" and .state == "Connected"' 60 && wait_state ".folders | length == $folders_before" 30 \
+  && pass "launched with the app group: still enrolled, the same $folders_before folders" || fail "enrolled after the move" "$(state)"
 state_fp=$(fps)
 printf '%s\n' "$state_fp" >"$logs/fp-state-1.json"
 if jq -e '.shared' <<<"$state_fp" >/dev/null; then
   pass "the app group is there (ad hoc signing on the simulator honours it): store in $(jq -r .store <<<"$state_fp" | sed "s|$HOME|~|")"
-  jq -e '.migration == "Moved" or .migration == "NothingToMove"' <<<"$state_fp" >/dev/null \
-    && pass "task 21's store: $(jq -r .migration <<<"$state_fp")" || fail "store migration" "$state_fp"
+  jq -e '.migration == "Moved"' <<<"$state_fp" >/dev/null && [[ ! -e "$container/Library/Application Support/async/identity.json" ]] \
+    && pass "task 21's store moved into the group's container (nothing left in the app's)" || fail "store migration" "$state_fp"
   files=$(ctl files)
   jq -e 'map(select(.name == "identity.json")) | length == 1' <<<"$files" >/dev/null && pass "the identity is in the group's store" || fail "identity in the group" "$files"
 else
@@ -146,19 +170,10 @@ fi
 printf '%s\n' "$(fps)" >"$logs/fp-state-2.json"
 ctl fp-log >"$logs/fileprovider-log-tail.txt" || true
 
-# Screenshots: the Files app at the ASync location, a folder, a snapshot (shareddocuments:// opens it at a path), and the Settings
-# line an unsigned build shows (forced: the simulator build has the group).
+# Screenshots: the Files app at the ASync location, a folder, a snapshot (shareddocuments:// opens it at a path).
 if [[ -n "$shots" ]]; then
   ctl "fp-open " >/dev/null; sleep 4; shot_system files-root
   ctl "fp-open Phone docs" >/dev/null; sleep 4; shot_system files-folder
   [[ -n "${snapshot_dir:-}" ]] && { ctl "fp-open Picked/$snapshot_dir" >/dev/null; sleep 4; shot_system files-snapshot; }
   in_front
-  ctl "fp-force-note on" >/dev/null
-  ctl settings >/dev/null
-  sleep 2
-  ctl "show FilesLocationNote" >/dev/null
-  sleep 1
-  shot files-settings-unsigned
-  ctl "fp-force-note off" >/dev/null
-  ctl back >/dev/null
 fi

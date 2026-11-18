@@ -13,7 +13,7 @@ namespace ASync.App.iOS;
 /// group decision, where the store is, the move, the domains, the signals, the extension's footprint and log tail), <c>fp-url
 /// [identifier]</c>, <c>fp-ls &lt;path&gt;</c> (a directory under the domain's root: names, sizes), <c>fp-read &lt;path&gt;</c> (copies the
 /// file into the app's tmp/ and answers that path and its size), <c>fp-write &lt;path&gt; &lt;base64&gt;</c>, <c>fp-delete &lt;path&gt;</c>,
-/// <c>fp-signal</c> (the working set), <c>fp-log</c>, <c>fp-force-note on|off</c> (Settings' unsigned line, for a screenshot), <c>fp-open &lt;path&gt;</c> (the Files app at that place, for screenshots).
+/// <c>fp-signal</c> (the working set), <c>fp-log</c>, <c>fp-open &lt;path&gt;</c> (the Files app at that place, for screenshots).
 /// </summary>
 internal static class FileProviderAutomation
 {
@@ -41,10 +41,6 @@ internal static class FileProviderAutomation
             }
             case "fp-delete":
                 return await DeleteAsync(arg);
-            case "fp-force-note":
-                // For a screenshot of what an unsigned build shows (the simulator build has the group): Settings' line.
-                FileProviderDomains.NoteOverride = arg == "on" ? IosAppGroup.NeedsSignedBuild : null;
-                return "ok";
             case "fp-signal":
                 FileProviderDomains.Changed(null);
                 return "signalled";
