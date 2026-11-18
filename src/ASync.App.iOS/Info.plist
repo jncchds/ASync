@@ -53,6 +53,8 @@
 	<string>ASync backs up the photos and videos you choose, as they are, to your own ASync server. It never changes or deletes anything in your library.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>ASync puts photos and videos back into your library when you restore them from a backup.</string>
+	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
+	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>ASync connects to your ASync server, which may be on your local network.</string>
 	<key>NSAppTransportSecurity</key>

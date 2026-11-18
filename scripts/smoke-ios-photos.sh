@@ -209,8 +209,8 @@ else
   return 0 # the rest needs access
 fi
 assets=$(ctl photos-assets)
-jq -e 'length == 4 and ([.[].fileName] | sort) == ["ios-cam-1.jpg", "ios-cam-2.jpg", "ios-clip.mov", "ios-trip-1.jpg"]' <<<"$assets" >/dev/null \
-  && pass "PhotoKit lists the 4 assets with their original names" || fail "photokit listing" "$assets"
+jq -e '([.[].fileName | select(startswith("ios-"))] | sort) == ["ios-cam-1.jpg", "ios-cam-2.jpg", "ios-clip.mov", "ios-trip-1.jpg"]' <<<"$assets" >/dev/null \
+  && pass "PhotoKit lists the 4 assets added, with their original names ($(jq length <<<"$assets") with the simulator's own sample photos)" || fail "photokit listing" "$assets"
 # Albums, as a person makes them in the Photos app (no confirmation needed): ios-cam-1 in both.
 ctl "photos-album-make SmokeCamera ios-cam-1.jpg,ios-cam-2.jpg,ios-clip.mov" >/dev/null
 ctl "photos-album-make SmokeTrip ios-trip-1.jpg,ios-cam-1.jpg" >/dev/null

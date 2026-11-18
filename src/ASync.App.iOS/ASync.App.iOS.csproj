@@ -22,7 +22,9 @@
     unsigned .ipa and the simulator build have no push entitlement and the app then does not register (see BackgroundWork.cs).
     Resources/en.lproj/Localizable.strings: the overdue alert's text, which APNs pushes name by key only.
     Photos (task 23): NSPhotoLibraryUsageDescription (read/write access, asked from the Photos screen only) and
-    NSPhotoLibraryAddUsageDescription (putting photos back on a restore); PhotoKit in PhotoLibrary.cs, its mapping in Shared/IosPhotos.cs.
+    NSPhotoLibraryAddUsageDescription (putting photos back on a restore); PHPhotoLibraryPreventAutomaticLimitedAccessAlert (with
+    limited access iOS would ask again at every launch; the Photos screen offers its own Choose photos instead). PhotoKit in
+    PhotoLibrary.cs, its mapping in Shared/IosPhotos.cs.
     AllowUnsafeBlocks: the quick action's method added to Avalonia's scene delegate (a function pointer, a block call).
   -->
   <PropertyGroup>

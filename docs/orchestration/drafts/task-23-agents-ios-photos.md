@@ -102,3 +102,5 @@ lets it be re-edited as Cinematic again was not tried). Assets of an iCloud Shar
 `photos-restore`, `photos-assets`) and the library as a person changes it in the Photos app (`photos-album-make`, `photos-album-add`,
 `photos-album-remove`, `photos-favourite`; deleting a photo needs iOS's confirmation, which simctl cannot answer).
 
+
+Added after the simulator run: `PHPhotoLibraryPreventAutomaticLimitedAccessAlert` (iOS re-asked at launch with limited access).

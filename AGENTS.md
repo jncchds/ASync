@@ -2799,7 +2799,8 @@ With limited access the screen and card say so in iOS's words (`IosPhotoTexts`) 
 `PHPhotoLibraryChangeObserver` is registered only once access is granted (registering earlier would make iOS ask at launch);
 coming to the front and the observer raise `Changed` (a limited selection changed in the picker counts). Info.plist:
 `NSPhotoLibraryUsageDescription` and `NSPhotoLibraryAddUsageDescription`; read/write access covers a restore's additions, so a restore
-never asks again.
+never asks again. `PHPhotoLibraryPreventAutomaticLimitedAccessAlert`: with limited access iOS otherwise asks "Select More Photos /
+Keep Current Selection" when the app starts (seen in the simulator run); the app offers *Choose photos…* itself.
 
 **iCloud originals** ("Optimize iPhone Storage"): requestData with `networkAccessAllowed` downloads them. **Decision: a local
 setting, not part of the selection** — `IosPhotoSettings` (`ios-photos.json`, *Download originals from iCloud* on the Photos screen,
