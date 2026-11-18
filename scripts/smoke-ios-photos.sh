@@ -1,7 +1,8 @@
 # Sourced by scripts/smoke-ios.sh (it needs that script's helpers, $udid, $device, $backend, $work, $bundle and the running
 # app): photo and video backups on the iPhone (task 23). Makes test media on the Mac (JPEGs with an EXIF date and GPS, an H.264
 # video: a Swift script, ImageIO and AVFoundation), adds them with `xcrun simctl addmedia`, shows the permission's explanation and
-# iOS's question, grants access with `xcrun simctl privacy` (simctl cannot tap the question), makes albums as a person would in the
+# iOS's question, grants limited and then full access in the simulator's TCC database (simctl cannot tap the question, and its
+# `privacy grant photos` leaves PhotoKit's read/write status undetermined), makes albums as a person would in the
 # Photos app, makes a Photos folder in the web UI's API, picks an album from the iPhone's live album list (over the hub), backs it
 # up, checks the snapshot's tree, sidecars (source ios-photokit) and byte-identical originals with async-cli (offline, from the
 # repository and the folder's recovery key), sees a favourite change read no original again, a new photo start a backup by itself
@@ -96,17 +97,29 @@ sleep 3
 shot_system photos-permission-dialog
 pass "Allow asks iOS's question (shown; simctl cannot tap it)"
 
-# Limited access ("Limit Access…"), if this simctl can grant it; otherwise the screen is shown in that state for a look.
-if xcrun simctl privacy "$udid" grant photos-limited "$bundle" >"$logs/privacy-limited.log" 2>&1; then
-  launch 3
-  if wait_for 20 access_is Partial; then
-    pass "simctl granted limited access: the agent reports Partial"
-  else
-    note "simctl took photos-limited but the app reports $(photos | jq -r .access)"
-  fi
+# Access as the person's answer would give it. `xcrun simctl privacy … grant photos` succeeds but PhotoKit's read/write status
+# stays "not determined" (seen in task 23's first Mac run), and simctl refuses photos-limited: the simulator's TCC database is
+# written instead, with the simulator shut down (tccd reads it at boot): auth_value 3 = limited, 2 = full.
+tcc_db="$HOME/Library/Developer/CoreSimulator/Devices/$udid/data/Library/TCC/TCC.db"
+tcc_photos() { # VALUE RUN
+  xcrun simctl privacy "$udid" grant photos "$bundle" >>"$logs/privacy.log" 2>&1 || true # makes the row (and the database) exist
+  xcrun simctl shutdown "$udid"
+  sqlite3 "$tcc_db" "DELETE FROM access WHERE client = '$bundle' AND service IN ('kTCCServicePhotos', 'kTCCServicePhotosAdd');
+    INSERT INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified)
+    VALUES ('kTCCServicePhotos', '$bundle', 0, $1, 2, 1, 0, CAST(strftime('%s','now') AS INTEGER));" 2>>"$logs/privacy.log"
+  sqlite3 "$tcc_db" "SELECT service, client, auth_value, auth_reason, auth_version FROM access WHERE client = '$bundle'" >>"$logs/privacy.log" 2>&1
+  xcrun simctl boot "$udid"
+  xcrun simctl bootstatus "$udid" -b >/dev/null
+  launch "$2"
+  ctl "notifications off" >/dev/null
+  wait_state '.page == "DashboardViewModel" and .state == "Connected"' 60 || true
+}
+sqlite3 "$tcc_db" ".schema access" >"$logs/tcc-schema.log" 2>&1 || true
+tcc_photos 3 3
+if wait_for 20 access_is Partial; then
+  pass "limited access (TCC auth_value 3): the agent reports Partial and lists $(ctl photos-assets | jq length) photos (none selected)"
 else
-  note "simctl cannot grant limited photo access ($(tail -1 "$logs/privacy-limited.log")): the limited state is shown forced, for the screenshot"
-  launch 3
+  note "limited access could not be set ($(photos | jq -r .authorization)): the limited state is shown forced, for the screenshot"
   ctl "photos-force partial" >/dev/null
 fi
 ctl "photos-dialog $pf" >/dev/null
@@ -118,9 +131,13 @@ shot photos-limited
 ctl "photos-force off" >/dev/null
 ctl back >/dev/null
 
-xcrun simctl privacy "$udid" grant photos "$bundle" && pass "full access granted (xcrun simctl privacy … grant photos)" || fail "privacy grant"
-launch 4
-wait_for 30 access_is Full && pass "ASync may read all photos and videos now" || fail "photos access" "$(photos)"
+tcc_photos 2 4
+if wait_for 30 access_is Full; then
+  pass "full access (TCC auth_value 2): ASync may read all photos and videos now"
+else
+  fail "photos access" "$(photos) $(cat "$logs/privacy.log")"
+  return 0 # the rest needs access
+fi
 assets=$(ctl photos-assets)
 jq -e 'length == 4 and ([.[].fileName] | sort) == ["ios-cam-1.jpg", "ios-cam-2.jpg", "ios-clip.mov", "ios-trip-1.jpg"]' <<<"$assets" >/dev/null \
   && pass "PhotoKit lists the 4 assets with their original names" || fail "photokit listing" "$assets"
