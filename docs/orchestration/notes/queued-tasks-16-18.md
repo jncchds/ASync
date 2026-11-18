@@ -5,10 +5,10 @@ metadata:
   node_type: memory
   type: project
   originSessionId: b2861529-d4c1-4414-9957-8604ca41c312
-  modified: 2026-11-16T21:45:56.085Z
+  modified: 2026-11-17T23:01:17.625Z
 ---
 
-Requested 2026-11-16. Merged into local main: tasks 15–19 (task 19 f622d44, 2026-11-17). v0.1.5 re-tagged on d8cd152 at the user's request (first v0.1.5 run failed on Windows tests). Task 20 merged as 48feec5 (2026-11-17; Android smoke passes, its Android screenshots and the 3-ABI APK still unverified). iOS (tasks 21–25) handed to a new orchestrator session "ASync iOS orchestrator" (id 31c6ab0b) on 2026-11-17.
+Requested 2026-11-16. Merged into local main: tasks 15–19 (task 19 f622d44, 2026-11-17). v0.1.5 re-tagged on d8cd152 at the user's request (first v0.1.5 run failed on Windows tests). Task 20 merged as 48feec5 (2026-11-17; Android smoke passes, its Android screenshots and the 3-ABI APK still unverified). iOS (tasks 21–25) handed to a new orchestrator session "ASync iOS orchestrator" (id 31c6ab0b) on 2026-11-17. iOS progress: task 21 merged (aa96f61), task 22 merged (591c16e), task 23 merged (d1a15e2, 2026-11-18), task 24 running. main pushed up to f7e7083 on 2026-11-17 at the user's request (no release).
 
 - **Task 16, Android all-files access:** Android 11+ SAF tree picker refuses the storage root, Download and Android/data. Fix like Syncthing-fork/FolderSync: request MANAGE_EXTERNAL_STORAGE (fine for APK-only distribution; Play would need approval) and use real paths (/storage/emulated/0/..., SD cards) through a file-system local tree; keep SAF as the fallback. Android/data and obb stay out of reach even then (only Shizuku/root).
 - **Task 17, browse a device's folders from the web UI:** the server asks the online device over the SignalR hub to list a directory (request/response with correlation id, timeout), a folder picker in the device-folder form instead of typing the path. Per-device switch to refuse browsing. Works for CLI/desktop/Android (on Android, the paths it can reach).
