@@ -291,7 +291,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         PhotoAccessText = !IsPhotos ? null : PhotoAccess switch
         {
             MediaAccess.None => "ASync may not read the photos yet: open Photos… to allow it.",
-            MediaAccess.Partial => "ASync may read only the photos chosen for it (\"Select photos\"): only those are backed up.",
+            MediaAccess.Partial => (shell.Platform.Photos?.Texts ?? PhotoTexts.Android).CardPartial,
             MediaAccess.Unsupported => $"This {shell.Platform.DeviceNoun} has no photo library: Photos folders are backed up by phones.",
             _ => null,
         };

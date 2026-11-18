@@ -2,6 +2,17 @@
 
 ## v0.1.6 — 2026-11-18
 
+- feat(ios): **the iPhone backs up its photos and videos.** A *Photos & videos* folder works on the iPhone as on Android: all
+  photos and videos or the albums you choose in the web UI from the iPhone's own list (your albums and system albums such as
+  Favorites, Screenshots, Videos, Selfies, Live Photos, Portrait), without videos or screenshots if you like. Each photo is kept as
+  it is, with everything that belongs to it: the original, a Live Photo's video, your edit as iOS renders it and a RAW, beside a
+  small `.json` of its details; a photo in several albums is stored once. With iCloud Photos' *Optimize iPhone Storage*, originals
+  that are only in iCloud are downloaded for their first backup (only on Wi-Fi for a Wi-Fi-only folder; *Download originals from
+  iCloud* on the Photos screen turns it off) and a photo that cannot come down now simply waits for a later run: nothing is lost or
+  taken for deleted, and a favourite or an album change never downloads a photo again. New photos are backed up within seconds
+  while ASync is open, and otherwise in iOS's background slots. *Limit Access* is explained, with *Choose photos…* to change the
+  selection. *Restore into the library…* puts photos back with their date, location and favourite mark, Live Photos as Live
+  Photos, into their albums (made when missing), skipping what is there.
 - feat(ios): **the iPhone syncs in the background.** Folders run when iOS gives the app background time (a short refresh slot
   and longer slots, usually overnight on the charger; how often is iOS's decision: more for apps you use, rarely in Low Power
   Mode, never after closing the app from the app switcher), every time you open the app, and while it stays open when they are

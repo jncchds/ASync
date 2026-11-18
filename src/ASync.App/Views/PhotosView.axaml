@@ -26,13 +26,16 @@
           <Border Classes="notice" Name="PartialNotice" IsVisible="{Binding IsPartial}">
             <StackPanel Spacing="6">
               <TextBlock Classes="small" Text="{Binding PartialText}" TextWrapping="Wrap" />
-              <Button Classes="small" Content="Allow all photos…" Command="{Binding OpenSettingsCommand}" HorizontalAlignment="Left" />
+              <WrapPanel ItemSpacing="8" LineSpacing="8">
+                <Button Classes="small" Name="ChooseMorePhotos" Content="Choose photos…" Command="{Binding ChooseMoreCommand}"
+                        IsVisible="{Binding CanChooseMore}" />
+                <Button Classes="small" Name="AllowAllPhotos" Content="{Binding AllowAllLabel}" Command="{Binding OpenSettingsCommand}" />
+              </WrapPanel>
             </StackPanel>
           </Border>
           <Border Classes="notice" IsVisible="{Binding NoLocation}">
             <StackPanel Spacing="6">
-              <TextBlock Classes="small" TextWrapping="Wrap"
-                         Text="Android removes the location from photos unless ASync may read it: allow &quot;media location&quot; to keep it in the backup." />
+              <TextBlock Classes="small" TextWrapping="Wrap" Text="{Binding NoLocationText}" />
               <Button Classes="small secondary" Content="Allow the location" Command="{Binding AllowCommand}" HorizontalAlignment="Left" />
             </StackPanel>
           </Border>
@@ -64,6 +67,12 @@
 
           <CheckBox Name="IncludeVideos" Content="Videos too" IsChecked="{Binding IncludeVideos}" />
           <CheckBox Name="IncludeScreenshots" Content="Screenshots too" IsChecked="{Binding IncludeScreenshots}" />
+          <StackPanel Name="CloudDownloads" Spacing="2" IsVisible="{Binding OffersCloudDownloads}">
+            <CheckBox Name="CloudDownloadsSwitch" IsChecked="{Binding CloudDownloads}">
+              <TextBlock Text="{Binding CloudLabel}" TextWrapping="Wrap" />
+            </CheckBox>
+            <TextBlock Classes="muted small" Text="{Binding CloudHint}" TextWrapping="Wrap" Margin="28,0,0,0" />
+          </StackPanel>
           <TextBlock Classes="muted small" TextWrapping="Wrap"
                      Text="Originals are kept as they are, with a small file of their details beside each; a photo in several albums is stored once. New photos are backed up soon after you take them." />
         </StackPanel>

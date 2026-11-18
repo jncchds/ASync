@@ -351,6 +351,74 @@ public class MediaBackupTests : IDisposable
     }
 
     /// <summary>Calls the handler on the reporting thread (Progress&lt;T&gt; posts to the thread pool, which a test cannot wait for).</summary>
+    // ── iOS (task 23): PhotoKit's shapes through the same tree and restorer ──
+
+    [Fact]
+    public async Task AnIosSnapshot_KeepsItsSource_RestoresTheLiveVideoBeside_AndPutsWhatIsThereBackIntoItsAlbums()
+    {
+        var trip = _lib.Album("Trip", "user-trip");
+        _lib.Album("Favorites", "smart:favorites");
+        var live = _lib.Add("IMG_0001.HEIC", Bytes(51), new DateTime(2026, 3, 9, 21, 30, 0, DateTimeKind.Utc), [trip, "smart:favorites"],
+            id: "8A4D9C5E-1F2B/L0/001", extras: [("live", "IMG_0001.MOV", Bytes(52, 30_000)), ("edited", "FullSizeRender.heic", Bytes(53))]);
+        _lib.DetailsById[live.Id] = new MediaDetails(50.45, 30.52);
+        var repo = await RepoAsync();
+        var snapshot = (await new BackupJob(repo, Folder(), Phone, "iPhone", new MediaTree(_lib, null, "ios-photokit")).RunAsync()).Snapshot;
+        var root = await RestoreToDiskAsync(repo, snapshot);
+        Assert.Equal(["2026/03/IMG_0001~8A4D9C5E-1F2B_L0_001.edited.heic", "2026/03/IMG_0001~8A4D9C5E-1F2B_L0_001.heic",
+            "2026/03/IMG_0001~8A4D9C5E-1F2B_L0_001.json", "2026/03/IMG_0001~8A4D9C5E-1F2B_L0_001.live.mov"], Files(root));
+        var sidecar = MediaSidecar.Parse(File.ReadAllBytes(Path.Combine(root, "2026/03/IMG_0001~8A4D9C5E-1F2B_L0_001.json")));
+        Assert.Equal(("ios-photokit", "8A4D9C5E-1F2B/L0/001"), (sidecar.Source, sidecar.Id));
+        Assert.Equal(["Trip", "Favorites"], sidecar.Albums.Select(a => a.Name));
+
+        // Still there: skipped, and handed to the library to put back into the albums it may have left.
+        _lib.RestoredRoles = ["live"];
+        var skipped = await new MediaRestorer(repo, _lib).RunAsync(snapshot);
+        Assert.Equal((0, 1), (skipped.Restored, skipped.Skipped));
+        Assert.Equal(live.Id, _lib.AlbumCalls.Single().Id);
+        Assert.Equal(["user-trip", "smart:favorites"], _lib.AlbumCalls.Single().Albums.Select(a => a.Id));
+
+        // Gone: the original and its Live Photo video (not the edit: a library takes no render without its adjustments), with the
+        // albums, the location and the favourite flag for the library to apply.
+        _lib.Clear();
+        var result = await new MediaRestorer(repo, _lib).RunAsync(snapshot);
+        Assert.Equal((1, 0), (result.Restored, result.Skipped));
+        var insert = _lib.Inserted.Single().Insert;
+        Assert.Equal(["Trip", "Favorites"], insert.Albums!.Select(a => a.Name));
+        Assert.Equal((50.45, 30.52), (insert.Latitude!.Value, insert.Longitude!.Value));
+        Assert.Equal(("IMG_0001.HEIC", "live", "IMG_0001.mov"), (_lib.ExtrasInserted.Single().FileName, _lib.ExtrasInserted.Single().Role, _lib.ExtrasInserted.Single().Name));
+        Assert.Equal(Bytes(52, 30_000), _lib.ExtrasInserted.Single().Bytes);
+    }
+
+    [Fact]
+    public async Task AnOriginalTheLibraryCannotGiveNow_IsLeftForTheNextRun_KeptFromTheLastSnapshot_NotAnError()
+    {
+        var camera = _lib.Album("Camera");
+        var a = _lib.Add("IMG_1.jpg", Bytes(61), new DateTime(2026, 4, 1, 8, 0, 0, DateTimeKind.Utc), [camera]);
+        var b = _lib.Add("IMG_2.jpg", Bytes(62), new DateTime(2026, 4, 2, 8, 0, 0, DateTimeKind.Utc), [camera]);
+        var repo = await RepoAsync();
+        var offline = new MediaReadOptions(AllowNetwork: false);
+        _lib.CloudOnly.Add(b.Id);
+
+        var tree = new MediaTree(_lib, null, "test-library", options: offline);
+        var first = (await new BackupJob(repo, Folder(), Phone, "iPhone", tree).RunAsync()).Snapshot;
+        Assert.Equal(2, tree.Postponed); // the original, and its sidecar after it: nothing of a new asset without its original
+        Assert.All(first.Stats.Errors, e => Assert.True(tree.IsPostponed(e), e));
+        Assert.Equal(2, Files(await RestoreToDiskAsync(repo, first, "one")).Count);
+
+        var second = (await new BackupJob(repo, Folder(), Phone, "iPhone", new MediaTree(_lib, null, "test-library")).RunAsync()).Snapshot;
+        Assert.Equal(4, Files(await RestoreToDiskAsync(repo, second, "two")).Count);
+
+        // Changed on another device, and only in the cloud now: the run keeps the last version, nothing disappears.
+        _lib.Update(b.Id, x => x with { Modified = x.Modified + 60_000, Resources = [x.Resources[0] with { Size = 25_000 }] });
+        var third = new MediaTree(_lib, null, "test-library", options: offline);
+        var kept = (await new BackupJob(repo, Folder(), Phone, "iPhone", third).RunAsync()).Snapshot;
+        Assert.Equal(2, third.Postponed);
+        var files = Files(await RestoreToDiskAsync(repo, kept, "three"));
+        Assert.Equal(4, files.Count);
+        Assert.Equal(Bytes(62), File.ReadAllBytes(Path.Combine(_dir.Sub("three"), files.Single(f => f.Contains("IMG_2", StringComparison.Ordinal) && f.EndsWith(".jpg", StringComparison.Ordinal)))));
+        Assert.False(tree.IsPostponed($"2026/04/IMG_1~{a.ShortId}.jpg: no"));
+    }
+
     private sealed class SyncProgress<T>(Action<T> handler) : IProgress<T>
     {
         public void Report(T value) => handler(value);

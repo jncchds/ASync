@@ -10,7 +10,10 @@ public enum MediaKind { Photo, Video }
 /// </summary>
 /// <param name="Role"><see cref="MediaResource.Original"/> for the main file; another lower-case word for the others ("live", "edited", "raw").</param>
 /// <param name="FileName">The name the device gives it (IMG_1234.HEIC).</param>
-public sealed record MediaResource(string Role, string FileName, long Size, string Mime)
+/// <param name="Modified">When this resource last changed (Unix ms), when it differs from the asset's: iOS keeps an original unchanged
+/// however often the asset's details (favourite, albums, edits) change, so its file in the tree keeps its time and is not read again.
+/// Null: the asset's <see cref="MediaAsset.Modified"/>.</param>
+public sealed record MediaResource(string Role, string FileName, long Size, string Mime, long? Modified = null)
 {
     public const string Original = "original";
 }
@@ -40,8 +43,29 @@ public sealed record MediaDetails(double? Latitude = null, double? Longitude = n
 
 /// <summary>What is written back into the library on a restore.</summary>
 /// <param name="RelativePath">Android: where the asset was (DCIM/Camera/), the album it goes back into.</param>
+/// <param name="Albums">Every album the sidecar names (iOS puts the asset into each user album, made when missing); <paramref name="AlbumName"/> is the first.</param>
+/// <param name="Extras">Further resources of the asset the library takes back (<see cref="IMediaLibrary.RestoredRoles"/>: iOS's Live Photo video).</param>
 public sealed record MediaInsert(MediaKind Kind, string FileName, string Mime, long Modified, long? Taken, string? RelativePath, string? AlbumName,
-    bool Favourite);
+    bool Favourite, IReadOnlyList<MediaAlbumRef>? Albums = null, double? Latitude = null, double? Longitude = null,
+    IReadOnlyList<MediaInsertResource>? Extras = null);
+
+/// <summary>A further resource of a restored asset, opened when the library writes it (one chunk of the snapshot in memory at a time).</summary>
+public sealed record MediaInsertResource(string Role, string FileName, string Mime, long Size, Func<Stream> Open);
+
+/// <summary>How a run may read the library now.</summary>
+/// <param name="AllowNetwork">Whether originals kept only in the cloud (iOS: iCloud Photos with "Optimize iPhone Storage") may be
+/// downloaded now: false on a metered network for a folder that runs on Wi-Fi only.</param>
+public sealed record MediaReadOptions(bool AllowNetwork = true)
+{
+    public static readonly MediaReadOptions Default = new();
+}
+
+/// <summary>
+/// A resource that cannot be read now but will be later (iOS: an original only in iCloud while downloads are not allowed, or
+/// iCloud cannot be reached). The run keeps what earlier snapshots hold of the asset, does not count it as an error and reads it
+/// again on the next run; it is never taken for deleted.
+/// </summary>
+public sealed class MediaUnavailableException(string message, Exception? inner = null) : IOException(message, inner);
 
 /// <summary>
 /// A device's photo library: Android's MediaStore (<c>AndroidMediaLibrary</c>), iOS's PhotoKit later, a fake in the tests. Reading is
@@ -62,6 +86,12 @@ public interface IMediaLibrary
     /// <summary>Reads one resource's bytes as they are (Android: the original, with its location, when ACCESS_MEDIA_LOCATION is granted).</summary>
     Stream OpenRead(MediaAsset asset, MediaResource resource);
 
+    /// <summary>
+    /// Reads a resource within what the run allows now (<see cref="MediaReadOptions.AllowNetwork"/>); throws
+    /// <see cref="MediaUnavailableException"/> for one that must wait for a later run.
+    /// </summary>
+    Stream OpenRead(MediaAsset asset, MediaResource resource, MediaReadOptions options) => OpenRead(asset, resource);
+
     /// <summary>Details read from the file (the EXIF location); empty when there are none or they cannot be read.</summary>
     MediaDetails Details(MediaAsset asset) => new();
 
@@ -70,4 +100,13 @@ public interface IMediaLibrary
 
     /// <summary>Puts a restored asset into the library (Android: a MediaStore insert into its relative path); returns its new id.</summary>
     Task<string> InsertAsync(MediaInsert insert, Stream content, CancellationToken ct);
+
+    /// <summary>The roles beside the original a restore hands over (<see cref="MediaInsert.Extras"/>); none on Android.</summary>
+    IReadOnlyCollection<string> RestoredRoles => [];
+
+    /// <summary>
+    /// An asset a restore found already there: put it back into the sidecar's albums it is missing from (iOS, where an asset is
+    /// in the library once and albums only refer to it). Nothing on Android, where an album is the asset's directory.
+    /// </summary>
+    Task AddToAlbumsAsync(MediaAsset existing, IReadOnlyList<MediaAlbumRef> albums, CancellationToken ct) => Task.CompletedTask;
 }

@@ -243,6 +243,44 @@ public sealed class PhotosTests
     }
 
     [AvaloniaFact]
+    public async Task OnAnIPhone_LimitedAccessOffersTheSystemsPicker_AndTheICloudSwitch_InIosWords()
+    {
+        var f = new ShellFixture();
+        f.Platform.Phone = true;
+        var access = new FakePhotos { Access = MediaAccess.Partial, HasLocation = true, Texts = ASync.App.iOS.IosPhotoTexts.Texts, CanChooseMore = true,
+            OffersCloudDownloads = true, CloudDownloads = true };
+        f.Platform.PhotoAccess = access;
+        f.Start(Statuses.Connected(Statuses.Photos()));
+        await using var _ = f;
+        var window = new Window { Width = 360, Height = 760, Content = new ShellView { DataContext = f.Shell } };
+        window.Show();
+        await Pump(() => f.Shell.Dashboard.Folders.Count == 1 && window.GetVisualDescendants().OfType<DashboardView>().Any());
+        Assert.Contains("Limited Access", f.Shell.Dashboard.Folders.Single().PhotoAccessText);
+
+        Named<Button>(window, "ChoosePhotos").Command!.Execute(null);
+        await Pump(() => f.Shell.PhotosDialog is { Albums.Count: 3 });
+        var screen = f.Shell.PhotosDialog!;
+        Assert.True(screen.IsPartial && screen.CanChooseMore && screen.OffersCloudDownloads);
+        Assert.False(screen.NoLocation); // PhotoKit keeps the location: no notice
+        Assert.Contains("Limit Access", screen.PartialText);
+        Assert.Equal("Allow full access…", Named<Button>(window, "AllowAllPhotos").Content);
+        Assert.True(Named<Button>(window, "ChooseMorePhotos").IsEffectivelyVisible);
+        Assert.True(Named<CheckBox>(window, "CloudDownloadsSwitch").IsEffectivelyVisible);
+        Named<Button>(window, "ChooseMorePhotos").Command!.Execute(null);
+        Assert.Equal(["choose-more"], access.Calls);
+        Named<CheckBox>(window, "CloudDownloadsSwitch").IsChecked = false;
+        await Pump(() => !access.CloudDownloads);
+        Assert.Empty(Outside(window, 360));
+
+        // Full access: no picker, the switch stays.
+        access.Access = MediaAccess.Full;
+        access.Request();
+        await Pump(() => !screen.IsPartial);
+        Assert.False(screen.CanChooseMore);
+        Assert.True(screen.OffersCloudDownloads);
+    }
+
+    [AvaloniaFact]
     public async Task TheCardAndThePhotosScreen_AreWired_AndFitAPhone()
     {
         var f = new ShellFixture();
