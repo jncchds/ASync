@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { CreditsLine } from '../components/Credits'
+import VersionPill from '../components/VersionPill'
 import { authLogin, authRegister, authSetup, errorMessage, OIDC_LOGIN_URL, type AuthSetup } from '../api'
 
 const SSO_ERRORS: Record<string, string> = {
@@ -44,7 +46,7 @@ export default function Login() {
         <div className="login-brand">
           <img src="/favicon.svg" alt="" width={36} height={36} />
           <h1>ASync</h1>
-          <span className="version-pill">v{__APP_VERSION__}</span>
+          <VersionPill />
         </div>
         <h2>{needsSetup ? 'Create the admin account' : 'Sign in'}</h2>
         {needsSetup && <p className="hint">No accounts yet. The first account becomes admin.</p>}
@@ -68,6 +70,7 @@ export default function Login() {
           </>
         )}
       </div>
+      <CreditsLine className="login-credits" />
     </div>
   )
 }

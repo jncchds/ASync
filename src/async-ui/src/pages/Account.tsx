@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { changeOwnPassword, errorMessage } from '../api'
+import { CreditsCard } from '../components/Credits'
 import { useAuth } from '../hooks/useAuth'
 
 /** The signed-in person's own account: who they are and, for password accounts, changing the password. */
@@ -74,6 +75,8 @@ export default function Account() {
           </p>
         )}
       </section>
+
+      <CreditsCard />
     </>
   )
 }

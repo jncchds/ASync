@@ -66,6 +66,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public string AppText => $"ASync {_shell.AppVersion}";
 
+    /// <summary>Opens the project's GitHub repository (the About card's link).</summary>
+    public IAsyncRelayCommand OpenRepositoryCommand => _shell.OpenRepositoryCommand;
+
     public bool CanSignOut => DeviceText is not null;
 
     /// <summary>"Sign out of this device" was pressed: the confirmation is showing.</summary>

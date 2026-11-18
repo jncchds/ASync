@@ -241,7 +241,17 @@ html:has(.app-layout), html:has(.app-layout) body { height: 100%; min-height: 0;
   font-size: 0.65rem; font-weight: 500; padding: 1px 6px; border-radius: 10px; line-height: 1.4; flex-shrink: 0;
   background: var(--accent-faint); color: var(--text-muted); border: 1px solid var(--accent-soft);
 }
+a.version-pill { text-decoration: none; }
+a.version-pill:hover { color: var(--accent); border-color: var(--accent); }
+.sidebar-head { display: flex; align-items: center; gap: 4px; }
+.sidebar-head .sidebar-toggle-btn { flex: 1 1 auto; min-width: 0; }
+.sidebar-head .version-pill { margin-right: 6px; }
 .app-sidebar.collapsed .version-pill { display: none; }
+.sidebar-credits, .login-credits { font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-credits { padding: 0.35rem 0.5rem 0; }
+.sidebar-credits a, .login-credits a { color: inherit; }
+.sidebar-credits a:hover, .login-credits a:hover { color: var(--accent); }
+.app-sidebar.collapsed .sidebar-credits { display: none; }
 .sidebar-user {
   display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.5rem 0.2rem;
   font-size: 0.8rem; color: var(--text-muted); min-width: 0;
@@ -341,7 +351,7 @@ pre.command {
 }
 
 /* ── Login ── */
-.login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; background: var(--bg); }
+.login-page { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 1rem; background: var(--bg); }
 .login-card { width: 100%; max-width: 380px; }
 .login-brand { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.25rem; }
 .login-brand h1 { font-size: 1.5rem; }

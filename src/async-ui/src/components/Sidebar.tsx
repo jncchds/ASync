@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import { readSetting, useTheme, writeSetting, type Theme } from '../hooks/useTheme'
+import { CreditsLine } from './Credits'
+import VersionPill from './VersionPill'
 
 const COLLAPSED_KEY = 'sidebarCollapsed'
 const PHONE = '(max-width: 767px)'
@@ -43,7 +45,7 @@ export default function Sidebar({ children, bottomChildren }: SidebarProps) {
       <aside className={`app-sidebar ${collapsed ? 'collapsed' : 'expanded'}`} onClick={e => {
         if ((e.target as HTMLElement).closest('a.sidebar-btn')) closeOnPhone()
       }}>
-        <div className="sidebar-fixed-top">
+        <div className="sidebar-fixed-top sidebar-head">
           <button
             type="button"
             className="sidebar-btn sidebar-toggle-btn"
@@ -53,8 +55,8 @@ export default function Sidebar({ children, bottomChildren }: SidebarProps) {
           >
             <span className="s-icon">☰</span>
             <span className="s-label s-brand">ASync</span>
-            <span className="version-pill">v{__APP_VERSION__}</span>
           </button>
+          <VersionPill />
         </div>
 
         <nav className="sidebar-scroll">{children}</nav>
@@ -65,6 +67,7 @@ export default function Sidebar({ children, bottomChildren }: SidebarProps) {
             <span className="s-icon">{themeIcon}</span>
             <span className="s-label">{themeLabel}</span>
           </button>
+          <CreditsLine className="sidebar-credits" />
         </div>
       </aside>
       {!collapsed && <div className="sidebar-backdrop" onClick={() => setCollapsed(true)} aria-hidden />}

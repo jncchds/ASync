@@ -14,9 +14,12 @@
             <PathIcon Data="{StaticResource SyncGlyph}" Width="16" Height="16" Foreground="{DynamicResource AccentContrast}" />
           </Border>
           <TextBlock Text="ASync" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" TextWrapping="NoWrap" />
-          <Border Classes="pill accent">
-            <TextBlock Text="{Binding AppVersion}" />
-          </Border>
+          <Button Classes="link" Name="VersionPill" Command="{Binding OpenRepositoryCommand}" Cursor="Hand"
+                  ToolTip.Tip="ASync on GitHub" VerticalAlignment="Center">
+            <Border Classes="pill accent">
+              <TextBlock Text="{Binding AppVersion}" />
+            </Border>
+          </Button>
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
           <Button Classes="icon" Content="Web UI" Command="{Binding OpenWebUiCommand}" ToolTip.Tip="Open the web UI in the browser"

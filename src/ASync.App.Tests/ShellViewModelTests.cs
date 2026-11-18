@@ -191,4 +191,13 @@ public class ShellViewModelTests
         await f.Shell.OpenWebUiCommand.ExecuteAsync(null);
         Assert.Equal(["https://sync.example.com"], f.Platform.Opened);
     }
+
+    [Fact]
+    public async Task VersionPill_OpensTheRepository()
+    {
+        await using var f = new ShellFixture().Start(Statuses.Connected());
+        await ShellFixture.Until(() => f.Shell.Page is DashboardViewModel);
+        await f.Shell.OpenRepositoryCommand.ExecuteAsync(null);
+        Assert.Equal(["https://github.com/jncchds/ASync"], f.Platform.Opened);
+    }
 }

@@ -408,6 +408,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         else ShowMessage("Enroll this device first: the web UI is on its server.", error: true);
     }
 
+    /// <summary>The project's GitHub repository: the version pill opens it, the Settings' About names it.</summary>
+    public const string RepositoryUrl = "https://github.com/jncchds/ASync";
+
+    [RelayCommand]
+    private Task OpenRepository() => Platform.OpenUrlAsync(RepositoryUrl);
+
     [RelayCommand]
     private void OpenSettings()
     {

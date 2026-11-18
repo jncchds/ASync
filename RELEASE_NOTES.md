@@ -64,6 +64,9 @@
 - fix(android): the background folder runs have a stable worker name again (task 17 had put it on the browse wake-up
   worker by mistake). On the first start after this update the app re-enqueues the folders' scheduled work under the new
   name, so phones that already have the app keep running their folders in the background.
+- feat: **the version pill links to the GitHub repository** (web UI sidebar and sign-in page, the apps' top bar), and the
+  web UI has **credits**: "by CHDS · built with Claude" under the sidebar and the sign-in card, a Credits card on the
+  Account page; the apps' Settings → About says the same with a link to the source code.
 - docs: the design plan, task briefs (tasks 1–25), planning notes, worker drafts and test records the app was built from are kept in
   `docs/orchestration/`.
 

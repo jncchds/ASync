@@ -134,6 +134,10 @@
         <TextBlock Name="AppVersion" Text="{Binding AppText}" />
         <TextBlock Classes="muted" Text="{Binding AgentText}" />
         <TextBlock Classes="muted small" Text="Self-hosted sync and backup. MIT licence." />
+        <TextBlock Classes="muted small" TextWrapping="Wrap"
+                   Text="ASync by CHDS: created and maintained by CHDS, built together with Claude by Anthropic." />
+        <Button Classes="link" Name="RepositoryLink" Content="Source code, releases and issues on GitHub"
+                Command="{Binding OpenRepositoryCommand}" HorizontalAlignment="Left" Cursor="Hand" />
       </StackPanel>
     </Border>
   </StackPanel>

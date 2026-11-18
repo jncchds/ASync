@@ -874,8 +874,11 @@ Storage column and a Quota button on the Users page, and a Quota button on share
 
 The UI belongs to the owner's app family (abook, nopds, …): same layout and components, its own palette.
 - **Shell:** `layouts/AppLayout.tsx` + `components/Sidebar.tsx`, after abook's sidebar. Top: ☰ toggle, app name,
-  version pill (`__APP_VERSION__`). Middle: emoji `NavLink`s (Folders, Devices, Storage, Users for admins).
-  Bottom: the user's name, sign-out, and the theme switch (light → dark → system). Collapsed it is a 48 px icon
+  version pill (`__APP_VERSION__`, `components/VersionPill.tsx`: a link to the GitHub repository, also on the sign-in
+  card and in the apps' top bar). Middle: emoji `NavLink`s (Folders, Devices, Storage, Users for admins).
+  Bottom: the user's name, sign-out, the theme switch (light → dark → system) and the credits line ("by CHDS · built
+  with Claude", `components/Credits.tsx`, as in ANalyze; also under the sign-in card, and in full as the Account page's
+  Credits card and the apps' Settings → About). Collapsed it is a 48 px icon
   rail. Under 768 px it starts collapsed and the expanded sidebar is an overlay drawer with a backdrop. The
   document never scrolls: `.app-main` does, so nothing can widen the page.
 - **Tokens** (`src/index.css`, nopds's names in plain CSS): `--bg --surface --surface-2 --border --text
