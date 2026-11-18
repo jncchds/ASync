@@ -69,6 +69,28 @@
     <PackageReference Include="Avalonia.iOS" />
   </ItemGroup>
 
+  <!--
+    The File Provider extension's bundle into PlugIns/. The iOS SDK asks the extension project for its bundle path with targets
+    that have only Outputs, no Returns; MSBuild then returns nothing (task 25's first Mac run: the extension built, the app had no
+    PlugIns), which dotnet/macios fixed later by adding Returns. Until the pinned workload has that fix, the path is added here
+    when the SDK found none: the extension's bundle next to its assembly, as AppBundleDir puts it. A build without the bundle fails.
+  -->
+  <Target Name="_AsyncEmbedFileProvider" AfterTargets="_ResolveAppExtensionReferences">
+    <PropertyGroup>
+      <_AsyncFileProviderOut>$(MSBuildThisFileDirectory)../ASync.App.iOS.FileProvider/bin/$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/</_AsyncFileProviderOut>
+      <_AsyncFileProviderAppex>$(_AsyncFileProviderOut)ASyncFileProvider.appex</_AsyncFileProviderAppex>
+    </PropertyGroup>
+    <ItemGroup Condition="'@(_ResolvedAppExtensionReferences)' == '' And Exists('$(_AsyncFileProviderAppex)')">
+      <_ResolvedAppExtensionReferences Include="$(_AsyncFileProviderAppex)" />
+    </ItemGroup>
+    <ItemGroup>
+      <_AsyncFileProviderOutFiles Include="$(_AsyncFileProviderOut)*" />
+    </ItemGroup>
+    <Message Importance="high" Text="File Provider extension to embed: @(_ResolvedAppExtensionReferences)" />
+    <Error Condition="'@(_ResolvedAppExtensionReferences)' == ''"
+           Text="The File Provider extension's bundle was not found ($(_AsyncFileProviderAppex)); its output has: @(_AsyncFileProviderOutFiles->'%(Filename)%(Extension)')" />
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\ASync.App.iOS.FileProvider\ASync.App.iOS.FileProvider.csproj">
       <IsAppExtension>true</IsAppExtension>

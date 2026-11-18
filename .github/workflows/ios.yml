@@ -220,6 +220,14 @@ jobs:
           path: artifacts/packages/ios/*.ipa
           if-no-files-found: error
 
+      - name: Upload the build log (failures)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-build-log
+          path: artifacts/ios-build/
+          if-no-files-found: ignore
+
       - name: Upload the screenshots
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
