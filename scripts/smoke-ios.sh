@@ -226,7 +226,7 @@ pass "installed $(basename "$APP") ($(du -sh "$APP" | cut -f1))"
 # ASYNC_NO_APP_GROUP=1, which only simctl can set. That part then launches it with the group: task 21's store moves into it.
 no_app_group=1
 launch() {
-  SIMCTL_CHILD_ASYNC_APP_AUTOMATION="$auto_port" SIMCTL_CHILD_ASYNC_NO_APP_GROUP="$no_app_group" xcrun simctl launch --terminate-running-process \
+  SIMCTL_CHILD_ASYNC_APP_AUTOMATION="$auto_port" SIMCTL_CHILD_ASYNC_NO_APP_GROUP="$no_app_group" SIMCTL_CHILD_ASYNC_FP_TESTING=1 xcrun simctl launch --terminate-running-process \
     --stdout="$logs/app-stdout-$1.log" --stderr="$logs/app-stderr-$1.log" "$udid" "$bundle" >/dev/null
   container=$(xcrun simctl get_app_container "$udid" "$bundle" data)
   wait_for 60 ctl state || { tail -40 "$logs/app-stdout-$1.log" "$logs/app-stderr-$1.log"; echo "the app's automation did not answer" >&2; exit 1; }

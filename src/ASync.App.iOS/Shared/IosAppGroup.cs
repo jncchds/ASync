@@ -31,6 +31,9 @@ public static class IosAppGroup
     /// <summary>The line in Settings when the build cannot have the Files app location.</summary>
     public const string NeedsSignedBuild = "The Files app location needs a signed build";
 
+    /// <summary>The line in Settings while iOS has the location switched off (new locations start off).</summary>
+    public const string TurnOnInFiles = "Turn on ASync in the Files app: Browse → ⋯ → Edit, then switch on ASync";
+
     /// <summary>The store inside an app's (or the group's) container: Library/Application Support/async.</summary>
     public static string StoreIn(string container) => Path.Combine(container, "Library", "Application Support", "async");
 

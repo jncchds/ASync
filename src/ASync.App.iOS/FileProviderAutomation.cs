@@ -98,9 +98,8 @@ internal static class FileProviderAutomation
     private static async Task<string> ListAsync(string path)
     {
         var url = Combine(await RootAsync(), path);
-        return await Task.Run(() =>
+        return await Coordinated(coordinator =>
         {
-            using var coordinator = new NSFileCoordinator();
             string? result = null;
             coordinator.CoordinateRead(url, NSFileCoordinatorReadingOptions.WithoutChanges, out var error, actual =>
             {
@@ -116,16 +115,15 @@ internal static class FileProviderAutomation
                     }).OrderBy(e => e.name, StringComparer.Ordinal), Json);
             });
             return error is not null ? $"error: {error.LocalizedDescription} ({error.Domain} {error.Code})" : result ?? "error: no answer";
-        });
+        }, path);
     }
 
     private static async Task<string> ReadAsync(string path)
     {
         var url = Combine(await RootAsync(), path);
-        return await Task.Run(() =>
+        return await Coordinated(coordinator =>
         {
             var target = Path.Combine(IosAgent.Home, "tmp", "fp-read-" + Guid.NewGuid().ToString("N")[..8] + "-" + Path.GetFileName(path));
-            using var coordinator = new NSFileCoordinator();
             string? result = null;
             coordinator.CoordinateRead(url, NSFileCoordinatorReadingOptions.WithoutChanges, out var error, actual =>
             {
@@ -137,15 +135,14 @@ internal static class FileProviderAutomation
                 catch (Exception e) { result = $"error: {e.Message}"; }
             });
             return error is not null ? $"error: {error.LocalizedDescription} ({error.Domain} {error.Code})" : result ?? "error: no answer";
-        });
+        }, path);
     }
 
     private static async Task<string> WriteAsync(string path, byte[] content)
     {
         var url = Combine(await RootAsync(), path);
-        return await Task.Run(() =>
+        return await Coordinated(coordinator =>
         {
-            using var coordinator = new NSFileCoordinator();
             string? result = null;
             coordinator.CoordinateWrite(url, NSFileCoordinatorWritingOptions.ForReplacing, out var error, actual =>
             {
@@ -157,22 +154,35 @@ internal static class FileProviderAutomation
                 catch (Exception e) { result = $"error: {e.GetType().Name}: {e.Message}"; }
             });
             return error is not null ? $"error: {error.LocalizedDescription} ({error.Domain} {error.Code})" : result ?? "error: no answer";
-        });
+        }, path);
     }
 
     private static async Task<string> DeleteAsync(string path)
     {
         var url = Combine(await RootAsync(), path);
-        return await Task.Run(() =>
+        return await Coordinated(coordinator =>
         {
-            using var coordinator = new NSFileCoordinator();
             string? result = null;
             coordinator.CoordinateWrite(url, NSFileCoordinatorWritingOptions.ForDeleting, out var error, actual =>
             {
                 result = NSFileManager.DefaultManager.Remove(actual, out var removeError) ? "deleted" : $"error: {removeError?.LocalizedDescription}";
             });
             return error is not null ? $"error: {error.LocalizedDescription}" : result ?? "error: no answer";
-        });
+        }, path);
+    }
+
+    /// <summary>A coordinated access on a thread of its own, cancelled after a minute (one that hangs would block every later command).</summary>
+    private static async Task<string> Coordinated(Func<NSFileCoordinator, string> work, string what)
+    {
+        var coordinator = new NSFileCoordinator();
+        var task = Task.Factory.StartNew(() => work(coordinator), TaskCreationOptions.LongRunning);
+        if (await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(60))) == task)
+        {
+            coordinator.Dispose();
+            return await task;
+        }
+        coordinator.Cancel();
+        return $"error: timeout ({what}: the coordinated access did not end within 60 s)";
     }
 
     private static string Tail(string path, int lines)

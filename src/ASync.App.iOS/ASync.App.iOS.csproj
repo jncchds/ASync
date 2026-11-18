@@ -55,7 +55,10 @@
     <UseNativeHttpHandler>false</UseNativeHttpHandler>
     <!-- Entitlements only take effect when the app is signed (CI's TestFlight job, or SideStore/AltStore re-signing it): the
          app group and the File Provider extension of task 25 go there. -->
-    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false' And '$(AsyncPush)' != 'true'">Entitlements.plist</CodesignEntitlements>
+    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false' And '$(AsyncPush)' != 'true' And '$(AsyncSimulatorTesting)' != 'true'">Entitlements.plist</CodesignEntitlements>
+    <!-- The simulator build of package-ios.sh: Entitlements.plist plus the File Provider testing mode, so the smoke test can
+         keep its domain enabled (iOS leaves a new location off until the person turns it on in Files). Never in a signed build. -->
+    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false' And '$(AsyncSimulatorTesting)' == 'true'">Entitlements.Simulator.plist</CodesignEntitlements>
     <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false' And '$(AsyncPush)' == 'true'">Entitlements.Push.plist</CodesignEntitlements>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>

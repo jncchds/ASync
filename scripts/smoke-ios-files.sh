@@ -17,6 +17,12 @@ note() { printf '  \033[33m·\033[0m %s\n' "$1"; }
 fps() { ctl fp-state; }
 fp_has() { fps | jq -e "$1" >/dev/null; }
 fp_ls_has() { ctl "fp-ls $1" | jq -e --arg n "$2" 'type == "array" and any(.name == $n)' >/dev/null; }
+# within SECONDS COMMAND…: until it succeeds or the time is up (wall clock: a command here can itself take up to a minute).
+within() {
+  local until=$((SECONDS + $1)); shift
+  while ((SECONDS < until)); do "$@" >/dev/null 2>&1 && return 0; sleep 2; done
+  return 1
+}
 b64() { python3 -c 'import base64,sys;print(base64.b64encode(sys.argv[1].encode()).decode())' "$1"; }
 
 appex="$APP/PlugIns/ASyncFileProvider.appex"
@@ -63,20 +69,20 @@ else
   fail "the simulator gave no app group (the domain cannot be registered)" "$state_fp"
 fi
 
-if wait_for 60 fp_has '.domains | any(test("ASync — 127.0.0.1"))'; then
+if within 60 fp_has '.domains | any(test("ASync — 127.0.0.1"))'; then
   pass "the domain is registered: $(fps | jq -r '.domains[0]')"
 else
   fail "no File Provider domain" "$(fps)"
 fi
 
-if wait_for 60 fp_has '.root | type == "string" and startswith("/")'; then
+if within 60 fp_has '.root | type == "string" and startswith("/")'; then
   pass "the domain's root has a user-visible URL ($(fps | jq -r .root | sed "s|$HOME|~|"))"
 else
   fail "no user-visible URL for the root" "$(fps)"
 fi
 
 # The root: the account's folders (through the extension's enumeration).
-if wait_for 90 fp_ls_has "" "Phone docs"; then
+if within 90 fp_ls_has "" "Phone docs"; then
   root_listing=$(ctl "fp-ls ")
   pass "the root lists the folders: $(jq -r 'map(.name) | join(", ")' <<<"$root_listing")"
 else
@@ -84,7 +90,7 @@ else
 fi
 
 # A TwoWay folder: its files, no .async.
-if wait_for 60 fp_ls_has "Phone docs" "from-cli.txt"; then
+if within 60 fp_ls_has "Phone docs" "from-cli.txt"; then
   docs_listing=$(ctl "fp-ls Phone docs")
   jq -e 'all(.name != ".async")' <<<"$docs_listing" >/dev/null && pass "Phone docs lists its files, .async hidden: $(jq -r 'map(.name) | join(", ")' <<<"$docs_listing")" \
     || fail ".async shown" "$docs_listing"
@@ -96,7 +102,7 @@ fi
 head -c 5242880 /dev/urandom >"$work/cli-docs/big.bin"
 cli_sync "$sync_id"
 ctl fp-signal >/dev/null
-wait_for 60 fp_ls_has "Phone docs" "big.bin" || true
+within 60 fp_ls_has "Phone docs" "big.bin" || true
 read_answer=$(ctl "fp-read Phone docs/big.bin")
 read_path=${read_answer% *}
 if [[ -f "$read_path" ]] && cmp -s "$read_path" "$work/cli-docs/big.bin"; then
@@ -116,7 +122,7 @@ fi
 
 # Writing: a file saved into the TwoWay folder through the provider reaches the server and the other device.
 answer=$(ctl "fp-write Phone docs/from-files-app.txt $(b64 "saved in the Files app")")
-if [[ "$answer" == written ]] && wait_for 60 server_has "$sync_id" from-files-app.txt; then
+if [[ "$answer" == written ]] && within 60 server_has "$sync_id" from-files-app.txt; then
   cli_sync "$sync_id"
   [[ "$(cat "$work/cli-docs/from-files-app.txt" 2>/dev/null)" == "saved in the Files app" ]] \
     && pass "a file saved through the provider is on the server and on the other device" || fail "written file on the cli" "$(ls "$work/cli-docs")"
@@ -131,7 +137,7 @@ api PUT "/api/folders/$music_id/devices" "{\"deviceId\":\"$cli_device\",\"localP
 api PUT "/api/folders/$music_id/devices" "{\"deviceId\":\"$device\",\"localPath\":\"~/Documents/Music\",\"direction\":\"Download\"}" >/dev/null
 cli_sync "$music_id"
 wait_state '.folders | any(.name == "Shared music")' 30 || fail "the Mirror folder appears" "$(state)"
-if wait_for 90 fp_ls_has "Shared music" "song.txt"; then
+if within 90 fp_ls_has "Shared music" "song.txt"; then
   answer=$(ctl "fp-write Shared music/not-allowed.txt $(b64 "nope")")
   sleep 15
   if server_has "$music_id" not-allowed.txt >/dev/null 2>&1; then
@@ -146,7 +152,7 @@ fi
 # A Backup folder: its snapshots, a file of one read back.
 picked_listing=$(ctl "fp-ls Picked")
 snapshot_dir=$(jq -r 'if type == "array" then (map(select(.dir)) | .[0].name // "") else "" end' <<<"$picked_listing" 2>/dev/null || true)
-if [[ -n "$snapshot_dir" ]] && wait_for 60 fp_ls_has "Picked/$snapshot_dir" "picked.txt"; then
+if [[ -n "$snapshot_dir" ]] && within 60 fp_ls_has "Picked/$snapshot_dir" "picked.txt"; then
   answer=$(ctl "fp-read Picked/$snapshot_dir/picked.txt")
   [[ "$(cat "${answer% *}" 2>/dev/null)" == picked ]] \
     && pass "the Backup folder lists its snapshot \"$snapshot_dir\" and a file of it reads back" || fail "snapshot file" "$answer"
@@ -162,7 +168,7 @@ generation_before=$(fps | jq -r '.generation // 0')
 echo "changed on the computer" >"$work/cli-docs/from-cli.txt"
 cli_sync "$sync_id"
 changed_content() { local a; a=$(ctl "fp-read Phone docs/from-cli.txt"); [[ "$(cat "${a% *}" 2>/dev/null)" == "changed on the computer" ]]; }
-if wait_for 90 changed_content; then
+if within 90 changed_content; then
   pass "a change on the server was signalled (generation $generation_before → $(fps | jq -r .generation), $(fps | jq -r .signals) signals) and the new content arrived"
 else
   fail "change signalling" "$(fps) | $(ctl fp-log)"

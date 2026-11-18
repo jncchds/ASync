@@ -53,7 +53,8 @@ case $mode in
     rid=iossimulator-$([[ "$(uname -m)" == arm64 ]] && echo arm64 || echo x64)
     # Ad hoc ("-"): the simulator needs a signature (for the entitlements: the Keychain group) but no identity.
     mkdir -p artifacts/ios-build
-    "${build[@]}" -r "$rid" -p:CodesignKey=- -bl:artifacts/ios-build/simulator.binlog
+    # AsyncSimulatorTesting: the File Provider testing-mode entitlement (Entitlements.Simulator.plist) for the smoke test.
+    "${build[@]}" -r "$rid" -p:CodesignKey=- -p:AsyncSimulatorTesting=true -bl:artifacts/ios-build/simulator.binlog
     app=src/ASync.App.iOS/bin/Release/net10.0-ios/$rid/ASync.app
     rm -rf "$out/simulator" && mkdir -p "$out/simulator"
     cp -R "$app" "$out/simulator/ASync.app"

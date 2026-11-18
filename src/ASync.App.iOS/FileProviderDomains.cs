@@ -55,6 +55,12 @@ public static class FileProviderDomains
     public static string? Registered => _registered;
     public static int Signals { get; private set; }
 
+    /// <summary>
+    /// Set while iOS has the location switched off (a new one starts off until the person turns it on in Files): what to do, for
+    /// Settings. Null when it is on, or not known yet.
+    /// </summary>
+    public static string? DisabledNote { get; private set; }
+
     private static (AppGroupDecision, string) Prepare()
     {
         var home = IosAgent.Home;
@@ -154,6 +160,9 @@ public static class FileProviderDomains
         var id = SharedAccount.DomainId(identity.DeviceId);
         if (_registered == id) return;
         var domain = new NSFileProviderDomain(id, SharedAccount.DomainTitle(identity.ServerUrl));
+        // Tests only: iOS adds a new location switched off until the person turns it on in Files (Browse → ⋯ → Edit); the smoke
+        // test (ASYNC_FP_TESTING=1, which only simctl sets, and the simulator build's testing-mode entitlement) keeps it on.
+        if (Environment.GetEnvironmentVariable("ASYNC_FP_TESTING") == "1") domain.TestingModes = NSFileProviderDomainTestingModes.AlwaysEnabled;
         NSFileProviderManager.AddDomain(domain, error =>
         {
             if (error is not null)
@@ -165,6 +174,7 @@ public static class FileProviderDomains
             _domain = domain;
             Console.WriteLine($"ASync: File Provider domain {domain.DisplayName} registered");
             RemoveDomains(keep: id); // an earlier enrollment's
+            CheckEnabled(id);
         });
     }
 
@@ -189,6 +199,18 @@ public static class FileProviderDomains
         });
     }
 
+    /// <summary>Whether the person has the location on (iOS keeps <c>userEnabled</c> on the domain it hands back).</summary>
+    [SupportedOSPlatform("ios16.0")]
+    [UnsupportedOSPlatform("maccatalyst")]
+    private static void CheckEnabled(string id)
+    {
+        NSFileProviderManager.GetDomains((domains, error) =>
+        {
+            if (error is not null || domains?.FirstOrDefault(d => d.Identifier == id) is not { } d) return;
+            DisabledNote = d.UserEnabled ? null : IosAppGroup.TurnOnInFiles;
+        });
+    }
+
     /// <summary>The domains iOS has for this app (the automation's <c>fp-state</c>).</summary>
     public static Task<string[]> DomainsAsync()
     {
@@ -203,7 +225,7 @@ public static class FileProviderDomains
     private static void ListDomains(TaskCompletionSource<string[]> done)
     {
         NSFileProviderManager.GetDomains((domains, error) =>
-            done.TrySetResult(error is not null ? [$"error: {error.LocalizedDescription}"] : [.. (domains ?? []).Select(d => $"{d.Identifier} {d.DisplayName}")]));
+            done.TrySetResult(error is not null ? [$"error: {error.LocalizedDescription}"] : [.. (domains ?? []).Select(d => $"{d.Identifier} {d.DisplayName} userEnabled={d.UserEnabled}")]));
     }
 
     // ── Signals ───────────────────────────────────────────────────────────────
