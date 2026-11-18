@@ -9,7 +9,7 @@ namespace ASync.App.iOS;
 
 /// <summary>
 /// Tests only: the photo commands of <see cref="Automation"/> (task 23, <c>scripts/smoke-ios.sh</c>). The Photos screen:
-/// <c>photos-dialog &lt;folder&gt;</c>, <c>photos-state</c>, <c>photos-allow</c> (the system's question), <c>photos-more</c> (the limited
+/// <c>photos-dialog &lt;folder&gt;</c>, <c>photos-state</c>, <c>photos-allow</c> (the system's question), <c>photos-ask</c> (the same without the screen), <c>photos-more</c> (the limited
 /// library picker), <c>photos-albums all|&lt;name&gt;,…</c>, <c>photos-cloud on|off</c>, <c>photos-save</c>, <c>photos-force
 /// none|partial|off</c> (what the screen and card show, for a screenshot of a state simctl cannot grant; the agent keeps reading the
 /// real permission), <c>photos-restore-choose|photos-restore-cancel &lt;folder&gt;</c>. The agent: <c>photos</c> (access, albums, the
@@ -41,6 +41,10 @@ internal static class PhotosAutomation
                 return State(shell);
             case "photos-allow":
                 Dialog(shell).AllowCommand.Execute(null);
+                return "asked";
+            case "photos-ask":
+                // iOS's question without the Photos screen (for its screenshot at the end of the smoke test).
+                IosPhotos.Access.Request();
                 return "asked";
             case "photos-more":
                 Dialog(shell).ChooseMoreCommand.Execute(null);
@@ -147,7 +151,8 @@ internal static class PhotosAutomation
         return JsonSerializer.Serialize(new
         {
             access = library.Access.ToString(), library.Photos, library.Videos, library.Problem, cloud = IosPhotos.Settings.CloudDownloads,
-            authorization = PHPhotoLibrary.GetAuthorizationStatus(PHAccessLevel.ReadWrite).ToString(), triggered = IosPhotos.Triggered,
+            authorization = PHPhotoLibrary.GetAuthorizationStatus(PHAccessLevel.ReadWrite).ToString(),
+            addOnly = PHPhotoLibrary.GetAuthorizationStatus(PHAccessLevel.AddOnly).ToString(), triggered = IosPhotos.Triggered,
             albums = library.Albums.Select(a => new { a.Id, a.Name, a.Photos, a.Videos }),
             restore = status.MediaRestore,
             folders = status.Folders.Where(f => f.Kind == FolderKind.Photos)

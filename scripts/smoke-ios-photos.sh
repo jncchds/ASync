@@ -92,32 +92,47 @@ jq -e '.needsPermission and .access == "None" and (.explanation | test("Allow Fu
   && pass "without permission the Photos screen explains why ASync asks" || fail "photos explanation" "$p"
 jq -e '.access == "None"' <<<"$(photos)" >/dev/null && pass "and the agent reports no access (nothing asked of PhotoKit)" || fail "agent access" "$(photos)"
 shot photos-permission
-ctl photos-allow >/dev/null
-sleep 3
-shot_system photos-permission-dialog
-pass "Allow asks iOS's question (shown; simctl cannot tap it)"
+ctl back >/dev/null
 
-# Access as the person's answer would give it. `xcrun simctl privacy … grant photos` succeeds but PhotoKit's read/write status
-# stays "not determined" (seen in task 23's first Mac run), and simctl refuses photos-limited: the simulator's TCC database is
-# written instead, with the simulator shut down (tccd reads it at boot): auth_value 3 = limited, 2 = full.
+# Access as the person's answer would give it (simctl cannot tap iOS's question; the question itself is shown at the end of
+# smoke-ios.sh). Granted before anything asks: in task 23's first two Mac runs the app had asked first, and with the question
+# open PhotoKit's read/write status stayed "not determined" whatever `simctl privacy` or the TCC database said. simctl refuses
+# photos-limited: limited access is written into the simulator's TCC database with the simulator shut down (auth_value 3).
+# privacy.log has the TCC rows of each step.
 tcc_db="$HOME/Library/Developer/CoreSimulator/Devices/$udid/data/Library/TCC/TCC.db"
-tcc_photos() { # VALUE RUN
-  xcrun simctl privacy "$udid" grant photos "$bundle" >>"$logs/privacy.log" 2>&1 || true # makes the row (and the database) exist
+sqlite3 "$tcc_db" ".schema access" >"$logs/tcc-schema.log" 2>&1 || true
+tcc_rows() {
+  { echo "── $1"; sqlite3 "$tcc_db" "SELECT service, client, client_type, auth_value, auth_reason, auth_version, csreq IS NOT NULL, indirect_object_identifier, flags FROM access WHERE client = '$bundle'"; } >>"$logs/privacy.log" 2>&1 || true
+}
+tcc_write() { # AUTH_VALUE RUN: the photos row set while the simulator is shut down, then booted and the app launched
   xcrun simctl shutdown "$udid"
-  sqlite3 "$tcc_db" "DELETE FROM access WHERE client = '$bundle' AND service IN ('kTCCServicePhotos', 'kTCCServicePhotosAdd');
-    INSERT INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified)
-    VALUES ('kTCCServicePhotos', '$bundle', 0, $1, 2, 1, 0, CAST(strftime('%s','now') AS INTEGER));" 2>>"$logs/privacy.log"
-  sqlite3 "$tcc_db" "SELECT service, client, auth_value, auth_reason, auth_version FROM access WHERE client = '$bundle'" >>"$logs/privacy.log" 2>&1
+  sqlite3 "$tcc_db" "UPDATE access SET auth_value = $1, last_modified = CAST(strftime('%s','now') AS INTEGER) WHERE client = '$bundle' AND service = 'kTCCServicePhotos';
+    INSERT OR IGNORE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags)
+    VALUES ('kTCCServicePhotos', '$bundle', 0, $1, 2, 1, 0);" >>"$logs/privacy.log" 2>&1
+  tcc_rows "written: auth_value $1"
   xcrun simctl boot "$udid"
   xcrun simctl bootstatus "$udid" -b >/dev/null
   launch "$2"
   ctl "notifications off" >/dev/null
   wait_state '.page == "DashboardViewModel" and .state == "Connected"' 60 || true
+  echo "app: $(photos | jq -c '{access, authorization, addOnly}')" >>"$logs/privacy.log"
 }
-sqlite3 "$tcc_db" ".schema access" >"$logs/tcc-schema.log" 2>&1 || true
-tcc_photos 3 3
+tcc_rows "before"
+xcrun simctl privacy "$udid" grant photos "$bundle" >>"$logs/privacy.log" 2>&1 || fail "simctl privacy grant photos" "$(tail -3 "$logs/privacy.log")"
+tcc_rows "after simctl privacy grant photos"
+launch 3
+echo "app: $(photos | jq -c '{access, authorization, addOnly}')" >>"$logs/privacy.log"
+if wait_for 30 access_is Full; then
+  pass "full access granted (xcrun simctl privacy … grant photos, before the app asked)"
+else
+  note "simctl's grant left PhotoKit at $(photos | jq -r .authorization): writing the TCC database"
+  tcc_write 2 3b
+  wait_for 30 access_is Full && pass "full access (TCC auth_value 2)" || { fail "photos access" "$(photos) $(cat "$logs/privacy.log")"; api DELETE "/api/folders/$pf" >/dev/null; return 0; }
+fi
+
+tcc_write 3 4
 if wait_for 20 access_is Partial; then
-  pass "limited access (TCC auth_value 3): the agent reports Partial and lists $(ctl photos-assets | jq length) photos (none selected)"
+  pass "limited access (TCC auth_value 3): the agent reports Partial and sees $(ctl photos-assets | jq length) assets (none selected)"
 else
   note "limited access could not be set ($(photos | jq -r .authorization)): the limited state is shown forced, for the screenshot"
   ctl "photos-force partial" >/dev/null
@@ -131,11 +146,12 @@ shot photos-limited
 ctl "photos-force off" >/dev/null
 ctl back >/dev/null
 
-tcc_photos 2 4
+tcc_write 2 5
 if wait_for 30 access_is Full; then
-  pass "full access (TCC auth_value 2): ASync may read all photos and videos now"
+  pass "full access again: ASync may read all photos and videos"
 else
   fail "photos access" "$(photos) $(cat "$logs/privacy.log")"
+  api DELETE "/api/folders/$pf" >/dev/null
   return 0 # the rest needs access
 fi
 assets=$(ctl photos-assets)
@@ -237,7 +253,7 @@ xcrun simctl shutdown "$udid"
 rm -rf "$sim_data/Media/DCIM" "$sim_data/Media/PhotoData"
 xcrun simctl boot "$udid"
 xcrun simctl bootstatus "$udid" -b >/dev/null
-launch 5
+launch 6
 ctl "notifications off" >/dev/null
 wait_state '.page == "DashboardViewModel" and .state == "Connected"' 60 || fail "after the wipe" "$(state)"
 wait_for 60 library_empty && pass "the simulator's library is empty (Photos data removed, rebooted)" || fail "wipe" "$(ctl photos-assets | head -c 400)"

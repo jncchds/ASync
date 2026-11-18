@@ -451,6 +451,17 @@ else
   fail "link opened through iOS (screen in logs/openurl.png)" "$(state)"
 fi
 
+# iOS's photo question (the Photos screen's Allow asks it), with the permission reset first: simctl cannot answer it, and an
+# open question keeps PhotoKit's status undetermined, so it comes after the photo checks.
+if [[ -n "$shots" ]]; then
+  xcrun simctl privacy "$udid" reset photos "$bundle" >/dev/null 2>&1 || true
+  launch 7
+  ctl "notifications off" >/dev/null
+  ctl photos-ask >/dev/null
+  sleep 3
+  shot_system photos-permission-dialog
+fi
+
 # The very last: iOS's notification question (the dashboard prompt's Allow asks it); simctl cannot answer it.
 if [[ -n "$shots" ]]; then
   ctl notify-permission >/dev/null
