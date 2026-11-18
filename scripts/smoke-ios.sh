@@ -25,8 +25,11 @@
 #   snapshot keeping a photo taken out of the album, restores into the library with and without the photos there); contacts
 #   and calendars (task 24, scripts/smoke-ios-collections.sh: the explanations, access granted, contacts and events seeded
 #   through the frameworks, the live lists over the hub, backups checked offline with async-cli, a changed contact's own run,
-#   everything deleted and restored twice without duplicates, limited contacts access); the app restarted (identity and
-#   folders survive, it signs in again).
+#   everything deleted and restored twice without duplicates, limited contacts access); the Files app location (task 25,
+#   scripts/smoke-ios-files.sh: the extension embedded, the app group, the domain, the root, a TwoWay folder, a fetch compared
+#   with async-cli, a write reaching the server, a Mirror folder refusing writes, a snapshot, a server change signalled, the
+#   extension's footprint; the domain gone after signing out); the app restarted (identity and folders survive, it signs in
+#   again).
 #
 # Needs: macOS with Xcode and a simulator runtime, the .NET SDK with the ios workload, jq, python3, Homebrew's PostgreSQL
 # (PG_BIN=…/bin, default: brew --prefix postgresql@16). From the repository root:
@@ -63,6 +66,10 @@ cleanup() {
   local status=$?
   [[ -n "$udid" ]] && xcrun simctl spawn "$udid" log show --last 15m --style compact --predicate 'process == "ASync"' >"$logs/simulator-ASync.log" 2>/dev/null || true
   if [[ -n "${container:-}" && -f "$container/Library/Logs/async.log" ]]; then cp "$container/Library/Logs/async.log" "$logs/app-agent.log" || true; fi
+  if [[ -n "$udid" ]] && group=$(xcrun simctl get_app_container "$udid" ua.pp.chds.async group.ua.pp.chds.async 2>/dev/null); then
+    cp "$group/Library/Application Support/fileprovider/fileprovider.log" "$logs/fileprovider.log" 2>/dev/null || true
+  fi
+  [[ -n "$udid" ]] && xcrun simctl spawn "$udid" log show --last 15m --style compact --predicate 'process == "ASyncFileProvider" OR subsystem == "com.apple.FileProvider"' >"$logs/simulator-fileprovider.log" 2>/dev/null || true
   if [[ "${KEEP:-}" == 1 ]]; then
     echo "Kept: the server (pid $server_pid), PostgreSQL in $work/pg, the simulator $udid, $work."
   else
@@ -215,8 +222,11 @@ pass "booted $(xcrun simctl list devices -j | jq -r --arg u "$udid" '.devices[][
 xcrun simctl install "$udid" "$APP"
 pass "installed $(basename "$APP") ($(du -sh "$APP" | cut -f1))"
 
+# Until the Files app part (task 25), the app runs as a build without the app group does (the unsigned .ipa):
+# ASYNC_NO_APP_GROUP=1, which only simctl can set. That part then launches it with the group: task 21's store moves into it.
+no_app_group=1
 launch() {
-  SIMCTL_CHILD_ASYNC_APP_AUTOMATION="$auto_port" xcrun simctl launch --terminate-running-process \
+  SIMCTL_CHILD_ASYNC_APP_AUTOMATION="$auto_port" SIMCTL_CHILD_ASYNC_NO_APP_GROUP="$no_app_group" SIMCTL_CHILD_ASYNC_FP_TESTING=1 xcrun simctl launch --terminate-running-process \
     --stdout="$logs/app-stdout-$1.log" --stderr="$logs/app-stderr-$1.log" "$udid" "$bundle" >/dev/null
   container=$(xcrun simctl get_app_container "$udid" "$bundle" data)
   wait_for 60 ctl state || { tail -40 "$logs/app-stdout-$1.log" "$logs/app-stderr-$1.log"; echo "the app's automation did not answer" >&2; exit 1; }
@@ -261,7 +271,7 @@ jq -e '(.reference | startswith("ioskey:")) and (.where == "Secure Enclave" or (
   && pass "device key: $(jq -r .where <<<"$keys") (only its reference in the identity)" || fail "device key" "$keys"
 files=$(ctl files)
 jq -e 'map(select(.name == "identity.json" or .name == "token.json")) | length == 2 and all(.start | startswith("ioskc:1:"))' <<<"$files" >/dev/null \
-  && ! grep -q admin "$container/Library/Application Support/async/identity.json" \
+  && ! grep -q admin "$(ctl fp-state | jq -r .store)/identity.json" \
   && pass "identity.json and token.json sealed with the Keychain AES key (nothing readable)" || fail "sealed store" "$files"
 
 section "a TwoWay folder in the app's Documents"
@@ -444,15 +454,23 @@ source "$root/scripts/smoke-ios-photos.sh"
 # shellcheck source=scripts/smoke-ios-collections.sh
 source "$root/scripts/smoke-ios-collections.sh"
 
+# The Files app location (task 25, the File Provider extension): its own file too.
+# shellcheck source=scripts/smoke-ios-files.sh
+source "$root/scripts/smoke-ios-files.sh"
+
 section "restart"
 launch 2
 wait_state '.page == "DashboardViewModel" and .state == "Connected"' 60 && pass "after a restart: still enrolled, signed in again" || fail "restart" "$(state)"
-wait_state '.folders | length == 3' 30 && pass "the three folders are back" || fail "folders after restart" "$(state)"
+# Four since the Files app part (task 25) added the Mirror folder "Shared music".
+wait_state '.folders | length == 4' 30 && pass "the four folders are back" || fail "folders after restart" "$(state)"
 
 section "a pairing link opened through iOS"
 # Last: if iOS asked "Open in ASync?" here, the question would cover the screens after it (simctl cannot tap it).
 ctl signout >/dev/null
 wait_state '.page == "EnrollViewModel"' 30 || fail "signed out again" "$(state)"
+no_domains() { ctl fp-state | jq -e '.domains | length == 0'; }
+wait_for 30 no_domains \
+  && pass "signing out removed the Files app location (no File Provider domain)" || fail "domain after sign-out" "$(ctl fp-state)"
 code3=$(api POST /api/devices/enrollments '{"reusable":false,"label":"ios link"}' | jq -r .code)
 link="async://pair?s=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$server")&c=$code3"
 ctl "openurl $link" >/dev/null

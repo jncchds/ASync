@@ -292,4 +292,35 @@ public class BackgroundTests
         Assert.False(Shows(window, "VendorHint"));
         Assert.True(Named<Border>(window, "BackgroundCard").Bounds.Width <= 360);
     }
+    // ── iOS (task 25): the Files app location ─────────────────────────────────
+
+    [AvaloniaFact]
+    public async Task OnAnUnsignedIphone_SettingsSayWhyTheFilesAppHasNoLocation()
+    {
+        var (window, f) = await PhoneAsync(Iphone(), Statuses.Folder());
+        await using var _ = f;
+        f.Shell.OpenSettingsCommand.Execute(null);
+        await Pump(() => window.GetVisualDescendants().OfType<SettingsView>().Any(v => v.IsEffectivelyVisible));
+        Assert.False(Shows(window, "FilesLocationNote")); // signed, or not an iPhone: nothing to say
+
+        var (unsignedWindow, g) = await UnsignedAsync();
+        await using var __ = g;
+        g.Shell.OpenSettingsCommand.Execute(null);
+        await Pump(() => Shows(unsignedWindow, "FilesLocationNote"));
+        Assert.Equal("The Files app location needs a signed build", Named<TextBlock>(unsignedWindow, "FilesLocationNote").Text);
+        Assert.Equal(iOS.IosAppGroup.NeedsSignedBuild, new SettingsViewModel(g.Shell).FilesLocationNote);
+    }
+
+    private static async Task<(Window, ShellFixture)> UnsignedAsync()
+    {
+        var f = new ShellFixture();
+        f.Platform.Phone = true;
+        f.Platform.BackgroundServices = Iphone();
+        f.Platform.FilesLocationNote = iOS.AppGroupSupport.Decide("/var/mobile/Containers/Data/Application/X", null, false, true).Note;
+        f.Start(Statuses.Connected(Statuses.Folder()));
+        var window = new Window { Width = 360, Height = 760, Content = new ShellView { DataContext = f.Shell } };
+        window.Show();
+        await Pump(() => f.Shell.Status is not null && window.GetVisualDescendants().OfType<DashboardView>().Any());
+        return (window, f);
+    }
 }

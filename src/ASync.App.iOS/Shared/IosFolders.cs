@@ -268,6 +268,12 @@ public sealed class IosTreeFactory(string home, BookmarkStore bookmarks, IBookma
     /// <summary>How long a resolved bookmark is trusted before it is resolved again (it may have moved).</summary>
     public TimeSpan Recheck { get; init; } = TimeSpan.FromMinutes(1);
 
+    /// <summary>
+    /// Coordinated reads of picked folders that live in another provider (iCloud Drive, another app's File Provider: task
+    /// 25), so files not downloaded are downloaded instead of failing; null reads every file directly (the tests' default).
+    /// </summary>
+    public IFileCoordination? Coordination { get; init; }
+
     public ILocalTree Open(string location)
     {
         if (IosLocations.TryParseBookmark(location, out var id, out var where)) return new BookmarkTree(this, location, id, where);
@@ -372,7 +378,7 @@ public sealed class IosTreeFactory(string home, BookmarkStore bookmarks, IBookma
             }
             if (access.Stale && access.Recreate() is { } fresh) bookmarks.Replace(id, fresh);
             if (_open.Remove(id, out var old)) old.Dispose();
-            var result = new BookmarkTree.Access(access, DateTime.UtcNow);
+            var result = new BookmarkTree.Access(access, DateTime.UtcNow, Coordination);
             _open[id] = result;
             return result;
         }
@@ -419,11 +425,13 @@ public sealed class BookmarkTree : ILocalTree
         _where = where;
     }
 
-    internal sealed class Access(IBookmarkAccess access, DateTime at) : IDisposable
+    internal sealed class Access(IBookmarkAccess access, DateTime at, IFileCoordination? coordination) : IDisposable
     {
         public string Path => access.Path;
         public DateTime At => at;
-        public FileSystemTree Tree { get; } = new(access.Path);
+        public FileSystemTree Files { get; } = new(access.Path);
+        public ILocalTree Tree => _tree ??= coordination is null ? Files : new CoordinatedTree(Files, coordination);
+        private ILocalTree? _tree;
         public void Dispose() => access.Dispose();
     }
 
@@ -439,7 +447,7 @@ public sealed class BookmarkTree : ILocalTree
         catch (UnauthorizedAccessException) { return null; }
     }
 
-    private FileSystemTree Tree() => _factory.Resolve(_id, _where).Tree;
+    private ILocalTree Tree() => _factory.Resolve(_id, _where).Tree;
 
     public bool Exists()
     {

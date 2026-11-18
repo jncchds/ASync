@@ -143,6 +143,19 @@ public class AgentEnrollmentTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task IdentityChanged_IsRaisedAfterAnEnrollmentAndAfterSigningOut_WithTheStoreAlreadyUpToDate()
+    {
+        var seen = new List<bool>(); // whether the store had an identity when the event came
+        _runtime.IdentityChanged += () => { lock (seen) seen.Add(Store.LoadIdentity() is not null); };
+        await _client.EnrollAsync(_server.Url, "K7QD-M2XP-9RWA", "laptop", DevicePlatform.Linux);
+        await WaitForAsync(s => s.State is not AgentState.NotEnrolled);
+        lock (seen) Assert.Equal([true], seen);
+
+        await _client.ForgetAsync();
+        lock (seen) Assert.Equal([true, false], seen); // iOS removes its File Provider domain on this one
+    }
+
+    [Fact]
     public async Task Forget_CancelsAPendingDeviceCode()
     {
         await _client.StartDeviceCodeAsync(_server.Url, "laptop", DevicePlatform.Linux);

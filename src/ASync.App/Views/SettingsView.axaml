@@ -133,6 +133,8 @@
         <TextBlock Classes="h2" Text="About" />
         <TextBlock Name="AppVersion" Text="{Binding AppText}" />
         <TextBlock Classes="muted" Text="{Binding AgentText}" />
+        <TextBlock Classes="muted small" Name="FilesLocationNote" Text="{Binding FilesLocationNote}" TextWrapping="Wrap"
+                   IsVisible="{Binding HasFilesLocationNote}" />
         <TextBlock Classes="muted small" Text="Self-hosted sync and backup. MIT licence." />
         <TextBlock Classes="muted small" TextWrapping="Wrap"
                    Text="ASync by CHDS: created and maintained by CHDS, built together with Claude by Anthropic." />

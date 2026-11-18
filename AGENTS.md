@@ -81,7 +81,10 @@ src/
   ASync.App.iOS/          iOS head (task 21): the agent in-process, the Secure Enclave key and the Keychain-sealed store,
                           the app's Documents and bookmarked folders, QR scanner, async://pair links (not in ASync.slnx: needs
                           the ios workload and Xcode; Shared/ is plain C# tested in ASync.App.Tests); BGTaskScheduler,
-                          run conditions, reminders, APNs (22); PhotoKit (23); later Contacts/EventKit (24), File Provider (25)
+                          run conditions, reminders, APNs (22); PhotoKit (23); Contacts/EventKit (24); the app group, File
+                          Provider domains and NSFileCoordinator reads (25)
+  ASync.App.iOS.FileProvider/  iOS File Provider extension (task 25): an NSFileProviderReplicatedExtension over DocumentCatalog,
+                          embedded in the app's PlugIns/ (not in ASync.slnx; Shared/ is plain C# tested in ASync.App.Tests)
   ASync.App.Android/      Android head (M4-1): the agent in-process, Android Keystore keys and sealed store, SAF trees,
                           QR scanner, async://pair links, WorkManager and UnifiedPush (M4-2), the documents
                           provider (M4-3) (not in ASync.slnx: needs the android workload). photos (task 19:
@@ -98,9 +101,11 @@ scripts/
   smoke-desktop.sh        the real desktop app under Xvfb with the real agent service and server stack (Linux)
   package-android.sh      the Android APK (and AAB): both ABIs, signed (release keystore from CI secrets, else debug)
   smoke-android.sh        the Android app on an emulator: enroll, the system folder picker, SAF sync both ways, backup
-  check-ios.sh            the iOS head's C# compiled on Linux against the iOS reference assemblies (no app built)
+  check-ios.sh            the iOS head's and its File Provider extension's C# compiled on Linux against the iOS reference
+                          assemblies (no app built)
   package-ios.sh          the iOS app on a Mac: the unsigned .ipa, a simulator build, or a signed .ipa for TestFlight
   smoke-ios.sh            the iOS app on a simulator (macOS, CI): native server + Homebrew PostgreSQL, enroll, sync, bookmarks
+                          (its parts: smoke-ios-photos.sh, smoke-ios-collections.sh, smoke-ios-files.sh)
   test-backends-env.sh    ASYNC_TEST_* variables for the containers of docker-compose.test.yml
 ```
 
@@ -2136,8 +2141,11 @@ section "documents provider" (below).
 - **Windows: Cloud Files API** (`CfRegisterSyncRoot`, placeholders, hydration callbacks) in the agent service: a sync root
   per folder, placeholders from the listings, `FETCH_DATA` answered from `DocumentCatalog`'s readers, writes uploaded on
   close, pinned/online-only states mapped to the cache.
-- **macOS and iOS: File Provider** (`NSFileProviderReplicatedExtension`): an app extension per platform with the
-  catalog behind it; enumeration and `fetchContents` from the catalog, the working set from `folder.changed`.
+- **iOS: File Provider** — done in task 25 ("iOS File Provider (task 25)"): an `NSFileProviderReplicatedExtension` with the
+  catalog behind it, the working set from `folder.changed` through a change log.
+- **macOS: File Provider**: the same extension's shared code (`src/ASync.App.iOS.FileProvider/Shared`) behind a macOS
+  extension of the desktop app (an app bundle with an embedded `.appex`, signed with Developer ID; the agent service writes
+  the account file and the signals as the iOS app does).
 - **Linux: FUSE** (libfuse 3 through a small binding, or a `fuse-t`-like user-space mount) run by the agent service, a
   mount per account (`~/ASync`), the cache as here.
 - The documents provider itself: an end-to-end Mirror/TwoWay layout (not there yet), a `ContentObserver` for SAF folders.
@@ -2229,8 +2237,8 @@ does not cover, and `NSAppTransportSecurity` allows arbitrary loads and local ne
   outside `~/Documents` and missing ones with what to do. `SamePlace` maps a container path, its `~/…` and a bookmark of a folder
   in the container to one place. Nothing is watched (`Watchable` false: no file-change events for an app); folders run on their
   interval, on *Sync now* and when the app comes to the front. Modification times can be set (POSIX underneath).
-- Providers that are not local (iCloud Drive's files not yet downloaded, other apps' file providers with placeholders) would need
-  `NSFileCoordinator` reads; that is not done yet (an open item for task 25, which brings the File Provider side anyway).
+- Providers that are not local (iCloud Drive's files not yet downloaded, other apps' file providers with placeholders) are read
+  through `NSFileCoordinator` since task 25 (`CoordinatedTree`, see "iOS File Provider (task 25)").
 - *Choose folder…* (`IosPlatform.PickFolderAsync`) opens the document picker at the folder's current place or Documents; *Open
   folder* opens the Files app there (`shareddocuments://`). *New folder…* / *Add to a folder…* (task 18) use the same picker for
   "where it lives"; end-to-end setup and unlock are the shared dialogs.
@@ -2259,7 +2267,10 @@ NSURL as the picker does), add-folder…, setup/unlock, signout, keyinfo, haskey
 **Contacts and calendars** (task 24): the Contacts framework and EventKit into task 20's collection trees, see "Contacts and calendars"
 → "iOS contacts and calendars (task 24)".
 
-**Not yet (and which task brings it):** the File Provider extension (task 25, with the app group). The camera
+**The Files app location** (task 25): the File Provider extension, the app group and the store's move into it, see "iOS File
+Provider (task 25)". Since then the store is in the group's container when the build has the group.
+
+**Not yet:** the File Provider's search, recents and thumbnails (task 25's limits). The camera
 scanner is only exercised on a device (the simulator has no camera; the simulator's Secure Enclave key worked in CI, the Keychain fallback
 stays for simulators without one); the unsigned .ipa has not been tried on a phone yet.
 
@@ -2396,6 +2407,194 @@ covered in-process (`bg-wake`), real delivery needs a signed build on a device. 
 hub connection alive, so a server change can arrive by the hub event before the task runs (`bg-run … <folder>` marks the
 folder due right before its run). Not exercised: a real iPhone, real BGTask slots, APNs against Apple (no account), the quick
 action (needs a touch on the home screen), Low Power Mode.
+
+## iOS File Provider (task 25)
+
+The person's ASync folders appear in the iOS Files app and every document picker as the location **"ASync — <server host>"**,
+files fetched on demand, as Android's documents provider (M4-3) does: Mirror/TwoWay folders through the storage gateway (TwoWay
+writable, Mirror read-only), Backup folders as read-only snapshots. Server, Contracts and repository formats are unchanged; the
+extension is the device itself (no endpoint, credential or check of its own). Code: `src/ASync.App.iOS.FileProvider/` (the
+extension: `Extension.cs`, `ExtensionRuntime.cs`; `Shared/`: plain C# linked into ASync.App.Tests), `src/ASync.App.iOS/FileProviderDomains.cs`
+(the app's side), `Shared/IosAppGroup.cs` (what both share), `Shared/IosCoordination.cs` + `Coordination.cs` (NSFileCoordinator
+reads), `FileProviderAutomation.cs` (tests).
+
+**The extension:** `ASync.App.iOS.FileProvider.csproj` (net10.0-ios, `IsAppExtension`, `OutputType` Library, iOS 16+), bundle id
+`ua.pp.chds.async.fileprovider`, `NSExtensionPointIdentifier` `com.apple.fileprovider-nonui`, principal class
+`ASyncFileProviderExtension` (`FileProviderExtensionMain : NSObject, INSFileProviderReplicatedExtension`, exported
+`initWithDomain:`), embedded as `PlugIns/ASyncFileProvider.appex` through the app's `ProjectReference … IsAppExtension`. Replicated
+(not the older `NSFileProviderExtension`): the system keeps the replica and the materialised files itself, so the extension only
+enumerates, fetches and applies changes; iOS 16 is the floor (the app stays iOS 15+; on 15 it registers no domain and Settings says
+the location needs iOS 16). **Kept small** for the extension's memory limit: no Avalonia, no agent (only ASync.Client.Core →
+Engine, Contracts), `InvariantGlobalization` (no ICU data mapped), `UseSystemResourceKeys`, AOT with the interpreter only for what
+AOT cannot compile (`MtouchInterpreter=-all`, as the app), `TrimMode=partial` (the client library's reflection JSON). The catalog's
+own cache is 32 MB (the system keeps fetched files; the cache only serves the catalog's internal copies). Its footprint is written
+to `fileprovider/footprint.txt` (resident size, peak, managed heap) and measured from the Mac by the smoke test (`footprint` of the
+simulator's process). Every callback runs its work on the pool and answers through the completion handler; nothing throws into the
+system.
+
+**Sharing between app and extension:**
+- **The app group** `group.ua.pp.chds.async` (`com.apple.security.application-groups` in both entitlements files): the store
+  (`Library/Application Support/async` of the group's container: identity, token, unlocked keys of end-to-end folders, the sync
+  state, bookmarks, app settings) and `Library/Application Support/fileprovider/` (the account file, the signals, the change log,
+  the extension's log and footprint, the written-folders note).
+- **The store's move** (`StoreMigration`): at the first start with the group, task 21's store in the app's container is moved
+  entry by entry (a rename: same volume; across volumes a copy under a temporary name, then a rename), a marker making a cut-short
+  move continue at the next start; both stores present without the marker: the group's is used and the app's left alone (logged);
+  the move failing: the old store stays in use and no domain is registered. Without the group the store stays where it is.
+- **The Keychain** needs no move: the device key (Secure Enclave) and the sealing key were made in the app's default Keychain group,
+  which is its application identifier `$(AppIdentifierPrefix)ua.pp.chds.async`, the group already in task 21's `keychain-access-groups`.
+  The extension lists the same group, so it reads both (queries search every group the process has).
+- **Which process signs device challenges: the extension**, with the shared key. iOS starts the extension without the app (usually
+  suspended or not running) and an extension cannot wake its app to ask; an XPC service of the app's own would need the app running.
+  The key never leaves the Secure Enclave either way, the server sees the same device, and the access token is shared through the
+  store's `token.json`, so the two rarely sign in twice.
+- **What the app writes for the extension** (`SharedAccount`, `fileprovider/account.json`, atomic renames): device id, server,
+  user, "removed" and the folder list as the agent has it, on every change of the account or the list. The extension answers from
+  it at once (also offline) and refreshes the list from the server (`GET /api/sync/folders`) when older than a minute; a file of
+  another device id (a new enrollment not written yet) is ignored.
+
+**Domains:** iOS adds a new location switched off: the person turns it on once in the Files app (*Browse → ⋯ → Edit*), and
+Settings says so while it is off (`FileProviderDomains.DisabledNote`). One `NSFileProviderDomain` per enrolled account, identifier = the device id (32 hex), display name "ASync — <host>",
+added by the app once the identity is there (again at every start; `addDomain` of a known identifier is harmless), other domains
+removed; signing out removes every domain (and the replica's files), deletes the account file and the change log and starts a new
+signal epoch. A revoked device keeps its domain: the root's listing fails with `NSFileProviderErrorNotAuthenticated` and the text
+"This iPhone was removed from <user>'s account. Open ASync to enroll it again." (from the app's file, or from the server refusing
+the extension's own signature).
+
+**Identifiers** (`FileProviderIds`): the system's root container is the catalog's root (the account's folders); every other
+identifier is exactly a `DocumentId` (`f/<folder>[/<path>]`, `b/<folder>`, `s/<folder>/<snapshot>[/<path>]`), so
+`DocumentId.TryParse`'s refusals apply (`..`, `.async/…`, other spellings, upper-case snapshot ids) and the catalog's own "root" is
+refused (one spelling per item). The working set is a container of its own (below); the trash container is empty (deletions go to
+the folder's trash on the server). The extension checks the framework's constants against the spelled-out values at start.
+
+**Items and capabilities** (`FileProviderItems`; a snapshot's directory is shown as "yyyy-MM-dd HH.mm · id": the Files app shows ":"
+as "/"): from the catalog's entries: reading for everything; TwoWay files writing,
+renaming, reparenting, deleting; TwoWay directories adding sub-items, renaming, reparenting, deleting; a TwoWay folder adding
+sub-items only (folders are renamed and deleted in the web UI); Mirror and Backup items reading only (and `fileSystemFlags`
+without user-writable), so the Files app greys out the actions and the system refuses them before the extension hears of them. iOS
+has no evicting capability (`AllowsEvicting` is macOS only): the system evicts by itself, the person with *Remove Download*. No
+trashing capability (no trash container). Versions: content = a hash of size and modification time (a snapshot's file: constant),
+metadata = a hash of parent and name; `contentType` from the extension (`UTType`), folders `UTTypes.Folder`.
+
+**Enumeration:** a container's enumerator lists the catalog's whole listing (cached 30 s) in pages of 200 (`FileProviderPages`:
+"p1:<offset>"; the system's initial page bytes start at 0) and remembers its first page in the change log. Sync anchors are
+"a1:<epoch>:<generation>" (`FileProviderAnchor`) of the signals (below); an anchor of another epoch or a newer generation is
+expired (`NSFileProviderErrorSyncAnchorExpired`: the system enumerates again).
+
+**Contents:** `fetchContents` streams the file into a file of the domain's temporary directory (`temporaryDirectoryURL`: the
+replica's volume, so the system moves it): a plain file straight from the gateway's response stream, a snapshot's file chunk by
+chunk (`SnapshotRangeReader`), never whole in memory, with the `NSProgress` counting bytes and its cancellation stopping the
+request. Errors (`FileProviderErrors.Map`): not enrolled / removed / Keychain not reachable → `NotAuthenticated`; no connection,
+timeouts, 5xx → `ServerUnreachable`; gone, no longer shared (403/404), an identifier not ours → `NoSuchItem`; a taken name →
+`FilenameCollision`; the quota → `InsufficientQuota`; a non-recursive delete of a non-empty directory → `DirectoryNotEmpty`; Mirror,
+backups, folder renames → Cocoa's no-permission error (read or write); bad names → Cocoa's invalid name; the system's cancellation
+→ Cocoa's user-cancelled; always with the catalog's message as `NSLocalizedDescription`. `DocumentListing.Failure` (new, Client
+library only) keeps the exception of a failed listing so its type can be mapped.
+
+**Writes (TwoWay only)** (`FileProviderOperations`, the Android provider's catalog calls): `createItem` → a directory with
+`CreateAsync` (kept in the extension until a file goes in, as on Android), a file in one upload with `WriteAsync` under a free name
+(" (1)": the system takes the item back with its new name; `MayAlreadyExist` writes over the same name instead, the old content a
+version); `modifyItem` → new contents with `WriteAsync` (a version kept), a new name with `RenameAsync`, a new parent with
+`MoveAsync` (name first, then the move; a move to another TwoWay folder is a copy and the original into its trash, as on Android);
+other fields (dates, tags) accepted as they are; `deleteItem` → `DeleteAsync` (the folder's trash). No lease; conflicts as on
+Android. Each write tells the other devices (`POST …/changed`), records the new item in the change log (so it is not reported back)
+and, for a folder this iPhone also syncs locally, notes the folder in `fileprovider/written.json` and posts the Darwin notification
+`ua.pp.chds.async.fileprovider.changed`: the app, when running, runs the folder at once; otherwise when it next becomes active.
+
+**Change signalling:** the app raises `FileProviderSignals` (`fileprovider/signals.json`: a generation counter, the generation per
+folder, the generation of the last folder-list/account change, an epoch) and calls `signalEnumerator(workingSet)` — at most once a
+second — when a folder changed: `AgentRuntime.RemoteFolderChanged` (the hub's `folder.changed`; 0 after a reconnect = everything),
+the iPhone's own runs (`FolderRan`, including the runs a silent push starts, task 22), and the account or folder list. The system
+then asks the working set for its changes since its anchor; `FileProviderChangeLog.ChangesAsync` lists afresh the containers it has
+handed out of the folders changed after that anchor (every container when the list or account changed), compares each item's
+version with what the system was told (`known.json`), and reports updated and deleted items (a removed directory by its parent;
+the system deletes what is below). A listing that fails for any reason but "gone" fails the request: nothing is reported deleted
+because the server could not be reached, and the system asks again with the same anchor. Materialised items whose version changed
+are refreshed by the system (re-fetched when opened). **Without push** (a sideloaded or unsigned build, or iOS not waking the app):
+changes reach the Files app when the app next runs (opening it, a background slot) or when the Files app enumerates a directory
+again (opening it); nothing is lost, it is only later.
+
+**Degrading cleanly:** `AppGroupSupport.Decide` at the first touch of the store: no group container (the unsigned .ipa, a
+sideloader that strips the entitlements or renames the group, as AltStore does for free accounts), an unwritable one, or a failed
+move → the store stays in the app's container, no domain is registered (so iOS never starts the extension), and Settings' About card
+shows "The Files app location needs a signed build" (`IPlatformServices.FilesLocationNote`, new, null elsewhere); iOS 15 says it
+needs iOS 16. A build that loses the group later (a signed build replaced by a sideloaded one) starts with an empty store and must be
+enrolled again: the old store is in a container it cannot reach. **Signed:** both entitlements files carry the app group;
+`package-ios.sh --signed` passes the extension's own profile (`ASYNC_IOS_FP_PROVISION` → `AsyncFileProviderProvision`, which the
+extension project uses because it treats `CodesignProvision` as a local property); `ios.yml` installs it from the secret
+`IOS_FILEPROVIDER_PROVISIONING_PROFILE` (signing stays skipped without all three secrets). The App IDs `ua.pp.chds.async` and
+`ua.pp.chds.async.fileprovider` both need the App Groups capability with `group.ua.pp.chds.async`.
+
+**NSFileCoordinator reads of picked folders (task 21's open item):** a folder picked in iCloud Drive or another app's File Provider
+is a `BookmarkTree` whose tree is a `CoordinatedTree` (`IosTreeFactory.Coordination`): a file whose URL says it is a provider's
+(`NSURLIsUbiquitousItemKey`) and not current (`NSURLUbiquitousItemDownloadingStatusKey` not *Current*: not downloaded, an older
+version, or not said) is read through `coordinateReadingItemAtURL` (the provider downloads it first; the file is opened inside the
+block and read afterwards); iCloud's older placeholders (`.<name>.icloud`) list as the file they stand for with the provider's size
+and time (left out when the provider gives none), a move of one downloads it first, a delete removes the placeholder too. The app's
+own Documents is read directly as before.
+
+**Automation (tests only):** `fp-state`, `fp-url`, `fp-ls`, `fp-read`, `fp-write`, `fp-delete`, `fp-signal`, `fp-log`, `fp-open`
+(`FileProviderAutomation`): the app reaches its own domain as any app reaches a provider (user-visible URLs and coordinated reads and
+writes, which make the system call the extension). `ASYNC_NO_APP_GROUP=1` (only `simctl launch` sets it) runs the app as a build
+without the group.
+
+**Tests (Linux):** `IosFileProviderTests` (identifiers both ways and every refusal, unknown items, capabilities per folder kind,
+`.async` hidden and versions, pages and anchors, signals, the change log's updates/deletions/expiry/failed listings/learned items,
+create/modify/rename/move/delete through the real catalog on local storage with versions and trash, Mirror and Backup refusing
+every write, fetches of a 3 MB plain file and a snapshot file with progress and cancellation, the error mapping, the root when
+removed or not enrolled, the host's folder list from the app's file and the server, the account file, the app-group decision, the
+store's move, its resumption, its fallback, the sealed store read through the moved directory, the coordinated-read decisions and
+tree, a picked folder reading through the coordination), `BackgroundTests` (the Settings line on an iPhone without the group).
+`scripts/smoke-ios-files.sh` on the simulator: see "Verified on the simulator" below.
+
+**Verified on the simulator** (`scripts/smoke-ios-files.sh`, ios.yml, iOS 26.5, iPhone 17; runs 44258823162 … 44313745951; the last one passed every check of smoke-ios.sh):
+the extension embedded (`PlugIns/ASyncFileProvider.appex`: 90 MB in the simulator build, 43 MB with a 30 MB executable in the device build of the unsigned .ipa, which is 47 MB in all); the app first launched as a build without the group
+(`ASYNC_NO_APP_GROUP=1`): no domain, the store in the app, Settings' line; launched with it: the app group and the Keychain group
+honoured by ad hoc signing, task 21's store moved, the device still enrolled with its folders, the domain "ASync — 127.0.0.1"
+registered with a user-visible URL under `Library/CloudStorage`; through coordinated reads and writes from the app (which make the
+system call the extension): the root lists the folders, a TwoWay folder its files without `.async`, a 5 MB file fetched through the
+extension is byte-identical with async-cli's, a file saved through the provider reaches the server and the other device, a write
+into the Mirror folder is refused (nothing reaches the server; the Files app shows the item with an upload error), the Backup folder
+lists its snapshot and a file of it reads back, a change made on the server is signalled (the generation moves) and the new content
+arrives; signing out removes the domain; the extension's process measured from the Mac: **phys_footprint 41 MB** (footprint 38 MB) after the 5 MB fetch;
+`Environment.WorkingSet` answers 0 inside the extension, so its own file only records the managed heap (about 2 MB). Screenshots:
+`docs/screenshots/ios-files-root-*.png`, `ios-files-folder-*`, `ios-files-snapshot-*`, `ios-files-settings-unsigned-*`.
+
+**Found on the way** (the runs in order):
+- **The pinned SDK did not embed the extension** (run 44259217422): Microsoft.iOS.Sdk 26.5.10315's `GetAppExtensionBundlePath` and
+  `BuildAndGetAppExtensionBundlePath` have `Outputs` but no `Returns`, so the app's `_ResolveAppExtensionReferences` got nothing back
+  and the app had no `PlugIns/` (dotnet/macios later added `Returns` for exactly this). The app's csproj adds the bundle itself
+  when the SDK returns none (`_AsyncEmbedFileProvider`, failing the build without it); drop it once the pinned workload has the fix.
+- **iOS adds a new location switched off** (run 44262819265: every request "Sync is not enabled", `NSFileProviderErrorDomain`
+  -2011; the extension was never started). A person turns it on in the Files app (*Browse → ⋯ → Edit*); Settings says so while
+  `userEnabled` is false. The smoke test keeps it on with `NSFileProviderDomainTestingModeAlwaysEnabled`, which needs the
+  `com.apple.developer.fileprovider.testing-mode` entitlement: only the simulator build has it (`Entitlements.Simulator.plist`,
+  `-p:AsyncSimulatorTesting=true` from `package-ios.sh --simulator`), and the app sets the mode only when `simctl` passes
+  `ASYNC_FP_TESTING=1`. Signed and unsigned builds never carry either.
+- **Read-only items cannot be created in the simulator's replica** (runs 44276087993, 44285810184): an item without writing (a file)
+  or adding sub-items (a directory) is locked (`m:rwxl` in fileproviderd's log) and the replica, on the Mac's disk, refuses the flag
+  ("cannotSetMetadata", POSIX "Operation not permitted"): no Mirror or Backup folder appeared. On the simulator only
+  (`Runtime.Arch`), those items are offered as writable and the extension refuses the write itself (not permitted). On a device the
+  honest capabilities stay; that the replica locks them there is **not verified** (no device).
+- **A fast listing stayed "running" forever** (CI's Linux tests, run 44293065292): `DocumentCatalog.Fetch` started its work with
+  `Task.Run` inside `ConcurrentDictionary.GetOrAdd`; a fetch that finished before `GetOrAdd` stored it removed nothing, and every
+  later fetch of that directory returned its old listing. The fetch is now registered before it starts (Android benefits too).
+- **The domain stayed after signing out** (runs 44285810184, 44293848227, 44302049537): `AgentRuntime.ForgetAsync` stops the device
+  before deleting the identity, so no `FoldersChanged` comes after it is gone. New: `AgentRuntime.IdentityChanged`, raised after an
+  enrollment and after signing out with the store already up to date (`AgentEnrollmentTests`); the app's side listens to it, takes
+  the store (not the signed-in client) as the truth, and does not take an unreadable store (not unlocked since start) for a sign-out.
+- A coordinated read of a disabled domain never returned and blocked the automation socket: the automation's coordinated accesses
+  are cancelled after 60 s. With the Files app in front ASync is suspended: the smoke test brings it back before each `fp-open`.
+- The Files app shows ":" in a name as "/" (the old Mac separator): a snapshot's directory reads "HH.mm" on iOS.
+- fileproviderd makes a `.Trash` directory in the replica's root (the system's own; hidden in the Files app).
+- Not exercised: a real iPhone, a signed build (no paid account), silent pushes reaching the app (task 22's limit), end-to-end
+  encrypted backups through the provider, files above the memory limit's comfort (only 5 MB was fetched).
+
+
+**Not done / limits:** search and recents in the Files app (the Android provider has them: an `NSFileProviderSearching`-style
+search needs iOS 17's search API), thumbnails (`NSFileProviderThumbnailing`), the extension's own pins/offline sets, an end-to-end
+plain layout (none exists), sharing to other apps by link. A save while the server cannot be reached stays pending in the system
+(it retries `createItem`/`modifyItem` later) rather than failing at once as on Android.
 
 ## Background work and wake-ups (M3–M4)
 
@@ -3282,7 +3481,10 @@ name or a chosen one, read-only refused, RDATE reported; the change triggers' pl
     temporary keychain, `IOS_PROVISIONING_PROFILE` (base64) is installed by its UUID, `scripts/package-ios.sh --signed` publishes a
     signed .ipa, and on tags `xcrun altool --upload-app` sends it to TestFlight with an App Store Connect API key
     (`APPSTORE_API_KEY_ID`, `APPSTORE_API_ISSUER_ID`, `APPSTORE_API_KEY_P8`). Until then APNs and the File Provider extension
-    (later tasks) must work signed and degrade cleanly unsigned.
+    must work signed and degrade cleanly unsigned. The File Provider extension (task 25) needs its own profile
+    (`IOS_FILEPROVIDER_PROVISIONING_PROFILE`, for `ua.pp.chds.async.fileprovider`; `HAS_IOS_SIGNING` needs it too), and both App
+    IDs the App Groups capability with `group.ua.pp.chds.async`. Every build embeds the extension (`PlugIns/ASyncFileProvider.appex`,
+    its size printed by `package-ios.sh`); the unsigned .ipa has neither the group nor a domain.
   - Validated with `actionlint` (1.7.12, which knows `macos-26`) and shellcheck.
 - **Not yet:** winget/Homebrew/Flathub listings, an apt/dnf repository (the .deb/.rpm are downloads), MSIX, the App Store.
 - **Android:** the sideloadable APK (above) for now; later a Play AAB and an F-Droid build, both with UnifiedPush.
@@ -3606,6 +3808,14 @@ Open questions:
   survives the app's relaunch on the simulator: restart the simulator before showing another. An all-day event's `endDate` is the last second of its last day. `EKEventStoreChanged` and `CNContactStoreDidChange` are
   posted for the app's own saves too (a restore triggers a backup that finds nothing new). An event store made before the
   permission was granted may not see the calendars: it is made again after the answer.
+- **iOS File Provider (task 25):** `AllowsEvicting` and several FileProvider types are macOS or iOS 16+ only, and the iOS
+  reference assembly implies Mac Catalyst for the platform analyzer: the extension says `[assembly: UnsupportedOSPlatform("maccatalyst")]`,
+  the app guards with `FileProviderDomains.Replicated` (a `SupportedOSPlatformGuard`); a guard inside a lambda does not count, so the
+  callbacks live in annotated methods. CI's SDK found a CA1416 a local `check-ios.sh` (SDK 10.0.115) did not: CI's check job is
+  the authority. The app group changes where the store is: never hard-code `Library/Application Support/async` of the app's
+  container (ask `IosAgent.ConfigDirectory`, or `fp-state` in the smoke test). On the simulator: the pinned SDK does not embed app
+  extensions by itself (`_AsyncEmbedFileProvider` does), a new domain is off until enabled (the testing mode keeps the smoke test's
+  on), and read-only (locked) items cannot be created in the replica: see "Found on the way" in "iOS File Provider (task 25)".
 - **iOS app delegate methods** that Avalonia's `AvaloniaAppDelegate` lacks are added with `[Export]` in our subclass
   (`willFinishLaunching`, the remote-notification callbacks); scene-delegate methods cannot be added that way (Avalonia's scene
   delegate is internal and sealed): the quick action's is added to its Objective-C class at launch (`QuickActions`).

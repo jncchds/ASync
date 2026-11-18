@@ -26,6 +26,11 @@
     limited access iOS would ask again at every launch; the Photos screen offers its own Choose photos instead). PhotoKit in
     PhotoLibrary.cs, its mapping in Shared/IosPhotos.cs.
     AllowUnsafeBlocks: the quick action's method added to Avalonia's scene delegate (a function pointer, a block call).
+    The File Provider extension (task 25): src/ASync.App.iOS.FileProvider, embedded in PlugIns/ as ASyncFileProvider.appex
+    (the project reference below with IsAppExtension). Both Entitlements files hold the app group
+    (group.ua.pp.chds.async) the extension shares; FileProviderDomains.cs decides at start whether the build has it (the
+    unsigned build does not: no domain, the store stays in the app). The signed mode of package-ios.sh passes the extension's
+    own provisioning profile (AsyncFileProviderProvision, a property of the extension project).
   -->
   <PropertyGroup>
     <TargetFramework>net10.0-ios</TargetFramework>
@@ -50,7 +55,10 @@
     <UseNativeHttpHandler>false</UseNativeHttpHandler>
     <!-- Entitlements only take effect when the app is signed (CI's TestFlight job, or SideStore/AltStore re-signing it): the
          app group and the File Provider extension of task 25 go there. -->
-    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false' And '$(AsyncPush)' != 'true'">Entitlements.plist</CodesignEntitlements>
+    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false' And '$(AsyncPush)' != 'true' And '$(AsyncSimulatorTesting)' != 'true'">Entitlements.plist</CodesignEntitlements>
+    <!-- The simulator build of package-ios.sh: Entitlements.plist plus the File Provider testing mode, so the smoke test can
+         keep its domain enabled (iOS leaves a new location off until the person turns it on in Files). Never in a signed build. -->
+    <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false' And '$(AsyncSimulatorTesting)' == 'true'">Entitlements.Simulator.plist</CodesignEntitlements>
     <CodesignEntitlements Condition="'$(EnableCodeSigning)' != 'false' And '$(AsyncPush)' == 'true'">Entitlements.Push.plist</CodesignEntitlements>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
@@ -64,7 +72,33 @@
     <PackageReference Include="Avalonia.iOS" />
   </ItemGroup>
 
+  <!--
+    The File Provider extension's bundle into PlugIns/. The iOS SDK asks the extension project for its bundle path with targets
+    that have only Outputs, no Returns; MSBuild then returns nothing (task 25's first Mac run: the extension built, the app had no
+    PlugIns), which dotnet/macios fixed later by adding Returns. Until the pinned workload has that fix, the path is added here
+    when the SDK found none: the extension's bundle next to its assembly, as AppBundleDir puts it. A build without the bundle fails.
+  -->
+  <Target Name="_AsyncEmbedFileProvider" AfterTargets="_ResolveAppExtensionReferences">
+    <PropertyGroup>
+      <_AsyncFileProviderOut>$(MSBuildThisFileDirectory)../ASync.App.iOS.FileProvider/bin/$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/</_AsyncFileProviderOut>
+      <_AsyncFileProviderAppex>$(_AsyncFileProviderOut)ASyncFileProvider.appex</_AsyncFileProviderAppex>
+    </PropertyGroup>
+    <ItemGroup Condition="'@(_ResolvedAppExtensionReferences)' == '' And Exists('$(_AsyncFileProviderAppex)')">
+      <_ResolvedAppExtensionReferences Include="$(_AsyncFileProviderAppex)" />
+    </ItemGroup>
+    <ItemGroup>
+      <_AsyncFileProviderOutFiles Include="$(_AsyncFileProviderOut)*" />
+    </ItemGroup>
+    <Message Importance="high" Text="File Provider extension to embed: @(_ResolvedAppExtensionReferences)" />
+    <Error Condition="'@(_ResolvedAppExtensionReferences)' == ''"
+           Text="The File Provider extension's bundle was not found ($(_AsyncFileProviderAppex)); its output has: @(_AsyncFileProviderOutFiles->'%(Filename)%(Extension)')" />
+  </Target>
+
   <ItemGroup>
+    <ProjectReference Include="..\ASync.App.iOS.FileProvider\ASync.App.iOS.FileProvider.csproj">
+      <IsAppExtension>true</IsAppExtension>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
     <ProjectReference Include="..\ASync.App\ASync.App.csproj" />
     <ProjectReference Include="..\ASync.Agent\ASync.Agent.csproj" />
   </ItemGroup>

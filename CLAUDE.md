@@ -72,6 +72,7 @@ dotnet run scripts/render-icons.cs           # packaging/icons from the logo (on
 | `src/ASync.Infrastructure` | EF Core `AppDbContext` (PostgreSQL), repositories, migrations, Data Protection key store |
 | `src/ASync.Api` | Controllers, `Auth/` (JWT, OIDC, secrets command), `Services/DeviceProvisioningService`, hosted services |
 | `src/ASync.App` | Avalonia shared UI (views, view models, theme); platform services behind interfaces (`Services/`) |
+| `src/ASync.App.iOS.FileProvider` | iOS File Provider extension (task 25): the folders in the Files app, over `DocumentCatalog` |
 | `src/ASync.App.Desktop` | `async-desktop`: window, tray, single instance, start at login; also runs as the agent service |
 | `src/async-ui` | React 19 + TypeScript + Vite SPA, served from the API's `wwwroot` |
 | `src/ASync.Tests` | xUnit with hand-written fakes (`Fakes.cs`) |

@@ -56,11 +56,15 @@ public sealed record DocumentEntry(DocumentId Id, string Name, bool IsDirectory,
 /// <param name="Info">A note to show above the listing (read-only folder…).</param>
 /// <param name="Error">Why the listing is empty (cannot reach the server, locked…).</param>
 /// <param name="Loading">The listing is still being fetched; a change notification follows.</param>
-public sealed record DocumentListing(IReadOnlyList<DocumentEntry> Entries, string? Info = null, string? Error = null, bool Loading = false);
+public sealed record DocumentListing(IReadOnlyList<DocumentEntry> Entries, string? Info = null, string? Error = null, bool Loading = false)
+{
+    /// <summary>What made the listing fail, when it was an exception (iOS's File Provider maps its type to the system's errors).</summary>
+    public Exception? Failure { get; init; }
+}
 
 /// <summary>
-/// The person's ASync folders as documents, for the Android documents provider (BCL only, so it is unit-tested with local
-/// storage): browse, read (cached or ranged), and for TwoWay folders create, write, rename, delete, copy and move, all
+/// The person's ASync folders as documents, for the Android documents provider and the iOS File Provider extension (BCL
+/// only, so it is unit-tested with local storage): browse, read (cached or ranged), and for TwoWay folders create, write, rename, delete, copy and move, all
 /// through <see cref="PlainStore"/> exactly as a sync would (versions kept, deletions to the trash, other devices told).
 /// Backup folders are read-only: one directory per snapshot, newest first, with its tree.
 /// <para>
@@ -192,19 +196,38 @@ public sealed class DocumentCatalog
 
     private Task<DocumentListing> Fetch(DocumentId directory, bool raiseWhenDone)
     {
-        var task = _fetching.GetOrAdd(directory, d => Task.Run(async () =>
+        // One fetch per directory at a time. The task is in _fetching before the work starts: a Task.Run inside GetOrAdd could
+        // finish (and remove itself) before GetOrAdd stored it, leaving a finished task there that every later fetch returned,
+        // with its old listing (found by task 25's tests on CI: a root listed after "removed" still showed the folders).
+        Task<DocumentListing> task;
+        while (true)
         {
-            try
+            if (_fetching.TryGetValue(directory, out var running))
             {
-                var listing = await FetchListingAsync(d, CancellationToken.None);
-                _listings[d] = new CachedListing(listing, listing.Error is null ? _clock.GetUtcNow() : _clock.GetUtcNow() - ListingTtl + TimeSpan.FromSeconds(5));
-                return listing;
+                task = running;
+                break;
             }
-            finally
+            var done = new TaskCompletionSource<DocumentListing>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_fetching.TryAdd(directory, done.Task)) continue;
+            task = done.Task;
+            _ = Task.Run(async () =>
             {
-                _fetching.TryRemove(d, out _);
-            }
-        }));
+                try
+                {
+                    var listing = await FetchListingAsync(directory, CancellationToken.None);
+                    _listings[directory] = new CachedListing(listing,
+                        listing.Error is null ? _clock.GetUtcNow() : _clock.GetUtcNow() - ListingTtl + TimeSpan.FromSeconds(5));
+                    _fetching.TryRemove(new KeyValuePair<DocumentId, Task<DocumentListing>>(directory, done.Task));
+                    done.SetResult(listing);
+                }
+                catch (Exception e)
+                {
+                    _fetching.TryRemove(new KeyValuePair<DocumentId, Task<DocumentListing>>(directory, done.Task));
+                    done.SetException(e);
+                }
+            });
+            break;
+        }
         if (raiseWhenDone) _ = task.ContinueWith(_ => Raise(directory), TaskScheduler.Default);
         return task;
     }
@@ -224,7 +247,7 @@ public sealed class DocumentCatalog
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return new DocumentListing([], Error: Describe(e));
+            return new DocumentListing([], Error: Describe(e)) { Failure = e };
         }
     }
 

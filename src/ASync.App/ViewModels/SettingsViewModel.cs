@@ -69,6 +69,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>Opens the project's GitHub repository (the About card's link).</summary>
     public IAsyncRelayCommand OpenRepositoryCommand => _shell.OpenRepositoryCommand;
 
+    /// <summary>Why the Files app shows no ASync location (iOS builds without the app group), or null.</summary>
+    public string? FilesLocationNote => _shell.Platform.FilesLocationNote;
+    public bool HasFilesLocationNote => FilesLocationNote is not null;
+
     public bool CanSignOut => DeviceText is not null;
 
     /// <summary>"Sign out of this device" was pressed: the confirmation is showing.</summary>
