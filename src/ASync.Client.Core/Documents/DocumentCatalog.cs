@@ -196,19 +196,38 @@ public sealed class DocumentCatalog
 
     private Task<DocumentListing> Fetch(DocumentId directory, bool raiseWhenDone)
     {
-        var task = _fetching.GetOrAdd(directory, d => Task.Run(async () =>
+        // One fetch per directory at a time. The task is in _fetching before the work starts: a Task.Run inside GetOrAdd could
+        // finish (and remove itself) before GetOrAdd stored it, leaving a finished task there that every later fetch returned,
+        // with its old listing (found by task 25's tests on CI: a root listed after "removed" still showed the folders).
+        Task<DocumentListing> task;
+        while (true)
         {
-            try
+            if (_fetching.TryGetValue(directory, out var running))
             {
-                var listing = await FetchListingAsync(d, CancellationToken.None);
-                _listings[d] = new CachedListing(listing, listing.Error is null ? _clock.GetUtcNow() : _clock.GetUtcNow() - ListingTtl + TimeSpan.FromSeconds(5));
-                return listing;
+                task = running;
+                break;
             }
-            finally
+            var done = new TaskCompletionSource<DocumentListing>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_fetching.TryAdd(directory, done.Task)) continue;
+            task = done.Task;
+            _ = Task.Run(async () =>
             {
-                _fetching.TryRemove(d, out _);
-            }
-        }));
+                try
+                {
+                    var listing = await FetchListingAsync(directory, CancellationToken.None);
+                    _listings[directory] = new CachedListing(listing,
+                        listing.Error is null ? _clock.GetUtcNow() : _clock.GetUtcNow() - ListingTtl + TimeSpan.FromSeconds(5));
+                    _fetching.TryRemove(new KeyValuePair<DocumentId, Task<DocumentListing>>(directory, done.Task));
+                    done.SetResult(listing);
+                }
+                catch (Exception e)
+                {
+                    _fetching.TryRemove(new KeyValuePair<DocumentId, Task<DocumentListing>>(directory, done.Task));
+                    done.SetException(e);
+                }
+            });
+            break;
+        }
         if (raiseWhenDone) _ = task.ContinueWith(_ => Raise(directory), TaskScheduler.Default);
         return task;
     }

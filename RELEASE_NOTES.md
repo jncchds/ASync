@@ -10,6 +10,8 @@
   account signs): it works as before and *Settings* says "The Files app location needs a signed build". Also: picked folders in
   iCloud Drive or another app's storage are read even when their files are not downloaded to the iPhone yet (ASync asks the
   provider for them).
+- fix(android): the Files app could keep showing an old listing of a directory after a change (a fetch that finished very fast
+  stayed registered as running, and every later listing of that directory returned its result).
 - feat(ios): **the iPhone backs up its contacts and calendars.** *Contacts* and *Calendars* folders work on the iPhone as on
   Android: everything, or the accounts (the iPhone itself, iCloud, Exchange, CardDAV) and calendars you choose in the web UI from
   the iPhone's own lists, and for calendars how far back (two years by default). Each contact is a vCard with its photo, labels
