@@ -1,0 +1,151 @@
+ Image async-measure-before-async-server Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 592B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 2.40kB 0.0s done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for mcr.microsoft.com/dotnet/sdk:10.0
+#3 ...
+
+#4 [internal] load metadata for mcr.microsoft.com/dotnet/aspnet:10.0
+#4 DONE 0.3s
+
+#3 [internal] load metadata for mcr.microsoft.com/dotnet/sdk:10.0
+#3 DONE 0.3s
+
+#5 [internal] load metadata for docker.io/library/node:22-alpine
+#5 DONE 1.0s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 150B done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [api-build  1/12] FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb
+#8 resolve mcr.microsoft.com/dotnet/sdk:10.0@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb
+#8 resolve mcr.microsoft.com/dotnet/sdk:10.0@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb 0.1s done
+#8 DONE 0.2s
+
+#9 [ui-build 1/7] FROM docker.io/library/node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+#9 resolve docker.io/library/node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a 0.1s done
+#9 DONE 0.1s
+
+#10 [runtime 1/6] FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e
+#10 resolve mcr.microsoft.com/dotnet/aspnet:10.0@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e 0.1s done
+#10 DONE 0.1s
+
+#7 [internal] load build context
+#7 transferring context: 1.40MB 0.1s done
+#7 DONE 0.2s
+
+#11 [api-build  6/12] COPY src/ASync.Engine/ASync.Engine.csproj src/ASync.Engine/
+#11 CACHED
+
+#12 [runtime 5/6] COPY --from=ui-build /ui/dist ./wwwroot
+#12 CACHED
+
+#13 [runtime 3/6] WORKDIR /app
+#13 CACHED
+
+#14 [ui-build 7/7] RUN npx vite build --outDir ./dist --emptyOutDir
+#14 CACHED
+
+#15 [api-build 10/12] RUN dotnet restore src/ASync.Api/ASync.Api.csproj
+#15 CACHED
+
+#16 [ui-build 2/7] WORKDIR /ui
+#16 CACHED
+
+#17 [api-build  4/12] COPY src/ASync.Contracts/ASync.Contracts.csproj src/ASync.Contracts/
+#17 CACHED
+
+#18 [api-build  9/12] COPY src/ASync.Api/ASync.Api.csproj src/ASync.Api/
+#18 CACHED
+
+#19 [api-build  3/12] COPY ASync.slnx Directory.Build.props Directory.Packages.props VERSION ./
+#19 CACHED
+
+#20 [api-build  2/12] WORKDIR /src
+#20 CACHED
+
+#21 [ui-build 4/7] RUN npm ci
+#21 CACHED
+
+#22 [ui-build 3/7] COPY src/async-ui/package*.json ./
+#22 CACHED
+
+#23 [ui-build 5/7] COPY src/async-ui/ ./
+#23 CACHED
+
+#24 [api-build  7/12] COPY src/ASync.Storage/ASync.Storage.csproj src/ASync.Storage/
+#24 CACHED
+
+#25 [api-build 11/12] COPY src/ src/
+#25 CACHED
+
+#26 [ui-build 6/7] COPY VERSION /VERSION
+#26 CACHED
+
+#27 [runtime 4/6] COPY --from=api-build /app/publish ./
+#27 CACHED
+
+#28 [api-build  5/12] COPY src/ASync.Core/ASync.Core.csproj src/ASync.Core/
+#28 CACHED
+
+#29 [api-build  8/12] COPY src/ASync.Infrastructure/ASync.Infrastructure.csproj src/ASync.Infrastructure/
+#29 CACHED
+
+#30 [api-build 12/12] RUN dotnet publish src/ASync.Api/ASync.Api.csproj -c Release -o /app/publish --no-restore
+#30 CACHED
+
+#31 [runtime 2/6] RUN apt-get update && apt-get install -y --no-install-recommends libgssapi-krb5-2 && rm -rf /var/lib/apt/lists/*
+#31 CACHED
+
+#32 [runtime 6/6] RUN mkdir -p /data && chown app:app /data
+#32 CACHED
+
+#33 exporting to image
+#33 exporting layers done
+#33 exporting manifest sha256:3302ff15fc025af86f34beca743b772bdb7a0a494041d9b5931f36bdbba52f65 0.1s done
+#33 exporting config sha256:f43ee03aa915bee164890a5d703ed2c6fbfc3e1a81bf3079fcd9cbb0cede4570 0.0s done
+#33 exporting attestation manifest sha256:f68a4757f02ddb30fc62989d640f09c4e15d64e282452f746c24f2d0a7d0653d 0.0s done
+#33 exporting manifest list sha256:2043e346f52ca66d8c688ac1652a083270aeb2d330f4e33a2f644d8f4320072f 0.0s done
+#33 naming to docker.io/library/async-measure-before-async-server:latest done
+#33 unpacking to docker.io/library/async-measure-before-async-server:latest
+#33 unpacking to docker.io/library/async-measure-before-async-server:latest 0.0s done
+#33 DONE 0.3s
+
+#34 resolving provenance for metadata file
+#34 DONE 0.0s
+ Image async-measure-before-async-server Built 
+ Network async-measure-before_default Creating 
+ Volume async-measure-before_postgres_data Creating 
+ Network async-measure-before_default Creating 
+ Volume async-measure-before_async_data Creating 
+ Volume async-measure-before_async_data Creating 
+ Volume async-measure-before_postgres_data Creating 
+ Volume async-measure-before_async_data Created 
+ Volume async-measure-before_async_data Created 
+ Volume async-measure-before_postgres_data Created 
+ Volume async-measure-before_postgres_data Created 
+ Network async-measure-before_default Created 
+ Network async-measure-before_default Created 
+ Container async-measure-before-postgres-1 Creating 
+ Container async-measure-before-postgres-1 Created 
+ Container async-measure-before-async-server-1 Creating 
+ Container async-measure-before-async-server-1 Created 
+ Container async-measure-before-postgres-1 Starting 
+ Container async-measure-before-postgres-1 Started 
+ Container async-measure-before-postgres-1 Waiting 
+ Container async-measure-before-postgres-1 Healthy 
+ Container async-measure-before-async-server-1 Starting 
+ Container async-measure-before-async-server-1 Started 
+ Container async-measure-before-async-server-1 Waiting 
+ Container async-measure-before-postgres-1 Waiting 
+ Container async-measure-before-async-server-1 Healthy 
+ Container async-measure-before-postgres-1 Healthy 

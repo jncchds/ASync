@@ -1,0 +1,330 @@
+Building async-cli…
+Building the async-cli image…
+Starting the server stack on port 5190…
+
+── setup through the API ──
+PASS  register as admin
+PASS  create Local back-end /data/e2e-20261115053518 → OK
+PASS  e2e-A: enroll with a one-time code
+PASS  e2e-A: enrolling twice is refused
+PASS  e2e-B: enroll with a one-time code
+PASS  e2e-B: enrolling twice is refused
+PASS  both devices are listed for the account under their names
+PASS  A: status reaches the server, no folders yet
+PASS  A keeps its access token between commands (token.json)
+PASS  A: `sync` without folders says so
+
+── TwoWay ──
+PASS  create TwoWay Transport folder "two" → OK
+PASS  attach e2e-A to "two" → OK
+PASS  attach e2e-B to "two" → OK
+PASS  B: `folders` lists the TwoWay folder
+PASS  B: `sync --folder` with someone else's folder id is refused
+PASS  e2e-A: A uploads three files
+PASS  e2e-B: B downloads them
+PASS  A → B: files are byte-identical on B
+PASS  e2e-B: B uploads a new file and an edit
+PASS  e2e-A: A downloads them
+PASS  B → A: the new file and the edit reach A
+
+── TwoWay conflict ──
+PASS  e2e-A: A uploads clash.txt
+PASS  e2e-B: B downloads clash.txt
+PASS  e2e-A: A uploads its edit
+PASS  e2e-B: B syncs its concurrent edit
+PASS  B reports one conflict
+PASS  B keeps its version as a conflict copy
+PASS  the original name holds the version synced first (A's)
+PASS  e2e-A: A syncs
+PASS  the conflict copy reaches A
+
+── TwoWay deletion ──
+PASS  e2e-A: A uploads a deletion
+PASS  e2e-B: B applies it
+PASS  the file is gone on B
+PASS  B moved it to .async/trash (content intact)
+PASS  the storage keeps it in .async/trash
+PASS  the storage keeps the overwritten hello.txt in .async/versions
+PASS  e2e-A: A syncs again
+PASS  a sync without changes transfers nothing
+
+── TwoWay large file: interrupted upload and download continue ──
+PASS  create TwoWay Transport folder "large" → OK
+PASS  attach e2e-A to "large" → OK
+PASS  attach e2e-B to "large" → OK
+PASS  A's agent is killed during the upload of 200 MB, with 33,554,432 bytes stored
+PASS  the file is not in place on the storage yet
+PASS  e2e-A: A syncs again
+FAIL  the upload continues: -1 bytes were already on the server (≥ 33,554,432 acknowledged)
+      large…
+        1 up, 0 down, 0 deleted, continued 1 upload(s): 50331648 bytes were already on the server, 159387873 sent
+FAIL  only the rest is sent: -1 bytes, none of the acknowledged parts again
+      large…
+        1 up, 0 down, 0 deleted, continued 1 upload(s): 50331648 bytes were already on the server, 159387873 sent
+PASS  on the storage: the whole file, and no staging files left
+PASS  B's agent is killed during the download, with 61,865,984 bytes here
+PASS  e2e-B: B syncs again
+PASS  the download continues: 109,051,904 bytes were already on B
+PASS  B's copy is byte-identical to A's
+PASS  no partial download is left on B
+
+── pause, set-path, mass-deletion guard ──
+PASS  B: a paused folder is skipped
+PASS  B: resume
+PASS  create TwoWay Transport folder "bulk" → OK
+PASS  attach e2e-A to "bulk" → OK
+PASS  attach e2e-B to "bulk" → OK
+PASS  e2e-A: A uploads 12 files
+PASS  B: set-path moves the folder
+PASS  e2e-B: B downloads them into the new path
+PASS  B has all 12 files
+PASS  deleting all 12 files is refused without --allow-mass-delete
+PASS  A: --allow-mass-delete applies it
+PASS  B refuses to delete them all on its side too, and keeps them
+PASS  a missing local folder (unmounted disk) is not synced
+
+── Mirror Upload → Download ──
+PASS  create Mirror Transport folder "mirror" → OK
+PASS  attach e2e-A to "mirror" (Upload) → OK
+PASS  attach e2e-B to "mirror" (Download) → OK
+PASS  e2e-A: A (Upload) uploads
+PASS  e2e-B: B (Download) downloads
+PASS  B is a copy of A
+PASS  B's extra file is removed (Download makes it equal)
+PASS  e2e-B: B syncs its local edit
+PASS  B's local edit is replaced by the storage's version
+PASS  e2e-A: A syncs
+PASS  A (Upload) is not changed by B
+PASS  e2e-A: A uploads a deletion and an edit
+PASS  e2e-B: B follows
+PASS  the deletion and the edit reach B
+
+── web UI: files, versions and trash (TwoWay) ──
+PASS  create TwoWay Transport folder "webfiles" → OK
+PASS  attach e2e-A to "webfiles" → OK
+PASS  attach e2e-B to "webfiles" → OK
+PASS  e2e-A: A uploads notes/plan.txt (v1)
+PASS  e2e-A: A uploads an edit (v2)
+PASS  e2e-A: A uploads a second edit (v3) and two more files
+PASS  e2e-B: B downloads them
+PASS  e2e-A: A deletes gone.txt and scrap.txt
+PASS  e2e-B: B applies the deletions
+PASS  B has v3 and no gone.txt
+PASS  the root lists only notes/ (no .async, no deleted files)
+PASS  notes/plan.txt is listed with its size and 2 versions
+PASS  the history lists v2 and v1, newest first
+PASS  v1 downloads through a download link
+PASS  the current file downloads
+PASS  the folder downloads as a ZIP without .async
+PASS  the files-with-versions view lists notes/plan.txt
+PASS  the trash lists gone.txt and scrap.txt
+PASS  a trashed file downloads
+PASS  `..`, .async/ and a forged stamp → 400
+PASS  a forged download ticket → 403
+PASS  the snapshot endpoints still refuse a TwoWay folder (400)
+PASS  a device token gets 403 on the files endpoints
+PASS  A takes the folder's lease
+PASS  a restore while A holds the lease → 409 naming A
+PASS  the refused restore changed nothing
+PASS  A releases the lease
+PASS  restore v1 of notes/plan.txt and the trashed gone.txt (no warning: no Mirror Upload device)
+PASS  v3 became a version (nothing is lost)
+PASS  restoring the same trashed file twice → 404
+PASS  e2e-B: B pulls the restored files
+PASS  B has v1 of notes/plan.txt and gone.txt back
+PASS  e2e-A: A pulls the restored files
+PASS  A (which made the edits and the deletion) has both back too
+PASS  e2e-A: A deletes gone.txt again
+PASS  e2e-A: A creates a new gone.txt
+PASS  restoring onto an existing file → 409 with the conflict
+PASS  …and with Rename it is restored next to it
+PASS  e2e-B: B pulls the renamed file
+PASS  B has both gone.txt files
+PASS  emptying the trash needs confirm=true, then the trash is empty
+PASS  restoring in a Mirror folder warns about the Upload device (A)
+PASS  e2e-B: B (Download) pulls the restored one.txt
+PASS  B has one.txt back
+
+── Backup (Transport) ──
+PASS  create Backup Transport folder "backup" → OK
+PASS  attach e2e-A to "backup" → OK
+PASS  attach e2e-B to "backup" → OK
+PASS  the server prunes and checks the new Transport folder on its own schedule
+PASS  e2e-A: A backs up
+PASS  e2e-A: A backs up again
+PASS  the second snapshot reuses unchanged files
+PASS  B lists A's two snapshots, under A's device name
+PASS  B restores the newest snapshot
+PASS  the restore is byte-identical to A's folder
+PASS  a partial restore (--path notes) restores only that directory
+
+── Transport recovery key ──
+PASS  creating a Transport Backup folder shows its recovery key
+PASS  the folder afterwards says when its key was made, never the key
+PASS  e2e-A: A backs up the folder
+PASS  e2e-A: A backs it up again
+PASS  a device token cannot get a recovery key → Forbidden
+PASS  a new recovery key needs the owner's password
+PASS  the owner gets a new recovery key with the password
+PASS  copy the folder's directory off the storage
+PASS  offline: `snapshots --repo` lists both snapshots with the recovery key
+PASS  offline: `restore --repo` is byte-identical, with no server and no enrolled device
+PASS  the offline agent has no identity (it never talked to a server)
+PASS  the replaced recovery key no longer opens it
+PASS  `--repo` and `--folder` together are refused
+PASS  delete the folder (its row and server key; the storage stays)
+PASS  a new folder on the existing repository without its key is refused
+PASS  …and with a wrong key
+PASS  with its recovery key, the new folder takes the repository over
+PASS  the web UI lists the old snapshots of the taken-over folder
+PASS  e2e-A: A backs up into the taken-over folder
+PASS  the backup continues from the old snapshots (unchanged files reused)
+PASS  the history is intact: 3 snapshots
+PASS  the repository has two key files: the new server key and the recovery key (the old server key is removed)
+PASS  `secrets export-folder-keys` prints the folder's server key
+PASS  offline: the exported server key opens the repository too
+PASS  the server's log holds no recovery key
+
+── prune ──
+PASS  `prune` on a TwoWay folder is refused
+PASS  A: `prune` with every snapshot still kept removes nothing
+PASS  the folder's retention and maintenance schedule can be edited
+PASS  e2e-A: A backs up without the big file
+PASS  the backup forgets the two older snapshots
+PASS  forgetting snapshots alone frees no space on the storage
+PASS  A: `prune` reports what it removed
+PASS  the space is actually reclaimed on the storage (5,245,902 → 999 bytes)
+PASS  a restore after the prune is still byte-identical
+PASS  the server shows the device's prune (who, ok, bytes freed)
+
+── check ──
+PASS  B: `check --read-data 100` passes on the good repository
+PASS  A: `check` without --folder checks every Backup folder of the device
+PASS  alter a pack file on the storage
+PASS  B: `check` reports the altered pack and exits with 1
+PASS  the server shows the failed check for the folder
+
+── Backup (end-to-end) ──
+PASS  create Backup EndToEnd folder "e2e" → OK
+PASS  attach e2e-A to "e2e" → OK
+PASS  attach e2e-B to "e2e" → OK
+PASS  a backup before init-encryption is refused with a hint
+PASS  A: init-encryption prints a recovery key
+PASS  init-encryption a second time is refused
+PASS  e2e-A: A backs up end-to-end encrypted
+PASS  the storage holds no plaintext
+PASS  B cannot restore before unlocking
+PASS  B: unlock with a wrong passphrase fails
+PASS  B: unlock with the recovery key
+PASS  B restores A's end-to-end snapshot byte-identically
+PASS  e2e-B: B backs up into the same end-to-end repository
+PASS  A sees B's snapshot
+
+── run mode (SignalR) ──
+PASS  B: `run` starts a worker per folder
+PASS  e2e-A: A uploads live.txt (and tells the server)
+PASS  B's agent downloads it after folder.changed, without polling
+PASS  B's agent uploads a local change it noticed by itself
+PASS  B's agent prunes and checks the end-to-end folder on schedule and reports both
+PASS  A: `check` works on the end-to-end folder too
+PASS  A: `prune` works on the end-to-end folder too
+PASS  create TwoWay Transport folder "late" → OK
+PASS  attach e2e-A to "late" → OK
+PASS  e2e-A: A fills a new folder
+PASS  attach B to a new folder while it runs
+PASS  B's agent picks up the new folder (config.changed) and syncs it
+
+── agent in Docker (async-cli:e2e) ──
+PASS  start the async-cli container (enrolls from ASYNC_ENROLL_CODE)
+PASS  the container enrolled itself (platform Cli)
+PASS  attach the container to the TwoWay folder at /data/two
+PASS  the container downloads the folder into its /data mount
+
+── alerts (webhook) ──
+PASS  a webhook with a non-http(s) address is refused
+PASS  add a webhook channel (its Authorization header is stored, never shown)
+PASS  "Send test" reaches the webhook, with the Authorization header
+PASS  a device token cannot read alert channels → Forbidden
+PASS  create TwoWay Transport folder "watch" → OK
+PASS  attach e2e-A to "watch" → OK
+PASS  e2e-A: A syncs the watched folder once
+PASS  after the (shortened) grace, the webhook gets an overdue alert for A on "watch"
+PASS  the alert has the documented payload (version, user, title, text)
+PASS  the web UI lists the open incident
+PASS  the overdue alert is sent once, not on every scan
+PASS  e2e-A: A syncs again
+PASS  the webhook gets a "back to normal" message
+PASS  the incident is resolved
+PASS  the webhook's secret never appears in the server log
+
+── revocation ──
+PASS  remove B in the web UI → NoContent
+PASS  B's commands are refused afterwards
+PASS  B cannot sync any more
+PASS  e2e-A: A keeps syncing
+PASS  B's running agent is disconnected and stops with an explanation
+PASS  B never received the change made after the revocation
+PASS  the server closed B's live-updates connection
+PASS  A is unaffected
+
+── password change ──
+PASS  admin creates e2e-pw-20261115053518
+PASS  e2e-pw-20261115053518 signs in in two browsers
+PASS  a device token cannot change a password → Forbidden
+PASS  a wrong current password is refused → BadRequest
+PASS  the usual password rules apply
+PASS  e2e-pw-20261115053518 changes their password in browser 1 → NoContent
+PASS  browser 2 is signed out (refresh → Unauthorized)
+PASS  browser 1 stays signed in (refresh → OK)
+PASS  the old password no longer signs in
+PASS  the new password signs in
+
+── deleting a folder with its data ──
+PASS  create Backup Transport folder "purge-me" → OK
+PASS  attach e2e-A to "purge-me" → OK
+PASS  create Backup Transport folder "purge-me-not" → OK
+PASS  attach e2e-A to "purge-me-not" → OK
+PASS  e2e-A: A backs up purge-me
+PASS  e2e-A: A backs up purge-me-not
+PASS  both repositories are on the storage
+PASS  a device token cannot delete a folder → Forbidden
+PASS  a device token cannot list purges → Forbidden
+PASS  another person cannot delete it → NotFound
+PASS  a purge needs the folder's exact name → BadRequest
+PASS  delete purge-me with its data → Accepted
+PASS  the purge finishes and reports what it removed (7 files, 3148919 bytes)
+PASS  the purge is listed for the person who started it
+PASS  purge-me's directory is gone from the storage
+PASS  purge-me-not's repository is untouched
+PASS  A cannot sync the deleted folder
+PASS  e2e-A: A keeps backing up purge-me-not
+PASS  purge-me-not still restores
+PASS  its directory can be used again once the purge is done → OK
+
+── deleting a user ──
+PASS  admin creates a shared back-end → OK
+PASS  admin creates e2e-gone-20261115053518, who signs in
+PASS  e2e-gone-20261115053518 enrolls device C
+PASS  e2e-gone-20261115053518 creates a TwoWay folder on the shared back-end with C
+PASS  e2e-C: C syncs it
+PASS  the file is in e2e-gone-20261115053518's area of the shared back-end
+PASS  C's agent runs
+PASS  the confirmation lists the user's device and folder
+PASS  an admin cannot delete themselves → BadRequest
+PASS  a non-admin cannot delete users → Forbidden
+PASS  a device token cannot delete users → Forbidden
+PASS  a purge needs the username typed → BadRequest
+PASS  admin deletes e2e-gone-20261115053518 with their data → OK
+PASS  C's running agent stops with an explanation
+PASS  the deleted user's access token stops working at once → Unauthorized
+PASS  and their browser session is gone → Unauthorized
+PASS  the user is no longer listed
+PASS  the user's folder data is purged
+PASS  their directory on the shared back-end is gone
+PASS  other folders' data stays
+PASS  the shared back-end itself stays
+
+2 check(s) failed:
+  - the upload continues: -1 bytes were already on the server (≥ 33,554,432 acknowledged)
+  - only the rest is sent: -1 bytes, none of the acknowledged parts again
+exit 1

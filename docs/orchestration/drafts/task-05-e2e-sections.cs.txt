@@ -1,0 +1,169 @@
+    // ── Own password change: the other browser is signed out, this one stays ──
+    Section("password change");
+    // A device's access token (A's, refreshed by a command): it must get 403 on everything in this part.
+    await Cli(a, ["status"]);
+    var deviceToken = JsonNode.Parse(File.ReadAllText(Path.Combine(a.Config, "token.json")))?["accessToken"]?.GetValue<string>();
+    var pwName = $"e2e-pw-{runId}";
+    var pwUser = await Send(HttpMethod.Post, "/api/users", new { username = pwName, password = "first-password", isAdmin = false }, token);
+    Check(pwUser.Status == HttpStatusCode.OK, $"admin creates {pwName}", pwUser.Raw);
+    var pwId = pwUser.Body?["id"]?.GetValue<int>() ?? 0;
+    var browser1 = new Browser(server);
+    var browser2 = new Browser(server);
+    var t1 = await browser1.SignInAsync(pwName, "first-password");
+    var t2 = await browser2.SignInAsync(pwName, "first-password");
+    Check(t1 is not null && t2 is not null, $"{pwName} signs in in two browsers");
+    var asDevice = await Send(HttpMethod.Post, "/api/auth/password", new { currentPassword = "first-password", newPassword = "x-device-pw" }, deviceToken);
+    Check(asDevice.Status == HttpStatusCode.Forbidden, $"a device token cannot change a password → {asDevice.Status}");
+    var wrongCurrent = await browser1.SendAsync(HttpMethod.Post, "/api/auth/password", new { currentPassword = "not-it", newPassword = "second-password" }, t1);
+    Check(wrongCurrent.Status == HttpStatusCode.BadRequest, $"a wrong current password is refused → {wrongCurrent.Status}", wrongCurrent.Raw);
+    var tooShort = await browser1.SendAsync(HttpMethod.Post, "/api/auth/password", new { currentPassword = "first-password", newPassword = "short" }, t1);
+    Check(tooShort.Status == HttpStatusCode.BadRequest && tooShort.Raw.Contains("8 characters"), "the usual password rules apply", tooShort.Raw);
+    var changed = await browser1.SendAsync(HttpMethod.Post, "/api/auth/password", new { currentPassword = "first-password", newPassword = "second-password" }, t1);
+    Check(changed.Status == HttpStatusCode.NoContent, $"{pwName} changes their password in browser 1 → {changed.Status}", changed.Raw);
+    var refresh2 = await browser2.SendAsync(HttpMethod.Post, "/api/auth/refresh");
+    Check(refresh2.Status == HttpStatusCode.Unauthorized, $"browser 2 is signed out (refresh → {refresh2.Status})", refresh2.Raw);
+    var refresh1 = await browser1.SendAsync(HttpMethod.Post, "/api/auth/refresh");
+    Check(refresh1.Status == HttpStatusCode.OK, $"browser 1 stays signed in (refresh → {refresh1.Status})", refresh1.Raw);
+    var t1b = refresh1.Body?["accessToken"]?.GetValue<string>();
+    Check(await new Browser(server).SignInAsync(pwName, "first-password") is null, "the old password no longer signs in");
+    Check(await new Browser(server).SignInAsync(pwName, "second-password") is not null, "the new password signs in");
+
+    // ── Deleting a folder with its stored data ────────────────────────────────
+    Section("deleting a folder with its data");
+    async Task<bool?> OnStorage(string path)
+    {
+        if (serverContainer is null) return null;
+        return (await Docker(["exec", serverContainer, "test", "-e", path])).Exit == 0;
+    }
+    async Task<JsonNode?> WaitForPurge(string id, int seconds)
+    {
+        JsonNode? job = null;
+        await WaitForAsync(async () =>
+        {
+            job = (await Send(HttpMethod.Get, $"/api/purges/{id}", token: token)).Body;
+            return job?["status"]?.GetValue<string>() is "Done" or "Failed";
+        }, seconds, 1);
+        return job;
+    }
+    var purgeMe = await Folder("purge-me", "Backup", "Transport", (a, "purge-me", null));
+    var keepMe = await Folder("purge-me-not", "Backup", "Transport", (a, "purge-me-not", null));
+    Write(a.Path("purge-me", "big.bin"), RandomBytes(3 * 1024 * 1024));
+    Write(a.Path("purge-me", "sub", "note.txt"), "to be purged");
+    Write(a.Path("purge-me-not", "keep.txt"), "must survive");
+    await Sync(a, purgeMe, "A backs up purge-me");
+    await Sync(a, keepMe, "A backs up purge-me-not");
+    if (serverContainer is not null)
+        Check(await OnStorage($"{storageRoot}/purge-me/config") == true && await OnStorage($"{storageRoot}/purge-me-not/config") == true,
+            "both repositories are on the storage");
+    var asDeviceDelete = await Send(HttpMethod.Delete, $"/api/folders/{purgeMe}?purge=true&confirm=purge-me", token: deviceToken);
+    Check(asDeviceDelete.Status == HttpStatusCode.Forbidden, $"a device token cannot delete a folder → {asDeviceDelete.Status}");
+    var asDevicePurges = await Send(HttpMethod.Get, "/api/purges", token: deviceToken);
+    Check(asDevicePurges.Status == HttpStatusCode.Forbidden, $"a device token cannot list purges → {asDevicePurges.Status}");
+    var asOther = await browser1.SendAsync(HttpMethod.Delete, $"/api/folders/{purgeMe}?purge=true&confirm=purge-me", token: t1b);
+    Check(asOther.Status == HttpStatusCode.NotFound, $"another person cannot delete it → {asOther.Status}");
+    var wrongName = await Send(HttpMethod.Delete, $"/api/folders/{purgeMe}?purge=true&confirm=purge", token: token);
+    Check(wrongName.Status == HttpStatusCode.BadRequest, $"a purge needs the folder's exact name → {wrongName.Status}", wrongName.Raw);
+    // The server's scheduled prune/check of the new folders may hold the repository for a moment: then 409, try again.
+    (HttpStatusCode Status, JsonNode? Body, string Raw) purged = default;
+    for (var attempt = 0; attempt < 20; attempt++)
+    {
+        purged = await Send(HttpMethod.Delete, $"/api/folders/{purgeMe}?purge=true&confirm=purge-me", token: token);
+        if (purged.Status != HttpStatusCode.Conflict) break;
+        await Task.Delay(3000);
+    }
+    Check(purged.Status == HttpStatusCode.Accepted, $"delete purge-me with its data → {purged.Status}", purged.Raw);
+    var purgeId = purged.Body?["id"]?.GetValue<string>() ?? "";
+    var purgeJob = await WaitForPurge(purgeId, 60);
+    var purgedFiles = purgeJob?["filesDeleted"]?.GetValue<long>() ?? 0;
+    var purgedBytes = purgeJob?["bytesDeleted"]?.GetValue<long>() ?? 0;
+    Check(purgeJob?["status"]?.GetValue<string>() == "Done" && purgedFiles > 3 && purgedBytes > 3_000_000,
+        $"the purge finishes and reports what it removed ({purgedFiles} files, {purgedBytes} bytes)", purgeJob?.ToJsonString());
+    var listed = (await Send(HttpMethod.Get, "/api/purges", token: token)).Body?.AsArray() ?? [];
+    Check(listed.Any(j => j?["id"]?.GetValue<string>() == purgeId), "the purge is listed for the person who started it");
+    if (serverContainer is not null)
+    {
+        Check(await OnStorage($"{storageRoot}/purge-me") == false, "purge-me's directory is gone from the storage");
+        Check(await OnStorage($"{storageRoot}/purge-me-not/config") == true, "purge-me-not's repository is untouched");
+    }
+    var goneFolder = await Cli(a, ["sync", "--folder", $"{purgeMe}"]);
+    Check(goneFolder.Exit != 0, "A cannot sync the deleted folder", goneFolder.Output);
+    Write(a.Path("purge-me-not", "later.txt"), "still backing up");
+    await Sync(a, keepMe, "A keeps backing up purge-me-not");
+    var keptRestore = await Cli(a, ["restore", "--folder", $"{keepMe}", "--target", Path.Combine(work, "restore-kept")]);
+    Check(keptRestore.Exit == 0 && File.Exists(Path.Combine(work, "restore-kept", "keep.txt")), "purge-me-not still restores", keptRestore.Output);
+    var reuse = await Send(HttpMethod.Post, "/api/folders", new
+    {
+        name = "purge-me", mode = "Mirror", encryption = "Transport", kind = "Files", storageBackendId = backendId, rootPath = "purge-me", intervalMinutes = 60,
+    }, token);
+    Check(reuse.Status == HttpStatusCode.OK, $"its directory can be used again once the purge is done → {reuse.Status}", reuse.Raw);
+
+    // ── Deleting a user: their running agent stops, their stored data is purged ──
+    Section("deleting a user");
+    var shared = await Send(HttpMethod.Post, "/api/storage-backends",
+        new { name = $"e2e shared {runId}", shared = true, settings = new { type = "Local", path = storageRoot + "-shared" } }, token);
+    Check(shared.Status == HttpStatusCode.OK, $"admin creates a shared back-end → {shared.Status}", shared.Raw);
+    var sharedId = shared.Body?["id"]?.GetValue<int>() ?? 0;
+    var goneName = $"e2e-gone-{runId}";
+    var goneUser = await Send(HttpMethod.Post, "/api/users", new { username = goneName, password = "gone-password", isAdmin = false }, token);
+    var goneId = goneUser.Body?["id"]?.GetValue<int>() ?? 0;
+    var goneBrowser = new Browser(server);
+    var tg = await goneBrowser.SignInAsync(goneName, "gone-password");
+    Check(goneId > 0 && tg is not null, $"admin creates {goneName}, who signs in", goneUser.Raw);
+    var c = new Agent("e2e-C", Path.Combine(work, "C"));
+    var codeC = (await goneBrowser.SendAsync(HttpMethod.Post, "/api/devices/enrollments", new { reusable = false, label = c.Name }, tg)).Body?["code"]?.GetValue<string>();
+    var enrolledC = await Cli(c, ["enroll", "--server", server, "--code", codeC ?? "", "--name", c.Name]);
+    Check(enrolledC.Exit == 0, $"{goneName} enrolls device C", enrolledC.Output);
+    c.Id = Guid.Parse(JsonNode.Parse(File.ReadAllText(Path.Combine(c.Config, "identity.json")))!["deviceId"]!.GetValue<string>());
+    var goneFolderRes = await goneBrowser.SendAsync(HttpMethod.Post, "/api/folders", new
+    {
+        name = "gone-docs", mode = "TwoWay", encryption = "Transport", kind = "Files", storageBackendId = sharedId, rootPath = "docs", intervalMinutes = 60,
+    }, tg);
+    var goneFolderId = goneFolderRes.Body?["id"]?.GetValue<int>() ?? 0;
+    Write(c.Path("docs", "letter.txt"), "goodbye");
+    var attachC = await goneBrowser.SendAsync(HttpMethod.Put, $"/api/folders/{goneFolderId}/devices", new { deviceId = c.Id, localPath = c.Path("docs") }, tg);
+    Check(goneFolderRes.Status == HttpStatusCode.OK && attachC.Status == HttpStatusCode.OK,
+        $"{goneName} creates a TwoWay folder on the shared back-end with C", goneFolderRes.Raw + attachC.Raw);
+    await Sync(c, goneFolderId, "C syncs it");
+    var goneArea = $"{storageRoot}-shared/users/{goneId}/docs";
+    if (serverContainer is not null) Check(await OnStorage($"{goneArea}/letter.txt") == true, $"the file is in {goneName}'s area of the shared back-end");
+    var runC = Start(c, ["run", "--verbose"]);
+    Check(await WaitFor(() => runC.Log.Contains("Syncing \"gone-docs\""), 30), "C's agent runs", runC.Log.ToString());
+
+    var preview = await Send(HttpMethod.Get, $"/api/users/{goneId}/deletion", token: token);
+    Check(preview.Status == HttpStatusCode.OK && preview.Body?["devices"]?.GetValue<int>() == 1
+          && preview.Body?["folders"]?.AsArray().Any(f => f?.GetValue<string>() == "gone-docs") == true,
+        "the confirmation lists the user's device and folder", preview.Raw);
+    var adminId = session.Body?["user"]?["id"]?.GetValue<int>() ?? 0;
+    var self = await Send(HttpMethod.Delete, $"/api/users/{adminId}", token: token);
+    Check(self.Status == HttpStatusCode.BadRequest && self.Raw.Contains("own account"), $"an admin cannot delete themselves → {self.Status}", self.Raw);
+    var byUser = await goneBrowser.SendAsync(HttpMethod.Delete, $"/api/users/{pwId}", token: tg);
+    Check(byUser.Status == HttpStatusCode.Forbidden, $"a non-admin cannot delete users → {byUser.Status}");
+    var byDevice = await Send(HttpMethod.Delete, $"/api/users/{goneId}", token: deviceToken);
+    Check(byDevice.Status == HttpStatusCode.Forbidden, $"a device token cannot delete users → {byDevice.Status}");
+    var badConfirm = await Send(HttpMethod.Delete, $"/api/users/{goneId}?purge=true&confirm=nope", token: token);
+    Check(badConfirm.Status == HttpStatusCode.BadRequest, $"a purge needs the username typed → {badConfirm.Status}", badConfirm.Raw);
+    var deletedUser = await Send(HttpMethod.Delete, $"/api/users/{goneId}?purge=true&confirm={goneName}", token: token);
+    var userPurges = deletedUser.Body?["purges"]?.AsArray() ?? [];
+    Check(deletedUser.Status == HttpStatusCode.OK && userPurges.Count == 1, $"admin deletes {goneName} with their data → {deletedUser.Status}", deletedUser.Raw);
+    var stoppedC = await WaitFor(() => runC.Process.HasExited, 30);
+    Check(stoppedC && runC.Process.ExitCode == 1 && runC.Log.Contains("was removed"), "C's running agent stops with an explanation", runC.Log.ToString());
+    var goneSession = await goneBrowser.SendAsync(HttpMethod.Get, "/api/folders", token: tg);
+    Check(goneSession.Status == HttpStatusCode.Unauthorized, $"the deleted user's access token stops working at once → {goneSession.Status}");
+    var goneRefresh = await goneBrowser.SendAsync(HttpMethod.Post, "/api/auth/refresh");
+    Check(goneRefresh.Status == HttpStatusCode.Unauthorized, $"and their browser session is gone → {goneRefresh.Status}");
+    var userList = (await Send(HttpMethod.Get, "/api/users", token: token)).Body?.AsArray() ?? [];
+    Check(userList.All(u => u?["username"]?.GetValue<string>() != goneName), "the user is no longer listed");
+    // The agent may have held the folder's lease when it was stopped: the purge waits for it (at most 2 minutes).
+    var userPurge = await WaitForPurge(userPurges.FirstOrDefault()?["id"]?.GetValue<string>() ?? "", 180);
+    Check(userPurge?["status"]?.GetValue<string>() == "Done" && userPurge?["filesDeleted"]?.GetValue<long>() >= 1,
+        "the user's folder data is purged", userPurge?.ToJsonString());
+    if (serverContainer is not null)
+    {
+        Check(await OnStorage(goneArea) == false, "their directory on the shared back-end is gone");
+        Check(await OnStorage($"{storageRoot}/purge-me-not/config") == true, "other folders' data stays");
+    }
+    var backendList = (await Send(HttpMethod.Get, "/api/storage-backends", token: token)).Body?.AsArray() ?? [];
+    Check(backendList.Any(x => x?["id"]?.GetValue<int>() == sharedId), "the shared back-end itself stays");
+    if (!runC.Process.HasExited) runC.Process.Kill(entireProcessTree: true);
+    File.WriteAllText(Path.Combine(work, "run-C.log"), runC.Log.ToString());
+

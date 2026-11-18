@@ -1,0 +1,24 @@
+
+[1m── build and start[0m
+  [32m✓[0m APK ASync-0.1.5-android.apk (29M)
+  [32m✓[0m async-cli published
+  [32m✓[0m server on http://localhost:5193 (the phone uses http://10.0.2.2:5193), account admin, storage 1
+  [32m✓[0m device: Android SDK built for x86_64, Android 15
+  [32m✓[0m installed; the app starts on the enroll page
+
+[1m── enroll[0m
+  [32m✓[0m device-code flow: the code JV86-B4CE is shown
+  [32m✓[0m the phone's browser did not open: the code is approved on a computer
+  [32m✓[0m it says where: On your computer, open http://10.0.2.2:5193/devices/approve?code=JV86-B4CE (or Devices → Approve in the web UI), sign in and enter this code.
+  [32m✓[0m Cancel gives the request up
+  [32m✓[0m an opened async://pair link brings the app up with the server and code filled in
+  [32m✓[0m the QR scanner opens (camera preview, ZXing)
+  [32m✓[0m Back closes the scanner
+  [32m✓[0m enrolled by code (Enrolled "Android SDK built for x86_64". Attach folders to it in the web UI.)
+  [32m✓[0m the server lists the device as Android (01a1e617-6e55-7654-908c-e0a9b62ccff6)
+  [32m✓[0m signed in: the server accepted the Keystore key's signature
+  [32m✓[0m device key: EC P-256 in the Android Keystore, not exportable (Software)
+  [32m✓[0m identity.json sealed with the Keystore AES key (only a key reference inside, no user name readable)
+
+[1m── a TwoWay folder on a SAF tree[0m
+  [32m✓[0m the folder attached in the web UI appears

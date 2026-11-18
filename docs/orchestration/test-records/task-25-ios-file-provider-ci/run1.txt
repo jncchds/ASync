@@ -1,0 +1,36 @@
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44258823162
+Triggered via push less than a minute ago
+
+JOBS
+* check (ID 134646908210)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  * Compile the iOS head (scripts/check-ios.sh)
+  * The iOS head's and the File Provider extension's shared code
+  * Post Setup .NET
+  * Post Checkout
+✓ decide in 6s (ID 134646908815)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+X ios-ci/25 iOS · 44258823162
+Triggered via push about 1 minute ago
+
+JOBS
+X check in 33s (ID 134646908210)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  X Compile the iOS head (scripts/check-ios.sh)
+  - The iOS head's and the File Provider extension's shared code
+  - Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+✓ decide in 6s (ID 134646908815)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+- ios (ID 134647167416)

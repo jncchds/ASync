@@ -1,0 +1,60 @@
+
+── build and server stack
+  ✓ async-cli published to /mnt/git/ASync/.claude/worktrees/task-10-agent-service/artifacts/agent-smoke/cli
+  ✓ server on http://localhost:5191
+
+── account, device, folder
+  ✓ registered admin
+  ✓ enrolled device 01a1e069-a9f5-7402-8857-98a9b30536ff
+  ✓ TwoWay folder 1 attached at /mnt/git/ASync/.claude/worktrees/task-10-agent-service/artifacts/agent-smoke/docs
+  ✓ without an agent, status works in-process
+
+── install the user unit
+  ✓ async-cli service install
+      Installed /home/chds/.config/systemd/user/async-agent.service and started it.
+      Logs: journalctl --user -u async-agent.service -f
+  ✓ unit file written to /home/chds/.config/systemd/user/async-agent.service
+  ✓ unit is Type=notify
+  ✓ unit is enabled
+  ✓ unit is active (READY=1 reached)
+  ✓ status goes through the service (pid 4034123)
+  ✓ the control socket is private (0600)
+  ✓ the service synced the folder by itself on start
+
+── commands through the control channel
+  ✓ async-cli sync runs in the service
+      docs…
+        1 up, 0 down, 0 deleted
+  ✓ the requested sync uploaded by-request.txt
+  ✓ a second agent (async-cli run) is refused
+  ✓ pause through the service
+  ✓ status shows the folder paused
+  ✓ resume through the service
+  ✓ a new file is synced by the file watcher (no command)
+  ✓ the service logs to the journal
+
+── systemctl --user restart
+  ✓ active again after restart
+  ✓ the old process stopped cleanly (exit 0)
+  ✓ a new process (4034123 → 4034560)
+  ✓ the CLI reaches the restarted service
+  ✓ syncs after the restart
+      Service: /home/chds/.config/systemd/user/async-agent.service: active
+      Device:  agent-smoke (01a1e069-a9f5-7402-8857-98a9b30536ff)
+      Account: admin on http://localhost:5191
+      Agent:   connected (live updates on) — running as a service, pid 4034560, v0.1.4, since 2026-11-15 19:13
+      
+        [1] docs                     TwoWay           every 60 min  /mnt/git/ASync/.claude/worktrees/task-10-agent-service/artifacts/agent-smoke/docs
+              idle; last run 2026-11-15 19:13: 1 up, 0 down, 0 deleted; next 20:13
+
+── uninstall
+  ✓ async-cli service uninstall
+  ✓ unit file removed
+  ✓ unit no longer active
+  ✓ no process left
+  ✓ stopped cleanly on uninstall
+  ✓ control socket and endpoint file removed
+  ✓ the CLI works in-process again
+  ✓ the identity stays
+
+agent service smoke test: all checks passed

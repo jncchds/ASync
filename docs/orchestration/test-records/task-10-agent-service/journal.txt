@@ -1,0 +1,25 @@
+2026-11-15T19:11:02+01:00 CHDS-VIBECODE systemd[5048]: async-agent.service: Failed with result 'exit-code'.
+2026-11-15T19:11:02+01:00 CHDS-VIBECODE systemd[5048]: Stopped async-agent.service - ASync sync agent.
+2026-11-15T19:11:02+01:00 CHDS-VIBECODE systemd[5048]: async-agent.service: Consumed 2.313s CPU time over 9.092s wall clock time, 37.5M memory peak.
+2026-11-15T19:11:02+01:00 CHDS-VIBECODE systemd[5048]: Starting async-agent.service - ASync sync agent...
+2026-11-15T19:11:02+01:00 CHDS-VIBECODE async-cli[4023876]: agent[0] Control channel: /run/user/1000/async/agent-ea75ec04b1714020.sock
+2026-11-15T19:11:02+01:00 CHDS-VIBECODE systemd[5048]: Started async-agent.service - ASync sync agent.
+2026-11-15T19:11:02+01:00 CHDS-VIBECODE async-cli[4023876]: agent[0] ASync agent 0.1.4: agent-smoke → http://localhost:5191
+2026-11-15T19:11:03+01:00 CHDS-VIBECODE async-cli[4023876]: agent[0] Syncing "docs" (TwoWay) at /mnt/git/ASync/.claude/worktrees/task-10-agent-service/artifacts/agent-smoke/docs.
+2026-11-15T19:11:03+01:00 CHDS-VIBECODE async-cli[4023876]: agent[0] "docs": 0 up, 0 down, 0 deleted.
+2026-11-15T19:11:03+01:00 CHDS-VIBECODE async-cli[4023876]: agent[0] "docs": 1 up, 0 down, 0 deleted.
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE systemd[5048]: Stopping async-agent.service - ASync sync agent...
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE async-cli[4023876]: Unhandled exception: System.ObjectDisposedException: The CancellationTokenSource has been disposed.
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE async-cli[4023876]: Object name: 'System.Threading.CancellationTokenSource'.
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE async-cli[4023876]:    at ASync.Agent.Control.ControlServer.DisposeAsync() in /mnt/git/ASync/.claude/worktrees/task-10-agent-service/src/ASync.Agent.Control/ControlServer.cs:line 198
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE async-cli[4023876]:    at ASync.Agent.AgentRuntime.DisposeAsync() in /mnt/git/ASync/.claude/worktrees/task-10-agent-service/src/ASync.Agent/AgentRuntime.cs:line 362
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE async-cli[4023876]:    at ASync.Agent.AgentHost.RunServiceAsync(ServiceRunOptions options, CancellationToken ct) in /mnt/git/ASync/.claude/worktrees/task-10-agent-service/src/ASync.Agent/AgentHost.cs:line 76
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE async-cli[4023876]:    at Program.<>c__DisplayClass0_0.<<<Main>$>b__23>d.MoveNext() in /mnt/git/ASync/.claude/worktrees/task-10-agent-service/src/ASync.Cli/Program.cs:line 476
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE async-cli[4023876]: --- End of stack trace from previous location ---
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE async-cli[4023876]:    at Program.<>c__DisplayClass0_1.<<<Main>$>b__25>d.MoveNext() in /mnt/git/ASync/.claude/worktrees/task-10-agent-service/src/ASync.Cli/Program.cs:line 45
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE async-cli[4023876]: --- End of stack trace from previous location ---
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE async-cli[4023876]:    at System.CommandLine.Invocation.InvocationPipeline.InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken)
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE systemd[5048]: async-agent.service: Main process exited, code=exited, status=1/FAILURE
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE systemd[5048]: async-agent.service: Failed with result 'exit-code'.
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE systemd[5048]: Stopped async-agent.service - ASync sync agent.
+2026-11-15T19:11:04+01:00 CHDS-VIBECODE systemd[5048]: async-agent.service: Consumed 1.450s CPU time over 2.553s wall clock time, 30M memory peak.

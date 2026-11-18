@@ -1,0 +1,80 @@
+
+[1m── build and start[0m
+  [32m✓[0m APK ASync-0.1.5-android.apk (29M)
+  [32m✓[0m async-cli published
+  [32m✓[0m server on http://localhost:5193 (the phone uses http://10.0.2.2:5193), account admin, storage 1
+  [32m✓[0m device: Android SDK built for x86_64, Android 15
+  [32m✓[0m installed; the app starts on the enroll page
+
+[1m── enroll[0m
+  [32m✓[0m device-code flow: the code WX9H-Q5JE is shown
+  [32m✓[0m the phone's browser did not open: the code is approved on a computer
+  [32m✓[0m it says where: On your computer, open http://10.0.2.2:5193/devices/approve?code=WX9H-Q5JE (or Devices → Approve in the web UI), sign in and enter this code.
+  [32m✓[0m Cancel gives the request up
+  [32m✓[0m an opened async://pair link brings the app up with the server and code filled in
+  [32m✓[0m the QR scanner opens (camera preview, ZXing)
+  [32m✓[0m Back closes the scanner
+  [32m✓[0m enrolled by code (Enrolled "Android SDK built for x86_64". Attach folders to it in the web UI.)
+  [32m✓[0m the server lists the device as Android (01a1e53a-af77-75a1-8fbb-81c4c2732288)
+  [32m✓[0m signed in: the server accepted the Keystore key's signature
+  [32m✓[0m device key: EC P-256 in the Android Keystore, not exportable (Software)
+  [32m✓[0m identity.json sealed with the Keystore AES key (only a key reference inside, no user name readable)
+
+[1m── a TwoWay folder on a SAF tree[0m
+  [32m✓[0m the folder attached in the web UI appears
+  [32m✓[0m the system picker opened at ASyncSmoke/docs: Use this folder
+  [32m✓[0m Allow ASync to access files in docs
+  [32m✓[0m the agent syncs the tree content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs
+  [32m✓[0m the server has the content URI as the local path
+  [32m✓[0m local tree contract on the SAF tree: 14/14 passed (SafTree)
+  [32m✓[0m async-cli put from-cli.txt on the server
+  [32m✓[0m Sync now: 0 up, 0 down, 0 deleted
+  [32m✓[0m down: from-cli.txt is on the phone
+  [32m✓[0m up: hello-phone.txt is on the server
+  [32m✓[0m and on the other device
+  [32m✓[0m the folder shows Syncing with live progress while it runs
+  [32m✓[0m the foreground-service notification (channel async-transfers) shows during the transfer
+  [32m✓[0m WorkManager's foreground service (type dataSync) holds the transfer
+  [32m✓[0m run finished: 0 up, 0 down, 0 deleted
+  [32m✓[0m the edit reached the phone
+  [32m✓[0m the 200 MB file went up in parts
+  [32m✓[0m the delete on the phone reached the server
+  [32m✓[0m video.bin arrived on the computer byte for byte
+  [32m✓[0m a second run changes nothing (SAF times are not set, nothing looks changed)
+
+[1m── pause, resume, back[0m
+  [32m✓[0m Pause
+  [32m✓[0m the server shows it paused
+  [32m✓[0m Resume
+  [32m✓[0m the Back button closes the settings
+  [32m✓[0m and the app stays open
+
+[1m── a Backup folder on a SAF tree, restored by async-cli[0m
+  [32m✓[0m picked ASyncSmoke/photos
+  [32m✓[0m backed up: Snapshot 0fdcaaf7: 0 new, 0 changed, 2 unchanged, 0 B added
+  [32m✓[0m async-cli lists the phone's snapshot
+  [32m✓[0m async-cli restored it
+  [32m✓[0m the restored files match the phone's byte for byte
+
+[1m── an end-to-end Backup folder set up on the phone[0m
+  [32m✓[0m the new end-to-end folder shows "Not set up" on the phone
+  [32m✓[0m set up in the app; the recovery key is shown once
+  [32m✓[0m the server knows the repository is ready
+  [32m✓[0m and the folder is unlocked on the phone
+  [32m✓[0m backed up end-to-end encrypted: Snapshot 90fba120: 0 new, 0 changed, 2 unchanged, 0 B added
+  [32m✓[0m async-cli unlocks it with the passphrase chosen on the phone
+  [32m✓[0m and restores the phone's files byte for byte
+
+[1m── documents provider: ASync in the Files app[0m
+  [32m✓[0m another caller without MANAGE_DOCUMENTS (the adb shell) is refused
+  [32m✓[0m one root: ASync — 10.0.2.2 (admin)
+  [32m✓[0m its folders: Phone docs, Phone photos
+  [32m✓[0m Phone docs lists from-cli.txt, video.bin (not .async)
+  [32m✓[0m a file uploaded by async-cli opens, byte for byte, from the cache
+error: no answer to "docs result 1": Broadcasting: Intent { act=ua.pp.chds.async.AUTOMATION flg=0x400000 cmp=ua.pp.chds.async/.Automation (has extras) }
+Broadcast completed: result=0
+  [31m✗[0m stream large file
+  [32m✓[0m the transfer notification kept the network for it
+error: no answer to "docs create f/1 text/plain provider-note.txt": Broadcasting: Intent { act=ua.pp.chds.async.AUTOMATION flg=0x400000 cmp=ua.pp.chds.async/.Automation (has extras) }
+Broadcast completed: result=0
+Kept the stack (docker compose -p async-android-smoke down -v), the emulator and /mnt/git/ASync/.claude/worktrees/task-15/artifacts/android-smoke.

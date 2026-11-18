@@ -1,0 +1,163 @@
+
+[1m── build and start[0m
+  [32m✓[0m APK ASync-0.1.5-android.apk (30M)
+  [32m✓[0m async-cli published
+  [32m✓[0m server on http://localhost:5193 (the phone uses http://10.0.2.2:5193), account admin, storage 1
+  [32m✓[0m device: Android SDK built for x86_64, Android 15
+  [32m✓[0m installed; the app starts on the enroll page
+
+[1m── enroll[0m
+  [32m✓[0m device-code flow: the code 53FD-TZ8H is shown
+  [32m✓[0m the phone's browser did not open: the code is approved on a computer
+  [32m✓[0m it says where: On your computer, open http://10.0.2.2:5193/devices/approve?code=53FD-TZ8H (or Devices → Approve in the web UI), sign in and enter this code.
+  [32m✓[0m Cancel gives the request up
+  [32m✓[0m an opened async://pair link brings the app up with the server and code filled in
+  [32m✓[0m the QR scanner opens (camera preview, ZXing)
+  [32m✓[0m Back closes the scanner
+  [32m✓[0m enrolled by code (Enrolled "Android SDK built for x86_64". Attach folders to it in the web UI.)
+  [32m✓[0m the server lists the device as Android (01a1e916-df50-7879-a8c3-4a68d4d99ca3)
+  [32m✓[0m signed in: the server accepted the Keystore key's signature
+  [32m✓[0m device key: EC P-256 in the Android Keystore, not exportable (Software)
+  [32m✓[0m identity.json sealed with the Keystore AES key (only a key reference inside, no user name readable)
+
+[1m── a TwoWay folder on a SAF tree[0m
+  [32m✓[0m the folder attached in the web UI appears
+  [32m✓[0m the system picker opened at ASyncSmoke/docs: Use this folder
+  [32m✓[0m Allow ASync to access files in docs
+  [32m✓[0m the agent syncs the tree content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs
+  [32m✓[0m the server has the content URI as the local path
+  [32m✓[0m local tree contract on the SAF tree: 14/14 passed (SafTree)
+  [32m✓[0m async-cli put from-cli.txt on the server
+  [32m✓[0m Sync now: 0 up, 0 down, 0 deleted
+  [32m✓[0m down: from-cli.txt is on the phone
+  [32m✓[0m up: hello-phone.txt is on the server
+  [32m✓[0m and on the other device
+  [32m✓[0m the folder shows Syncing with live progress while it runs
+  [32m✓[0m the foreground-service notification (channel async-transfers) shows during the transfer
+  [32m✓[0m WorkManager's foreground service (type dataSync) holds the transfer
+  [32m✓[0m run finished: 1 up, 0 down, 0 deleted
+  [32m✓[0m the edit reached the phone
+  [32m✓[0m the 200 MB file went up in parts
+  [32m✓[0m the delete on the phone reached the server
+  [32m✓[0m video.bin arrived on the computer byte for byte
+  [32m✓[0m a second run changes nothing (SAF times are not set, nothing looks changed)
+
+[1m── pause, resume, back[0m
+  [32m✓[0m Pause
+  [32m✓[0m the server shows it paused
+  [32m✓[0m Resume
+  [32m✓[0m the Back button closes the settings
+  [32m✓[0m and the app stays open
+
+[1m── a Backup folder on a SAF tree, restored by async-cli[0m
+  [32m✓[0m picked ASyncSmoke/photos
+  [32m✓[0m backed up: Snapshot 9d553210: 0 new, 0 changed, 2 unchanged, 0 B added
+  [32m✓[0m async-cli lists the phone's snapshot
+  [32m✓[0m async-cli restored it
+  [32m✓[0m the restored files match the phone's byte for byte
+
+[1m── an end-to-end Backup folder set up on the phone[0m
+  [32m✓[0m the new end-to-end folder shows "Not set up" on the phone
+  [32m✓[0m set up in the app; the recovery key is shown once
+  [32m✓[0m the server knows the repository is ready
+  [32m✓[0m and the folder is unlocked on the phone
+  [32m✓[0m backed up end-to-end encrypted: Snapshot 63f106b7: 0 new, 0 changed, 2 unchanged, 0 B added
+  [32m✓[0m async-cli unlocks it with the passphrase chosen on the phone
+  [32m✓[0m and restores the phone's files byte for byte
+
+[1m── documents provider: ASync in the Files app[0m
+  [32m✓[0m another caller without MANAGE_DOCUMENTS (the adb shell) is refused
+  [32m✓[0m one root: ASync — 10.0.2.2 (admin)
+  [32m✓[0m its folders: Phone docs, Phone photos
+  [32m✓[0m Phone docs lists from-cli.txt, video.bin (not .async)
+  [32m✓[0m a file uploaded by async-cli, read by another process with a grant for it, byte for byte (from the cache)
+  [32m✓[0m a document without a grant stays refused to it
+  [32m✓[0m the 200 MB file streams through a proxy descriptor (/mnt/appfuse/10182_0/2), byte for byte, not cached
+  [32m✓[0m the transfer notification kept the network for it
+  [32m✓[0m created f/1/provider-note.txt
+  [32m✓[0m the write is on the server at once
+  [32m✓[0m async-cli syncs it down byte for byte
+  [32m✓[0m the phone's own synced copy (the SAF folder) got it through the run the write triggered
+  [32m✓[0m replacing it keeps the old content as a version
+  [32m✓[0m and the phone's copy follows again
+  [32m✓[0m no conflict copies from the provider's own writes
+  [32m✓[0m renamed to f/1/provider-renamed.txt
+  [32m✓[0m a new directory (f/1/Scans) is listed (kept on the phone until a file goes in)
+  [32m✓[0m copied into it: f/1/Scans/provider-renamed.txt
+  [32m✓[0m deleted into the folder's trash (restorable in the web UI)
+  [32m✓[0m search finds provider-renamed.txt
+  [32m✓[0m recent documents list it
+  [32m✓[0m a thumbnail of an image: 67x150
+  [32m✓[0m the Backup folder shows its snapshots: 2026-11-17 11:44 · 81199b5c, 2026-11-17 11:44 · 9d553210, 2026-11-17 11:44 · 121e508e
+  [32m✓[0m a snapshot's tree, read-only: 2026, cat.jpg
+  [32m✓[0m a file from the snapshot opens byte for byte (cached)
+  [32m✓[0m and streamed (proxy descriptor, chunks located through the index) byte for byte
+  [32m✓[0m writing into a snapshot is refused (error: FileNotFoundException: This document is read-only.)
+
+[1m── All files access: folders anywhere on the phone[0m
+  [32m✓[0m a test volume: the virtual SD card at /storage/C9D1-1C13
+  [32m✓[0m the device list says the phone needs All files access to be browsed
+  [32m✓[0m browsing it from the API: 409 ""Android SDK built for x86_64" has no All files access: choose the folder in the app, or t…"
+  [32m✓[0m without All files access, Choose folder… explains why first
+  [32m✓[0m Allow all files access opens the system's page for ASync
+  [32m✓[0m the person turns it on there (Uid mode: MANAGE_EXTERNAL_STORAGE: allow)
+  [32m✓[0m back in the app with the permission: the in-app picker replaces the explanation
+  [32m✓[0m it opens at the root of the internal storage, Download offered (["Alarms","Android","ASyncJoined","ASyncNew","ASyncSmoke","Audiobooks","DCIM","Documents","Download","Movies","Music","Notifications","Pictures","Podcasts","Recordings","Ringtones"])
+  [32m✓[0m Android/data and Android/obb are not offered (["media"])
+  [32m✓[0m with the access the device list says the phone can be browsed
+  [32m✓[0m browsing it from the API lists the storage's root (["Alarms","Android","ASyncJoined","ASyncNew","ASyncSmoke","Audiobooks"])
+  [32m✓[0m and Android/ without data and obb (["media"])
+  [32m✓[0m Android/data itself is refused (422: out of reach)
+  [32m✓[0m the volumes: Internal storage (/storage/emulated/0), Virtual SD card (/storage/C9D1-1C13)
+  [32m✓[0m the SD card's root can be chosen: Virtual SD card
+  [32m✓[0m Phone root syncs at /storage/C9D1-1C13 ("Phone root" now syncs at /storage/C9D1-1C13.)
+  [32m✓[0m the server has the real path as the local path (the web UI shows /storage/C9D1-1C13)
+  [32m✓[0m local tree contract on the real path: 14/14 passed (GuardedTree)
+  [32m✓[0m the phone syncs the volume's root: 0 up, 0 down, 0 deleted
+  [32m✓[0m up: root-from-phone.txt is on the server
+  [32m✓[0m nothing of Android/data or Android/obb went up
+  [32m✓[0m and on the other device
+  [32m✓[0m down: root-from-cli.txt arrived at /storage/C9D1-1C13 (0 up, 0 down, 0 deleted)
+  [32m✓[0m a second run changes nothing
+  [32m✓[0m Phone docs (a document tree) is offered its real path /storage/emulated/0/ASyncSmoke/docs
+  [32m✓[0m switched: "Phone docs" now syncs at /storage/emulated/0/ASyncSmoke/docs.
+  [32m✓[0m its sync state was kept: 0 up, 0 down, 0 deleted (no upload again, no conflicts)
+  [32m✓[0m the server's files are as before
+  [32m✓[0m no conflict copies on the phone
+  [32m✓[0m Settings shows All files access as allowed
+  [32m✓[0m turned off: Android stops the app's process
+  [32m✓[0m turned off: the folder stops with "All files access was turned off for ASync, so this folder cannot be re…"
+  [32m✓[0m nothing was deleted on the server
+  [32m✓[0m nor on the phone
+  [32m✓[0m a background run (a wake-up) stops the same way
+  [32m✓[0m the app does not crash
+  [32m✓[0m turned on again: the folder syncs (0 up, 0 down, 0 deleted)
+
+[1m── adding folders from the app (task 18)[0m
+  [32m✓[0m the phone (enrolled with a one-time code) may add folders
+  [32m✓[0m New folder… asks the server what the phone may use: ["smoke (server disk)"]
+  [32m✓[0m the directory on the storage follows the name (phone-new)
+  [32m✓[0m Choose folder… opens the All files access picker
+  [32m✓[0m the real path is the form's local folder (/storage/emulated/0/ASyncNew)
+  [32m✓[0m created: "Phone new" was created and syncs /storage/emulated/0/ASyncNew.
+  [32m✓[0m it is on the dashboard at once, syncing /storage/emulated/0/ASyncNew
+  [32m✓[0m the web UI sees it: TwoWay, only the phone, "added from Android SDK built for x86_64"
+  [32m✓[0m up: the phone's file is on the server (0 up, 0 down, 0 deleted)
+  [32m✓[0m async-cli gets it
+  [32m✓[0m down: async-cli's file arrived on the phone (0 up, 0 down, 0 deleted)
+  [32m✓[0m Add to a folder… lists the account's folders the phone is not in: ["Phone root","Phone secrets","Shared"]
+  [32m✓[0m joined: This device now syncs "Shared" at /storage/emulated/0/ASyncJoined.
+  [32m✓[0m Shared is on the dashboard
+  [32m✓[0m the phone downloads the folder's files (0 up, 0 down, 0 deleted)
+  [32m✓[0m the web UI lists both devices in it
+  [32m✓[0m with "May add folders" off: "Adding folders from this device is turned off. Allowed in the web UI under Devices ("May add folders")."
+  [32m✓[0m allowed again, Try again shows the form
+  [32m✓[0m the owner deletes both in the web UI
+  [32m✓[0m and they leave the phone's dashboard
+
+[1m── contacts and calendars (task 20)[0m
+jq: parse error: Invalid numeric literal at line 1, column 6
+  [31m✗[0m seed
+      error: IllegalArgumentException: Exceptions can't overwrite dtend
+jq: parse error: Invalid numeric literal at line 1, column 6
+exit 5

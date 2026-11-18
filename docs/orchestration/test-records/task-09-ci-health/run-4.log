@@ -1,0 +1,8 @@
+Test run for /mnt/git/ASync/.claude/worktrees/task-09-ci-health/src/ASync.Tests/bin/Release/net10.0/ASync.Tests.dll (.NETCoreApp,Version=v10.0)
+VSTest version 18.0.2 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+Results File: /mnt/git/ASync/.claude/worktrees/task-09-ci-health/TestResults/tests.trx
+
+Passed!  - Failed:     0, Passed:   316, Skipped:     0, Total:   316, Duration: 21 s - ASync.Tests.dll (net10.0)

@@ -1,0 +1,26 @@
+PASS  the shared back-end itself stays
+── quota (refused upload, alert, back under after a scan) ──
+PASS  e2e-quota-20261116022430 signs in, enrolls D, makes a TwoWay folder on the shared back-end and a webhook channel
+PASS  a user cannot change their own quota → Forbidden
+PASS  e2e-D: D uploads 600 KB (no quota yet)
+PASS  the admin sets a 512 KB quota (below what is stored: the uploads were counted as they arrived)
+PASS  GET /api/usage says they are over quota
+PASS  D's next upload is refused: the sync fails and says why
+PASS  the refused file is not on the storage
+PASS  the webhook gets an over-quota alert
+PASS  the failed run is reported (so the device's failing alert follows if it goes on)
+PASS  D's sync deletes photo.bin on the storage (deletions work over quota)
+PASS  e2e-quota-20261116022430 empties the folder's trash → OK
+PASS  until the next scan they still count as over quota
+PASS  after "Count again" (a scan) they are back under quota
+PASS  the folder shows its counted size
+PASS  the webhook gets a "back to normal" message for the quota
+PASS  e2e-D: D's upload now goes through
+PASS  more.bin is on the storage
+── storage health checks ──
+PASS  e2e-quota-20261116022430 adds a WebDAV back-end nobody answers on
+PASS  the periodic check fails twice and the owner gets a storage-failing alert
+PASS  the shared back-end was tested by the periodic check (working) and admins see its total use
+All end-to-end checks passed.
+(exit 0)
+exit 0

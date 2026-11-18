@@ -1,0 +1,60 @@
+    // ── Alerts: overdue and back to normal, by webhook ────────────────────────
+    Section("alerts (webhook)");
+    using (var hook = new WebhookListener())
+    {
+        var hookUrl = $"http://{webhookHost}:{hook.Port}/hook";
+        var badScheme = await Send(HttpMethod.Post, "/api/alerts/channels", new { name = "ftp", settings = new { type = "Webhook", url = "ftp://example.com/x" } }, token);
+        Check(badScheme.Status == HttpStatusCode.BadRequest, "a webhook with a non-http(s) address is refused", badScheme.Raw);
+        var channel = await Send(HttpMethod.Post, "/api/alerts/channels",
+            new { name = "e2e hook", settings = new { type = "Webhook", url = hookUrl, authorization = "Bearer e2e-hook-secret" } }, token);
+        var channelId = channel.Body?["id"]?.GetValue<int>() ?? 0;
+        Check(channel.Status == HttpStatusCode.OK && channel.Body?["settings"]?["authorization"] is null
+              && channel.Body?["secretsSet"]?.AsArray().Any(x => x?.GetValue<string>() == "Authorization") == true,
+            "add a webhook channel (its Authorization header is stored, never shown)", channel.Raw);
+        var tested = await Send(HttpMethod.Post, $"/api/alerts/channels/{channelId}/test", token: token);
+        var testHit = await WaitFor(() => hook.Received.Any(r => r.Body?["event"]?.GetValue<string>() == "test"), 30);
+        Check(tested.Body?["ok"]?.GetValue<bool>() == true && testHit
+              && hook.Received.First(r => r.Body?["event"]?.GetValue<string>() == "test").Authorization == "Bearer e2e-hook-secret",
+            "\"Send test\" reaches the webhook, with the Authorization header", tested.Raw);
+        await Cli(a, ["status"]); // refreshes A's cached access token
+        var deviceToken = JsonNode.Parse(File.ReadAllText(Path.Combine(a.Config, "token.json")))?["accessToken"]?.GetValue<string>();
+        var deviceCalls = await Send(HttpMethod.Get, "/api/alerts/channels", token: deviceToken);
+        Check(deviceCalls.Status == HttpStatusCode.Forbidden, $"a device token cannot read alert channels → {deviceCalls.Status}", deviceCalls.Raw);
+
+        var watch = await Folder("watch", "TwoWay", "Transport", (a, "watch", null));
+        Write(a.Path("watch", "w.txt"), "watched");
+        await Sync(a, watch, "A syncs the watched folder once");
+        bool Mentions(JsonNode? body, string list, string kind) =>
+            body?[list]?.AsArray().Any(i => i?["folderName"]?.GetValue<string>() == "watch" && i?["kind"]?.GetValue<string>() == kind
+                                             && i?["deviceName"]?.GetValue<string>() == a.Name) == true;
+        var overdue = await WaitFor(() => hook.Received.Any(r => Mentions(r.Body, "opened", "overdue")), 120);
+        Check(overdue, "after the (shortened) grace, the webhook gets an overdue alert for A on \"watch\"",
+            string.Join("\n", hook.Received.Select(r => r.Raw)));
+        var alertBody = hook.Received.FirstOrDefault(r => Mentions(r.Body, "opened", "overdue")).Body;
+        Check(alertBody?["version"]?.GetValue<int>() == 1 && alertBody?["user"]?.GetValue<string>() == adminUser
+              && alertBody?["title"]?.GetValue<string>().StartsWith("ASync:") == true && alertBody?["text"]?.GetValue<string>().Contains("watch") == true,
+            "the alert has the documented payload (version, user, title, text)", alertBody?.ToJsonString());
+        var incidents = (await Send(HttpMethod.Get, "/api/alerts/incidents", token: token)).Body?.AsArray() ?? [];
+        Check(incidents.Any(i => i?["folderId"]?.GetValue<int>() == watch && i?["kind"]?.GetValue<string>() == "Overdue" && i?["resolvedAt"] is null),
+            "the web UI lists the open incident", incidents.ToJsonString());
+        var alertsBefore = hook.Received.Count(r => Mentions(r.Body, "opened", "overdue"));
+        await Task.Delay(TimeSpan.FromSeconds(8)); // a few more scans
+        Check(hook.Received.Count(r => Mentions(r.Body, "opened", "overdue")) == alertsBefore, "the overdue alert is sent once, not on every scan");
+
+        await Sync(a, watch, "A syncs again");
+        var recovered = await WaitFor(() => hook.Received.Any(r => Mentions(r.Body, "resolved", "overdue")), 60);
+        Check(recovered, "the webhook gets a \"back to normal\" message", string.Join("\n", hook.Received.Select(r => r.Raw)));
+        var after = (await Send(HttpMethod.Get, "/api/alerts/incidents", token: token)).Body?.AsArray() ?? [];
+        Check(after.Any(i => i?["folderId"]?.GetValue<int>() == watch && i?["resolvedAt"] is not null)
+              && !after.Any(i => i?["folderId"]?.GetValue<int>() == watch && i?["resolvedAt"] is null),
+            "the incident is resolved", after.ToJsonString());
+        if (serverContainer is not null)
+        {
+            var log = await Docker(["logs", serverContainer]);
+            Check(!log.Output.Contains("e2e-hook-secret"), "the webhook's secret never appears in the server log");
+        }
+        // Detach A and remove the channel, so nothing more is sent while the rest runs.
+        await Send(HttpMethod.Delete, $"/api/folders/{watch}/devices/{a.Id}", token: token);
+        await Send(HttpMethod.Delete, $"/api/alerts/channels/{channelId}", token: token);
+    }
+

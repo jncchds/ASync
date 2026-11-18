@@ -1,0 +1,148 @@
+ Image async-shots8-async-server Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 566B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 2.40kB 0.0s done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for mcr.microsoft.com/dotnet/aspnet:10.0
+#3 DONE 0.3s
+
+#4 [internal] load metadata for mcr.microsoft.com/dotnet/sdk:10.0
+#4 DONE 0.3s
+
+#5 [internal] load metadata for docker.io/library/node:22-alpine
+#5 DONE 0.9s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 150B done
+#6 DONE 0.1s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [ui-build 1/7] FROM docker.io/library/node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+#8 resolve docker.io/library/node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+#8 resolve docker.io/library/node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a 0.0s done
+#8 DONE 0.1s
+
+#9 [api-build  1/12] FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb
+#9 resolve mcr.microsoft.com/dotnet/sdk:10.0@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb 0.1s done
+#9 DONE 0.1s
+
+#10 [runtime 1/6] FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e
+#10 resolve mcr.microsoft.com/dotnet/aspnet:10.0@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e 0.1s done
+#10 DONE 0.1s
+
+#7 [internal] load build context
+#7 transferring context: 15.38kB 0.1s done
+#7 DONE 0.1s
+
+#11 [api-build  8/12] COPY src/ASync.Infrastructure/ASync.Infrastructure.csproj src/ASync.Infrastructure/
+#11 CACHED
+
+#12 [api-build  3/12] COPY ASync.slnx Directory.Build.props Directory.Packages.props VERSION ./
+#12 CACHED
+
+#13 [ui-build 7/7] RUN npx vite build --outDir ./dist --emptyOutDir
+#13 CACHED
+
+#14 [api-build  5/12] COPY src/ASync.Core/ASync.Core.csproj src/ASync.Core/
+#14 CACHED
+
+#15 [api-build  9/12] COPY src/ASync.Api/ASync.Api.csproj src/ASync.Api/
+#15 CACHED
+
+#16 [api-build 12/12] RUN dotnet publish src/ASync.Api/ASync.Api.csproj -c Release -o /app/publish --no-restore
+#16 CACHED
+
+#17 [api-build 10/12] RUN dotnet restore src/ASync.Api/ASync.Api.csproj
+#17 CACHED
+
+#18 [runtime 2/6] RUN apt-get update && apt-get install -y --no-install-recommends libgssapi-krb5-2 && rm -rf /var/lib/apt/lists/*
+#18 CACHED
+
+#19 [runtime 4/6] COPY --from=api-build /app/publish ./
+#19 CACHED
+
+#20 [ui-build 5/7] COPY src/async-ui/ ./
+#20 CACHED
+
+#21 [runtime 5/6] COPY --from=ui-build /ui/dist ./wwwroot
+#21 CACHED
+
+#22 [ui-build 4/7] RUN npm ci
+#22 CACHED
+
+#23 [runtime 3/6] WORKDIR /app
+#23 CACHED
+
+#24 [ui-build 2/7] WORKDIR /ui
+#24 CACHED
+
+#25 [ui-build 3/7] COPY src/async-ui/package*.json ./
+#25 CACHED
+
+#26 [api-build  7/12] COPY src/ASync.Storage/ASync.Storage.csproj src/ASync.Storage/
+#26 CACHED
+
+#27 [api-build 11/12] COPY src/ src/
+#27 CACHED
+
+#28 [ui-build 6/7] COPY VERSION /VERSION
+#28 CACHED
+
+#29 [api-build  2/12] WORKDIR /src
+#29 CACHED
+
+#30 [api-build  4/12] COPY src/ASync.Contracts/ASync.Contracts.csproj src/ASync.Contracts/
+#30 CACHED
+
+#31 [api-build  6/12] COPY src/ASync.Engine/ASync.Engine.csproj src/ASync.Engine/
+#31 CACHED
+
+#32 [runtime 6/6] RUN mkdir -p /data && chown app:app /data
+#32 CACHED
+
+#33 exporting to image
+#33 exporting layers done
+#33 exporting manifest sha256:664dfba071992c057ddaa4c4030ccb17770fc4574032591f48b3f846c3876da5 0.0s done
+#33 exporting config sha256:5b2c939cb3d66bcfb0616fd11602bce7dad0cdc562e6bb2a998d3b2dc1ca497d 0.0s done
+#33 exporting attestation manifest sha256:c208802eb1e88b7fe9e727ae2ad482e78259acc924800108b473469f87914014
+#33 exporting attestation manifest sha256:c208802eb1e88b7fe9e727ae2ad482e78259acc924800108b473469f87914014 0.0s done
+#33 exporting manifest list sha256:33b0398b611f1f0dcda9859ef5cd39aead0face90d6f241aad6ee3ca99e845ae 0.0s done
+#33 naming to docker.io/library/async-shots8-async-server:latest done
+#33 unpacking to docker.io/library/async-shots8-async-server:latest 0.0s done
+#33 DONE 0.3s
+
+#34 resolving provenance for metadata file
+#34 DONE 0.0s
+ Image async-shots8-async-server Built 
+ Network async-shots8_default Creating 
+ Network async-shots8_default Creating 
+ Volume async-shots8_postgres_data Creating 
+ Volume async-shots8_postgres_data Creating 
+ Volume async-shots8_async_data Creating 
+ Volume async-shots8_async_data Creating 
+ Volume async-shots8_postgres_data Created 
+ Volume async-shots8_postgres_data Created 
+ Volume async-shots8_async_data Created 
+ Volume async-shots8_async_data Created 
+ Network async-shots8_default Created 
+ Network async-shots8_default Created 
+ Container async-shots8-postgres-1 Creating 
+ Container async-shots8-postgres-1 Created 
+ Container async-shots8-async-server-1 Creating 
+ Container async-shots8-async-server-1 Created 
+ Container async-shots8-postgres-1 Starting 
+ Container async-shots8-postgres-1 Started 
+ Container async-shots8-postgres-1 Waiting 
+ Container async-shots8-postgres-1 Healthy 
+ Container async-shots8-async-server-1 Starting 
+ Container async-shots8-async-server-1 Started 
+ Container async-shots8-async-server-1 Waiting 
+ Container async-shots8-postgres-1 Waiting 
+ Container async-shots8-async-server-1 Healthy 
+ Container async-shots8-postgres-1 Healthy 

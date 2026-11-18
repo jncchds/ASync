@@ -1,0 +1,42 @@
+--- adb starting (pid 1322540) ---
+11-16 01:20:56.045 1322540 1322540 I adb     : main.cpp:65 Android Debug Bridge version 1.0.41
+11-16 01:20:56.045 1322540 1322540 I adb     : main.cpp:65 Version 37.0.1-15733141
+11-16 01:20:56.045 1322540 1322540 I adb     : main.cpp:65 Installed as /home/chds/Android/Sdk/platform-tools/adb
+11-16 01:20:56.045 1322540 1322540 I adb     : main.cpp:65 Running on Linux 7.0.0-43-generic (x86_64)
+11-16 01:20:56.045 1322540 1322540 I adb     : main.cpp:65 
+11-16 01:29:26.601 1322540 1322540 I adb     : adb.cpp:1288 adb server killed by remote request
+11-16 01:29:26.620 1322540 1322540 I adb     : blame_kill.cpp:283 kill-server process callchain
+11-16 01:29:26.620 1322540 1322540 I adb     : blame_kill.cpp:297 pid:1331832 cmdline:adb kill-server
+11-16 01:29:26.620 1322540 1322540 I adb     : blame_kill.cpp:297 pid:1331827 cmdline:/bin/bash -c source /home/chds/.claude/shell-snapshots/snapshot-bash-1794785520784-m4o73k.sh 2>/dev/null || true && \builtin shopt -u extglob 2>/dev/null || true && { \builtin unalias -- 'which'; \builtin unset -f -- 'which'; } >/dev/null 2>&1 || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'pkill -0 qemu 2>/dev/null; /home/chds/.claude/jobs/200f4d76/tmp/adn adb kill-server; grep -rn "Increasing RAM" ~/Android/Sdk/emulator/lib64 2>/dev/null | head -1; grep -E "ramSize|dataPartition" ~/.android/avd/async-smoke.avd/config.ini ~/.android/avd/async-smoke.avd/hardware-qemu.ini 2>/dev/null' < /dev/null && pwd -P >| /tmp/claude-301e-cwd
+11-16 01:29:26.620 1322540 1322540 I adb     : blame_kill.cpp:297 pid: 168813 cmdline:claude bg-spare --bg-spare /tmp/cc-daemon-1000/9614658b/spare/555f71c7.claim.sock
+11-16 01:29:26.620 1322540 1322540 I adb     : blame_kill.cpp:297 pid: 168805 cmdline:claude bg-pty-host --bg-pty-host /tmp/cc-daemon-1000/9614658b/spare/555f71c7.pty.sock 200 50 -- /home/chds/.local/share/claude/versions/2.1.325 --bg-spare /tmp/cc-daemon-1000/9614658b/spare/555f71c7.claim.sock
+11-16 01:29:26.620 1322540 1322540 I adb     : blame_kill.cpp:297 pid:  13499 cmdline:/home/chds/.local/bin/claude daemon run --json-path /home/chds/.claude/daemon.json --log-file /home/chds/.claude/daemon.log --origin transient --spawned-by {"label":"claude --bg","cwd":"/mnt/git/bs-reference/viewer-work/.claude/worktrees/game-look-2","pid":5878}
+11-16 01:29:26.620 1322540 1322540 I adb     : blame_kill.cpp:297 pid:   5048 cmdline:/usr/lib/systemd/systemd --user --deserialize=31
+--- adb starting (pid 1331844) ---
+11-16 01:29:26.632 1331844 1331844 I adb     : main.cpp:65 Android Debug Bridge version 1.0.41
+11-16 01:29:26.632 1331844 1331844 I adb     : main.cpp:65 Version 37.0.1-15733141
+11-16 01:29:26.632 1331844 1331844 I adb     : main.cpp:65 Installed as /home/chds/Android/Sdk/platform-tools/adb
+11-16 01:29:26.632 1331844 1331844 I adb     : main.cpp:65 Running on Linux 7.0.0-43-generic (x86_64)
+11-16 01:29:26.632 1331844 1331844 I adb     : main.cpp:65 
+11-16 02:05:39.902 1331844 1332833 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 03:09:53.118 1331844 1378637 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 03:20:18.970 1331844 1456571 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 08:24:44.543 1331844 2679508 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 09:10:33.262 1331844 2741399 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 09:33:39.335 1331844 2766576 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 09:40:31.479 1331844 2804987 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 12:24:09.884 1331844 2816125 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 12:44:23.387 1331844 3036602 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 13:03:44.577 1331844 3070905 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 14:35:38.821 1331844 3414788 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 17:37:33.569 1331844 1331844 W adb     : sockets.cpp:315 timeout expired while flushing socket, closing
+11-16 17:46:58.839 1331844 39963 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 17:46:59.815 1331844 1331844 W adb     : sockets.cpp:315 timeout expired while flushing socket, closing
+11-16 17:48:06.452 1331844 55935 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 18:08:42.133 1331844 69748 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 18:27:12.230 1331844 100736 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 18:45:02.835 1331844 131331 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 21:37:33.464 1331844 596514 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 21:41:05.089 1331844 708876 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 22:09:15.517 1331844 729697 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed
+11-16 22:38:02.959 1331844 766231 I adb     : transport.cpp:1222 emulator-5554: connection terminated: read failed

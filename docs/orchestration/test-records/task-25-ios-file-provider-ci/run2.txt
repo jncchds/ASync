@@ -1,0 +1,763 @@
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push less than a minute ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+* check (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  * Compile the iOS head (scripts/check-ios.sh)
+  * The iOS head's and the File Provider extension's shared code
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 1 minute ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  * Xcode
+  * Setup .NET
+  * Pin the .NET SDK
+  * NuGet cache
+  * The ios workload
+  * Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 3 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 4 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 6 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 7 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 9 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 11 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 12 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 14 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 15 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 17 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 18 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 20 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 21 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+Refreshing run status every 90 seconds. Press Ctrl+C to quit.
+
+* ios-ci/25 iOS · 44259217422
+Triggered via push about 23 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+* ios (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  * Build for the simulator
+  * PostgreSQL for the smoke test's server
+  * The web UI (for the smoke test's web screenshots)
+  * Smoke test on the simulator
+  * The unsigned .ipa (SideStore / AltStore)
+  * Signing identity and profile
+  * The signed .ipa
+  * Upload to TestFlight
+  * Upload the .ipa
+  * Upload the screenshots
+  * Upload the logs
+  * Attach the .ipa to the release
+  * Post NuGet cache
+  * Post Setup .NET
+  * Post Checkout
+X ios-ci/25 iOS · 44259217422
+Triggered via push about 24 minutes ago
+
+JOBS
+✓ decide in 4s (ID 134648201092)
+  ✓ Set up job
+  ✓ Run mac=true
+  ✓ Complete job
+✓ check in 1m37s (ID 134648202113)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Setup .NET
+  ✓ Compile the iOS head (scripts/check-ios.sh)
+  ✓ The iOS head's and the File Provider extension's shared code
+  ✓ Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+X ios in 21m58s (ID 134648913077)
+  ✓ Set up job
+  ✓ Checkout
+  ✓ Check the tag against VERSION
+  ✓ Xcode
+  ✓ Setup .NET
+  ✓ Pin the .NET SDK
+  ✓ NuGet cache
+  ✓ The ios workload
+  ✓ Unit tests (IosTests, IosBackgroundTests, IosPhotosTests, IosCollectionsTests, IosFileProviderTests)
+  X Build for the simulator
+  - PostgreSQL for the smoke test's server
+  - The web UI (for the smoke test's web screenshots)
+  - Smoke test on the simulator
+  - The unsigned .ipa (SideStore / AltStore)
+  - Signing identity and profile
+  - The signed .ipa
+  - Upload to TestFlight
+  - Upload the .ipa
+  ✓ Upload the screenshots
+  ✓ Upload the logs
+  - Attach the .ipa to the release
+  - Post NuGet cache
+  - Post Setup .NET
+  ✓ Post Checkout
+  ✓ Complete job
+
+ANNOTATIONS
+! No files were found with the provided path: artifacts/ios-smoke/logs/. No artifacts will be uploaded.
+ios: .github#19
+
+! No files were found with the provided path: artifacts/ios-screenshots/. No artifacts will be uploaded.
+ios: .github#19
+
+X Process completed with exit code 1.
+ios: .github#280
+
+! Using member 'System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes a JsonTypeInfo or JsonSerializerContext, or make sure all of the required types are preserved.
+ios: src/ASync.App.iOS/FileProviderAutomation.cs#111
+
+! Using member 'System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes a JsonTypeInfo or JsonSerializerContext, or make sure all of the required types are preserved.
+ios: src/ASync.App.iOS/FileProviderAutomation.cs#68
+
+! Using member 'System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes a JsonTypeInfo or JsonSerializerContext, or make sure all of the required types are preserved.
+ios: src/ASync.App.iOS/CollectionsAutomation.cs#34
+
+! Using member 'System.Reflection.Assembly.GetType(String)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. Types might be removed by trimming. If the type name is a string literal, consider using Type.GetType instead.
+ios: src/ASync.App.iOS/BackgroundWork.cs#560
+
+! Using member 'System.Text.Json.Nodes.JsonArray.Add<T>(T)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. Creating JsonValue instances with non-primitive types is not compatible with trimming. It can result in non-primitive types being serialized, which may have their members trimmed.
+ios: src/ASync.App.iOS/Automation.cs#512
+
+! Using member 'System.Text.Json.Nodes.JsonArray.Add<T>(T)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. Creating JsonValue instances with non-primitive types is not compatible with trimming. It can result in non-primitive types being serialized, which may have their members trimmed.
+ios: src/ASync.App.iOS/Automation.cs#433
+
+! Using member 'System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes a JsonTypeInfo or JsonSerializerContext, or make sure all of the required types are preserved.
+ios: src/ASync.App.iOS/Shared/IosPhotos.cs#279
+
+! Using member 'System.Text.Json.JsonSerializer.Deserialize<TValue>(String, JsonSerializerOptions)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes a JsonTypeInfo or JsonSerializerContext, or make sure all of the required types are preserved.
+ios: src/ASync.App.iOS/Shared/IosPhotos.cs#265
+
+! Using member 'System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes a JsonTypeInfo or JsonSerializerContext, or make sure all of the required types are preserved.
+ios: src/ASync.App.iOS/Shared/IosPhotos.cs#414
+
+! Using member 'System.Text.Json.JsonSerializer.Deserialize<TValue>(String, JsonSerializerOptions)' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. JSON serialization and deserialization might require types that cannot be statically analyzed. Use the overload that takes a JsonTypeInfo or JsonSerializerContext, or make sure all of the required types are preserved.
+ios: src/ASync.App.iOS/Shared/IosPhotos.cs#319
+
+- Due to capacity constraints, jobs targeting macOS arm64 runners may experience longer queue times.
+ios: .github#1
+

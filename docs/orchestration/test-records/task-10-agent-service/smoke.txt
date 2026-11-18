@@ -1,0 +1,60 @@
+
+[1m── build and server stack[0m
+  [32m✓[0m async-cli published to /mnt/git/ASync/.claude/worktrees/task-10-agent-service/artifacts/agent-smoke/cli
+  [32m✓[0m server on http://localhost:5191
+
+[1m── account, device, folder[0m
+  [32m✓[0m registered admin
+  [32m✓[0m enrolled device 01a1e069-a9f5-7402-8857-98a9b30536ff
+  [32m✓[0m TwoWay folder 1 attached at /mnt/git/ASync/.claude/worktrees/task-10-agent-service/artifacts/agent-smoke/docs
+  [32m✓[0m without an agent, status works in-process
+
+[1m── install the user unit[0m
+  [32m✓[0m async-cli service install
+      Installed /home/chds/.config/systemd/user/async-agent.service and started it.
+      Logs: journalctl --user -u async-agent.service -f
+  [32m✓[0m unit file written to /home/chds/.config/systemd/user/async-agent.service
+  [32m✓[0m unit is Type=notify
+  [32m✓[0m unit is enabled
+  [32m✓[0m unit is active (READY=1 reached)
+  [32m✓[0m status goes through the service (pid 4034123)
+  [32m✓[0m the control socket is private (0600)
+  [32m✓[0m the service synced the folder by itself on start
+
+[1m── commands through the control channel[0m
+  [32m✓[0m async-cli sync runs in the service
+      docs…
+        1 up, 0 down, 0 deleted
+  [32m✓[0m the requested sync uploaded by-request.txt
+  [32m✓[0m a second agent (async-cli run) is refused
+  [32m✓[0m pause through the service
+  [32m✓[0m status shows the folder paused
+  [32m✓[0m resume through the service
+  [32m✓[0m a new file is synced by the file watcher (no command)
+  [32m✓[0m the service logs to the journal
+
+[1m── systemctl --user restart[0m
+  [32m✓[0m active again after restart
+  [32m✓[0m the old process stopped cleanly (exit 0)
+  [32m✓[0m a new process (4034123 → 4034560)
+  [32m✓[0m the CLI reaches the restarted service
+  [32m✓[0m syncs after the restart
+      Service: /home/chds/.config/systemd/user/async-agent.service: active
+      Device:  agent-smoke (01a1e069-a9f5-7402-8857-98a9b30536ff)
+      Account: admin on http://localhost:5191
+      Agent:   connected (live updates on) — running as a service, pid 4034560, v0.1.4, since 2026-11-15 19:13
+      
+        [1] docs                     TwoWay           every 60 min  /mnt/git/ASync/.claude/worktrees/task-10-agent-service/artifacts/agent-smoke/docs
+              idle; last run 2026-11-15 19:13: 1 up, 0 down, 0 deleted; next 20:13
+
+[1m── uninstall[0m
+  [32m✓[0m async-cli service uninstall
+  [32m✓[0m unit file removed
+  [32m✓[0m unit no longer active
+  [32m✓[0m no process left
+  [32m✓[0m stopped cleanly on uninstall
+  [32m✓[0m control socket and endpoint file removed
+  [32m✓[0m the CLI works in-process again
+  [32m✓[0m the identity stays
+
+agent service smoke test: all checks passed

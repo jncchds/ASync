@@ -1,0 +1,7 @@
+desktop plain exit 0 107MB
+cli plain exit 0 82MB
+desktop r2r exit 0 124MB
+cli r2r exit 0 113MB
+du: cannot access '/home/chds/.claude/jobs/19d8a36a/tmp/pub/desktop-trim': No such file or directory
+desktop trim exit 1 MB warnings 15
+cli trim exit 0 24MB warnings 34

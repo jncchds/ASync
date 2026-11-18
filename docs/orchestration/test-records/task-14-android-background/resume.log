@@ -1,0 +1,43 @@
+resumed: device 01a1e36c-3b7b-7f2c-aedf-c34b73d2675c docs 1 photos 2
+
+[1m── background work: WorkManager, battery, conditions[0m
+  [31m✗[0m battery prompt
+      {"page":"DashboardViewModel","message":null,"state":"Connected","device":"Android SDK built for x86_64","enrollError":null,"enrollServer":"http://10.0.2.2:5193","enrollCode":"","useCode":true,"pendingCode":null,"dialog":false,"settings":false,"batteryPrompt":false,"pushText":"The server can wake this phone through io.heckel.ntfy.","folders":[{"id":1,"name":"Phone docs","mode":"TwoWay","path":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs","activity":"Idle","paused":false,"locked":false,"lastOk":null,"lastMessage":null,"lastAt":null,"waiting":null,"unmeteredOnly":false},{"id":2,"name":"Phone photos","mode":"Backup","path":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fphotos","activity":"Idle","paused":false,"locked":false,"lastOk":null,"lastMessage":null,"lastAt":null,"waiting":null,"unmeteredOnly":false}]}
+  [31m✗[0m battery exemption
+      <?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0"><node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="ua.pp.chds.async" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[0,0][1080,2400]"><node index="0" text="" resource-id="" class="android.widget.LinearLayout" package="ua.pp.chds.async" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="fals
+  [32m✓[0m and the prompt is gone
+  [32m✓[0m each folder has its periodic WorkManager job
+  [32m✓[0m JobScheduler holds the job of Phone docs (work 4d0536e6-28d2-4552-af4b-fa4c2cd2b599, job androidx.work.systemjobscheduler 46)
+  [32m✓[0m the app is in the background and its process is gone (am kill)
+  [32m✓[0m the scheduled job runs (Running job [FORCED]): the system starts the app's process for it
+  [32m✓[0m while-asleep.txt synced down with the app closed
+  [31m✗[0m background log
+      --------- beginning of main
+      11-16 09:30:57.395  7649  7677 I ASync   : agent: ASync agent 0.1.5: Android SDK built for x86_64 → http://10.0.2.2:5193
+      11-16 09:30:59.003  7649  7677 I ASync   : agent: Syncing "Phone docs" (TwoWay) at content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs.
+      11-16 09:30:59.003  7649  7677 I ASync   : agent: Syncing "Phone photos" (Backup) at content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fphotos.
+  [32m✓[0m without the app coming to the front
+
+[1m── background work: a Wi-Fi-only folder on mobile data[0m
+  [32m✓[0m Wi-Fi only, set in the web UI, reaches the phone
+  [32m✓[0m Wi-Fi off: the phone is on the emulator's (metered) mobile network
+  [32m✓[0m the folder's job waits for an unmetered network (Unsatisfied constraints: TIMING_DELAY CONNECTIVITY [0x90000000])
+  [32m✓[0m a wake-up on mobile data: the run waits ("Waiting for Wi-Fi")
+  [31m✗[0m the file came down over mobile data
+  [32m✓[0m the app shows why it waits
+  [32m✓[0m Wi-Fi back
+  [32m✓[0m on Wi-Fi the folder's job runs and the file comes down
+
+[1m── background work: UnifiedPush wake-ups (ntfy)[0m
+  [32m✓[0m the ntfy app is installed (the UnifiedPush distributor)
+  [32m✓[0m ntfy's default server is http://172.31.250.10:8093
+  [32m✓[0m ASync finds ntfy as a distributor
+  [32m✓[0m registered with ntfy; the endpoint went to the server
+  [32m✓[0m the Devices page shows UnifiedPush through the ntfy server (its host; the endpoint itself is not shown)
+  [32m✓[0m the app is closed again (process killed)
+  [32m✓[0m the change reached the closed app through a UnifiedPush wake-up
+  [31m✗[0m wake log
+  [32m✓[0m the server recorded the wake-up as delivered
+  [32m✓[0m the local reminder notification: Phone docs: nothing synced for 3 days
+  [32m✓[0m reminders are scheduled (moved on after each successful run)
+failures: 5

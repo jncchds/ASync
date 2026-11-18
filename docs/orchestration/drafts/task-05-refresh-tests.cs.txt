@@ -1,0 +1,89 @@
+
+/// <summary>Browser sessions after a password change: the old cookie of another browser must not sign out this one.</summary>
+public class RefreshTokenReuseTests
+{
+    private sealed class Tokens : IRefreshTokenRepository
+    {
+        public readonly List<RefreshToken> Rows = [];
+        public readonly AppUser User = new() { Id = 1, Username = "alice" };
+        public Task AddAsync(RefreshToken token) { Rows.Add(token); return Task.CompletedTask; }
+        public Task<RefreshToken?> GetByHashAsync(string tokenHash)
+        {
+            var row = Rows.FirstOrDefault(t => t.TokenHash == tokenHash);
+            if (row is not null) row.User = User;
+            return Task.FromResult(row);
+        }
+        public Task RotateAsync(RefreshToken token, RefreshToken replacement)
+        {
+            token.RevokedAt = DateTime.UtcNow;
+            token.ReplacedByHash = replacement.TokenHash;
+            Rows.Add(replacement);
+            return Task.CompletedTask;
+        }
+        public Task RevokeAsync(RefreshToken token) { token.RevokedAt ??= DateTime.UtcNow; return Task.CompletedTask; }
+        public Task RevokeAllForUserAsync(int userId)
+        {
+            foreach (var t in Rows.Where(t => t.RevokedAt == null)) t.RevokedAt = DateTime.UtcNow;
+            return Task.CompletedTask;
+        }
+        public Task<int> DeleteStaleAsync(DateTime olderThan) => Task.FromResult(0);
+    }
+
+    private static (JwtTokenService Service, Tokens Rows) Create()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Jwt:SigningKey"] = new string('k', 48) })
+            .Build();
+        var keys = new JwtKeyService();
+        keys.InitializeAsync(config, null!, NullLogger.Instance).GetAwaiter().GetResult();
+        var rows = new Tokens();
+        return (new JwtTokenService(keys, rows, config, NullLogger<JwtTokenService>.Instance), rows);
+    }
+
+    /// <summary>A browser signing in: the refresh cookie the server sets.</summary>
+    private static async Task<string> SignInAsync(JwtTokenService service, AppUser user)
+    {
+        var http = new DefaultHttpContext();
+        await service.IssueRefreshTokenAsync(user, http);
+        return CookieOf(http);
+    }
+
+    private static string CookieOf(HttpContext http)
+    {
+        var header = http.Response.Headers.SetCookie.ToString();
+        var start = header.IndexOf('=') + 1;
+        return header[start..header.IndexOf(';')];
+    }
+
+    private static async Task<(bool Ok, string? Cookie)> RefreshAsync(JwtTokenService service, string cookie)
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.Cookie = $"{JwtTokenService.RefreshCookieName}={cookie}";
+        var result = await service.RefreshAsync(http);
+        return (result is not null, result is null ? null : CookieOf(http));
+    }
+
+    [Fact]
+    public async Task An_old_cookie_after_a_password_change_does_not_end_the_new_session()
+    {
+        var (service, rows) = Create();
+        var other = await SignInAsync(service, rows.User);
+        await rows.RevokeAllForUserAsync(1);                  // the password change…
+        var mine = await SignInAsync(service, rows.User);     // …and this browser's new session
+
+        Assert.False((await RefreshAsync(service, other)).Ok);
+        Assert.True((await RefreshAsync(service, mine)).Ok);
+    }
+
+    [Fact]
+    public async Task A_rotated_cookie_presented_again_still_signs_out_everywhere()
+    {
+        var (service, rows) = Create();
+        var stolen = await SignInAsync(service, rows.User);
+        var (_, next) = await RefreshAsync(service, stolen);
+        foreach (var t in rows.Rows.Where(t => t.RevokedAt != null)) t.RevokedAt = DateTime.UtcNow.AddMinutes(-5); // past the grace
+
+        Assert.False((await RefreshAsync(service, stolen)).Ok);
+        Assert.False((await RefreshAsync(service, next!)).Ok);
+    }
+}

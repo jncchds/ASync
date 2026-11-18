@@ -1,0 +1,77 @@
+// Seeds a throw-away server for the task 20 web screenshots: a phone (platform Android) that reports its contact accounts and
+// calendars, plus Contacts and Calendars folders with that phone attached and a backup report each.
+//   dotnet run shots-seed.cs -- http://localhost:5195 admin pw
+#:property TargetFramework=net10.0
+#:property ManagePackageVersionsCentrally=false
+#:property PublishAot=false
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json.Nodes;
+
+var server = args[0].TrimEnd('/');
+var http = new HttpClient { BaseAddress = new Uri(server) };
+async Task<JsonNode?> Send(HttpMethod method, string path, object? body = null, string? token = null)
+{
+    using var req = new HttpRequestMessage(method, path);
+    if (body is not null) req.Content = JsonContent.Create(body);
+    if (token is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    using var res = await http.SendAsync(req);
+    var text = await res.Content.ReadAsStringAsync();
+    if (!res.IsSuccessStatusCode) throw new Exception($"{method} {path}: {(int)res.StatusCode} {text}");
+    return string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
+}
+var setup = await Send(HttpMethod.Get, "/api/auth/setup");
+var session = await Send(HttpMethod.Post, setup?["needsSetup"]?.GetValue<bool>() == true ? "/api/auth/register" : "/api/auth/login",
+    new { username = args[1], password = args[2] });
+var user = session!["accessToken"]!.GetValue<string>();
+
+using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+var code = (await Send(HttpMethod.Post, "/api/devices/enrollments", new { reusable = false }, user))!["code"]!.GetValue<string>();
+var enrolled = await Send(HttpMethod.Post, "/api/device-auth/enroll",
+    new { code, name = "Pixel 8", platform = "Android", publicKey = Convert.ToBase64String(key.ExportSubjectPublicKeyInfo()) });
+var deviceId = Guid.Parse(enrolled!["deviceId"]!.GetValue<string>());
+var nonce = (await Send(HttpMethod.Post, "/api/device-auth/challenge", new { deviceId }))!["nonce"]!.GetValue<string>();
+var sig = Convert.ToBase64String(key.SignData(Encoding.UTF8.GetBytes($"async-device-auth:v1:{deviceId:D}:{nonce}"), HashAlgorithmName.SHA256,
+    DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
+var phone = (await Send(HttpMethod.Post, "/api/device-auth/token", new { deviceId, nonce, signature = sig, appVersion = "0.1.6" }))!["accessToken"]!.GetValue<string>();
+
+await Send(HttpMethod.Put, "/api/sync/collections", new
+{
+    kind = "Contacts", access = "Full", items = 412,
+    collections = new object[]
+    {
+        new { id = "com.google:olena.shevchenko@gmail.com", name = "olena.shevchenko@gmail.com", count = 318, account = "Google" },
+        new { id = "local", name = "Phone", count = 57, account = "Phone" },
+        new { id = "com.android.sim:SIM", name = "SIM", count = 12, account = "SIM" },
+        new { id = "com.whatsapp:WhatsApp", name = "WhatsApp", count = 25, account = "WhatsApp", readOnly = true },
+    },
+}, phone);
+await Send(HttpMethod.Put, "/api/sync/collections", new
+{
+    kind = "Calendars", access = "Full", items = 1366,
+    collections = new object[]
+    {
+        new { id = "4", name = "Work", count = 842, account = "olena.shevchenko@gmail.com", color = "#3366cc" },
+        new { id = "5", name = "Family", count = 391, account = "olena.shevchenko@gmail.com", color = "#33aa55" },
+        new { id = "7", name = "Running club", count = 74, account = "olena.shevchenko@gmail.com", color = "#e67c00" },
+        new { id = "6", name = "Holidays in Ukraine", count = 59, account = "olena.shevchenko@gmail.com", color = "#aa3355", readOnly = true },
+    },
+}, phone);
+
+var backend = (await Send(HttpMethod.Get, "/api/storage-backends", token: user))!.AsArray().FirstOrDefault()?["id"]?.GetValue<int>()
+    ?? (await Send(HttpMethod.Post, "/api/storage-backends", new { name = "Home NAS", settings = new { type = "Local", path = "/data/shots" } }, user))!["id"]!.GetValue<int>();
+foreach (var (kind, name, root) in new[] { ("Contacts", "Contacts", "contacts"), ("Calendars", "Calendars", "calendars") })
+{
+    var folder = (await Send(HttpMethod.Post, "/api/folders", new { name, mode = "Backup", encryption = "Transport", kind, storageBackendId = backend, rootPath = root, intervalMinutes = 60 }, user))!["id"]!.GetValue<int>();
+    object selection = kind == "Contacts"
+        ? new { all = false, collections = new[] { new { id = "com.google:olena.shevchenko@gmail.com", name = "olena.shevchenko@gmail.com" }, new { id = "local", name = "Phone" } } }
+        : new { all = false, collections = new[] { new { id = "4", name = "Work" }, new { id = "5", name = "Family" } }, pastDays = 730 };
+    await Send(HttpMethod.Put, $"/api/folders/{folder}/devices", new { deviceId, localPath = "", collections = selection }, user);
+    await Send(HttpMethod.Post, $"/api/sync/folders/{folder}/report", kind == "Contacts"
+        ? new { ok = true, message = "Snapshot 1a2b3c4d: 375 contacts in 2 accounts (4.1 MB), 375 new", uploaded = 375, collections = new { items = 375, collections = 2, bytes = 4_300_000 } }
+        : (object)new { ok = true, message = "Snapshot 5e6f7a8b: 911 events in 2 calendars (1.2 MB), 911 new", uploaded = 911, collections = new { items = 911, collections = 2, bytes = 1_250_000 } }, phone);
+    Console.WriteLine($"{kind} folder {folder}");
+}
+Console.WriteLine($"device {deviceId}");

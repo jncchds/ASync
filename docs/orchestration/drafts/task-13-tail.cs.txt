@@ -1,0 +1,77 @@
+    private void MoveToLocalTrash(string path)
+    {
+        var source = StoragePath.Normalize(path);
+        if (_tree.Stat(source) is not { IsFile: true }) return;
+        var stamp = DateTime.UtcNow.ToString(TrashStamp, CultureInfo.InvariantCulture);
+        _tree.Move(source, $"{LocalMeta}/trash/{stamp}/{source}", overwrite: true);
+    }
+
+    private const string TrashStamp = "yyyyMMdd'T'HHmmss'Z'";
+
+    /// <summary>When a local trash directory was made: its name (the time of the deletion), else its modification time.</summary>
+    private static DateTimeOffset TrashedAt(LocalEntry dir) =>
+        DateTimeOffset.TryParseExact(dir.Name, TrashStamp, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var at)
+            ? at
+            : DateTimeOffset.FromUnixTimeMilliseconds(dir.Modified);
+
+    /// <summary>Once a day: the storage's versions and trash, and the local trash, past their retention.</summary>
+    private async Task CleanUpIfDueAsync(CancellationToken ct)
+    {
+        if (_state.LastCleanUp is { } last && DateTimeOffset.UtcNow - last < TimeSpan.FromDays(1)) return;
+        await _remote.CleanUpAsync(TimeSpan.FromDays(_options.VersionsKeepDays), TimeSpan.FromDays(_options.TrashKeepDays), ct: ct);
+        const string localTrash = $"{LocalMeta}/trash";
+        if (_tree.Stat(localTrash) is { IsDirectory: true })
+            foreach (var dir in _tree.List(localTrash))
+                if (dir.IsDirectory && TrashedAt(dir) < DateTimeOffset.UtcNow.AddDays(-_options.TrashKeepDays))
+                    _tree.DeleteDirectory($"{localTrash}/{dir.Name}");
+        // Partial downloads nobody continued (the file changed or went away on the storage meanwhile).
+        const string localTemp = $"{LocalMeta}/tmp";
+        if (_tree.Stat(localTemp) is { IsDirectory: true })
+            foreach (var file in _tree.List(localTemp))
+                if (file.IsFile && file.Modified < DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds())
+                    _tree.DeleteFile($"{localTemp}/{file.Name}");
+        _state.LastCleanUp = DateTimeOffset.UtcNow;
+    }
+
+    private Dictionary<string, LocalFile> ScanLocal()
+    {
+        var files = new Dictionary<string, LocalFile>(StringComparer.Ordinal);
+        // A directory we cannot read must not look empty: the plan would delete its files on the storage (TwoWay) or
+        // download them again over it. Such a run fails instead, with nothing changed.
+        var pending = new Stack<string>([""]);
+        while (pending.TryPop(out var dir))
+        {
+            IReadOnlyList<LocalEntry> entries;
+            try
+            {
+                entries = _tree.List(dir);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                var where = dir.Length == 0 ? _tree.Location : _tree is FileSystemTree fs ? fs.Full(dir) : $"{dir} in {_tree.Location}";
+                throw new SyncRefusedException($"Cannot read {where} (permission denied). Nothing was changed: fix its permissions, or exclude it.");
+            }
+            foreach (var entry in entries)
+            {
+                var relative = dir.Length == 0 ? entry.Name : $"{dir}/{entry.Name}";
+                if (relative == LocalMeta || entry.Name.EndsWith(".async-tmp", StringComparison.Ordinal) || _excludes.Matches(relative)) continue;
+                switch (entry.Kind)
+                {
+                    case LocalEntryKind.Directory: pending.Push(relative); break;
+                    case LocalEntryKind.File: files[relative] = new LocalFile(entry.Size, entry.Modified); break;
+                    // symlinks are not synced
+                }
+            }
+        }
+        return files;
+    }
+
+    private LocalFile? Stat(string path) =>
+        _tree.Stat(StoragePath.Normalize(path)) is { IsFile: true } e ? new LocalFile(e.Size, e.Modified) : null;
+
+    private long? SizeOf(string path) => _tree.Stat(path) is { IsFile: true } e ? e.Size : null;
+
+    private Stream OpenLocal(string path) => _tree.OpenRead(StoragePath.Normalize(path));
+
+    private void SaveState()

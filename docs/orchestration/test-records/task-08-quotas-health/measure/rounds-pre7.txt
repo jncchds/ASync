@@ -1,0 +1,8 @@
+before round 1: 17.6 s  (1 up, 0 down, 0 deleted)
+after round 1: 85.6 s  (1 up, 0 down, 0 deleted)
+after round 2: 16.7 s  (1 up, 0 down, 0 deleted)
+before round 2: 57.4 s  (1 up, 0 down, 0 deleted)
+before round 3: 22.8 s  (1 up, 0 down, 0 deleted)
+after round 3: 16.6 s  (1 up, 0 down, 0 deleted)
+after round 4: 19.7 s  (1 up, 0 down, 0 deleted)
+before round 4: 49.6 s  (1 up, 0 down, 0 deleted)

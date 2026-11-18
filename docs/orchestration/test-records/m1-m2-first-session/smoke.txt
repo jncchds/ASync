@@ -1,0 +1,26 @@
+PASS  GET /api/auth/setup → OK
+PASS  register as admin → OK
+PASS  wrong password → Unauthorized
+PASS  create enrollment code → OK
+PASS  pair URI has the async:// scheme
+PASS  enroll with code (typed lowercase) → OK
+PASS  one-time code used twice → BadRequest
+PASS  device signs in by signing a challenge
+PASS  device reads /self → OK
+PASS  device token cannot manage devices → Forbidden
+PASS  a different key cannot sign in as the device
+PASS  start device-code flow → OK
+      user code 2JYJ-WT37, verification link http://localhost:5100/devices/approve?code=2JYJ-WT37
+PASS  poll before approval → Pending
+PASS  approval page sees the request → OK
+PASS  user approves → OK
+PASS  poll after approval → Approved
+PASS  approved CLI device signs in
+PASS  user revokes the phone → NoContent
+PASS  revoked device's existing token stops working → Unauthorized
+PASS  revoked device cannot sign in again
+PASS  other devices keep working → OK
+PASS  GET /health → OK
+PASS  SPA served for client-side routes
+
+All checks passed.

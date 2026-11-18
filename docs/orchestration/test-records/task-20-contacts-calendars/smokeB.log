@@ -1,0 +1,156 @@
+
+[1m── build and start[0m
+  [32m✓[0m APK ASync-0.1.6-android.apk (30M)
+  [32m✓[0m async-cli published
+  [32m✓[0m server on http://localhost:5193 (the phone uses http://10.0.2.2:5193), account admin, storage 1
+  [32m✓[0m device: Android SDK built for x86_64, Android 15
+  [32m✓[0m installed; the app starts on the enroll page
+
+[1m── enroll[0m
+  [32m✓[0m device-code flow: the code 96G4-95XT is shown
+  [32m✓[0m the phone's browser did not open: the code is approved on a computer
+  [32m✓[0m it says where: On your computer, open http://10.0.2.2:5193/devices/approve?code=96G4-95XT (or Devices → Approve in the web UI), sign in and enter this code.
+  [32m✓[0m Cancel gives the request up
+  [32m✓[0m an opened async://pair link brings the app up with the server and code filled in
+  [32m✓[0m the QR scanner opens (camera preview, ZXing)
+  [32m✓[0m Back closes the scanner
+  [32m✓[0m enrolled by code (Enrolled "Android SDK built for x86_64". Attach folders to it in the web UI.)
+  [32m✓[0m the server lists the device as Android (01a1e984-e9d7-77d6-860d-e5246ce30451)
+  [32m✓[0m signed in: the server accepted the Keystore key's signature
+  [32m✓[0m device key: EC P-256 in the Android Keystore, not exportable (Software)
+  [32m✓[0m identity.json sealed with the Keystore AES key (only a key reference inside, no user name readable)
+
+[1m── a TwoWay folder on a SAF tree[0m
+  [32m✓[0m the folder attached in the web UI appears
+  [32m✓[0m the system picker opened at ASyncSmoke/docs: Use this folder
+  [32m✓[0m Allow ASync to access files in docs
+  [32m✓[0m the agent syncs the tree content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs
+  [32m✓[0m the server has the content URI as the local path
+  [32m✓[0m local tree contract on the SAF tree: 14/14 passed (SafTree)
+  [32m✓[0m async-cli put from-cli.txt on the server
+  [32m✓[0m Sync now: 0 up, 0 down, 0 deleted
+  [32m✓[0m down: from-cli.txt is on the phone
+  [32m✓[0m up: hello-phone.txt is on the server
+  [32m✓[0m and on the other device
+  [32m✓[0m the folder shows Syncing with live progress while it runs
+  [32m✓[0m the foreground-service notification (channel async-transfers) shows during the transfer
+  [32m✓[0m WorkManager's foreground service (type dataSync) holds the transfer
+  [32m✓[0m run finished: 1 up, 0 down, 0 deleted
+  [32m✓[0m the edit reached the phone
+  [32m✓[0m the 200 MB file went up in parts
+  [32m✓[0m the delete on the phone reached the server
+  [32m✓[0m video.bin arrived on the computer byte for byte
+  [32m✓[0m a second run changes nothing (SAF times are not set, nothing looks changed)
+
+[1m── pause, resume, back[0m
+  [32m✓[0m Pause
+  [32m✓[0m the server shows it paused
+  [32m✓[0m Resume
+  [32m✓[0m the Back button closes the settings
+  [32m✓[0m and the app stays open
+
+[1m── a Backup folder on a SAF tree, restored by async-cli[0m
+  [32m✓[0m picked ASyncSmoke/photos
+  [32m✓[0m backed up: Snapshot 83b55dd5: 0 new, 0 changed, 2 unchanged, 0 B added
+  [32m✓[0m async-cli lists the phone's snapshot
+  [32m✓[0m async-cli restored it
+  [32m✓[0m the restored files match the phone's byte for byte
+
+[1m── an end-to-end Backup folder set up on the phone[0m
+  [32m✓[0m the new end-to-end folder shows "Not set up" on the phone
+  [32m✓[0m set up in the app; the recovery key is shown once
+  [32m✓[0m the server knows the repository is ready
+  [32m✓[0m and the folder is unlocked on the phone
+  [32m✓[0m backed up end-to-end encrypted: Snapshot 7fc1c9e4: 0 new, 0 changed, 2 unchanged, 0 B added
+  [32m✓[0m async-cli unlocks it with the passphrase chosen on the phone
+  [32m✓[0m and restores the phone's files byte for byte
+
+[1m── documents provider: ASync in the Files app[0m
+  [32m✓[0m another caller without MANAGE_DOCUMENTS (the adb shell) is refused
+  [32m✓[0m one root: ASync — 10.0.2.2 (admin)
+  [32m✓[0m its folders: Phone docs, Phone photos
+  [32m✓[0m Phone docs lists from-cli.txt, video.bin (not .async)
+  [32m✓[0m a file uploaded by async-cli, read by another process with a grant for it, byte for byte (from the cache)
+  [32m✓[0m a document without a grant stays refused to it
+  [32m✓[0m the 200 MB file streams through a proxy descriptor (/mnt/appfuse/10148_0/2), byte for byte, not cached
+  [32m✓[0m the transfer notification kept the network for it
+  [32m✓[0m created f/1/provider-note.txt
+  [32m✓[0m the write is on the server at once
+  [32m✓[0m async-cli syncs it down byte for byte
+  [32m✓[0m the phone's own synced copy (the SAF folder) got it through the run the write triggered
+  [32m✓[0m replacing it keeps the old content as a version
+  [32m✓[0m and the phone's copy follows again
+  [32m✓[0m no conflict copies from the provider's own writes
+  [32m✓[0m renamed to f/1/provider-renamed.txt
+  [32m✓[0m a new directory (f/1/Scans) is listed (kept on the phone until a file goes in)
+  [32m✓[0m copied into it: f/1/Scans/provider-renamed.txt
+  [32m✓[0m deleted into the folder's trash (restorable in the web UI)
+  [32m✓[0m search finds provider-renamed.txt
+  [32m✓[0m recent documents list it
+  [32m✓[0m a thumbnail of an image: 67x150
+  [32m✓[0m the Backup folder shows its snapshots: 2026-11-17 13:43 · bc83b6c5, 2026-11-17 13:43 · 83b55dd5, 2026-11-17 13:43 · e80ed3de
+  [32m✓[0m a snapshot's tree, read-only: 2026, cat.jpg
+  [32m✓[0m a file from the snapshot opens byte for byte (cached)
+  [32m✓[0m and streamed (proxy descriptor, chunks located through the index) byte for byte
+  [32m✓[0m writing into a snapshot is refused (error: FileNotFoundException: This document is read-only.)
+
+[1m── All files access: folders anywhere on the phone[0m
+  [32m✓[0m a test volume: the virtual SD card at /storage/AA55-151B
+  [32m✓[0m the device list says the phone needs All files access to be browsed
+  [32m✓[0m browsing it from the API: 409 ""Android SDK built for x86_64" has no All files access: choose the folder in the app, or t…"
+  [32m✓[0m without All files access, Choose folder… explains why first
+  [32m✓[0m Allow all files access opens the system's page for ASync
+  [32m✓[0m the person turns it on there (Uid mode: MANAGE_EXTERNAL_STORAGE: allow)
+  [32m✓[0m back in the app with the permission: the in-app picker replaces the explanation
+  [32m✓[0m it opens at the root of the internal storage, Download offered (["Alarms","Android","ASyncSmoke","Audiobooks","DCIM","Documents","Download","Movies","Music","Notifications","Pictures","Podcasts","Recordings","Ringtones"])
+  [32m✓[0m Android/data and Android/obb are not offered (["media"])
+  [32m✓[0m with the access the device list says the phone can be browsed
+  [32m✓[0m browsing it from the API lists the storage's root (["Alarms","Android","ASyncSmoke","Audiobooks","DCIM","Documents"])
+  [32m✓[0m and Android/ without data and obb (["media"])
+  [32m✓[0m Android/data itself is refused (422: out of reach)
+  [32m✓[0m the volumes: Internal storage (/storage/emulated/0), Virtual SD card (/storage/AA55-151B)
+  [32m✓[0m the SD card's root can be chosen: Virtual SD card
+  [32m✓[0m Phone root syncs at /storage/AA55-151B ("Phone root" now syncs at /storage/AA55-151B.)
+  [32m✓[0m the server has the real path as the local path (the web UI shows /storage/AA55-151B)
+  [32m✓[0m local tree contract on the real path: 14/14 passed (GuardedTree)
+  [32m✓[0m the phone syncs the volume's root: 0 up, 0 down, 0 deleted
+  [32m✓[0m up: root-from-phone.txt is on the server
+  [32m✓[0m nothing of Android/data or Android/obb went up
+  [32m✓[0m and on the other device
+  [32m✓[0m down: root-from-cli.txt arrived at /storage/AA55-151B (0 up, 0 down, 0 deleted)
+  [32m✓[0m a second run changes nothing
+  [32m✓[0m Phone docs (a document tree) is offered its real path /storage/emulated/0/ASyncSmoke/docs
+  [32m✓[0m switched: "Phone docs" now syncs at /storage/emulated/0/ASyncSmoke/docs.
+  [32m✓[0m its sync state was kept: 0 up, 0 down, 0 deleted (no upload again, no conflicts)
+  [32m✓[0m the server's files are as before
+  [32m✓[0m no conflict copies on the phone
+  [32m✓[0m Settings shows All files access as allowed
+  [32m✓[0m turned off: Android stops the app's process
+  [32m✓[0m turned off: the folder stops with "All files access was turned off for ASync, so this folder cannot be re…"
+  [32m✓[0m nothing was deleted on the server
+  [32m✓[0m nor on the phone
+  [32m✓[0m a background run (a wake-up) stops the same way
+  [32m✓[0m the app does not crash
+  [31m✗[0m after re-grant
+      {"ok":false,"message":"Network is unreachable (10.0.2.2:5193)","skipped":false}
+
+[1m── adding folders from the app (task 18)[0m
+  [32m✓[0m the phone (enrolled with a one-time code) may add folders
+  [31m✗[0m add-folder options
+      {"open":true,"joining":false,"loaded":false,"refusal":null,"error":"Cannot reach the server, so nothing was changed: Network is unreachable (10.0.2.2:5193)","storages":[],"folders":[],"name":"","root":"","mode":"TwoWay","storage":null,"folder":null,"local":"","localDisplay":"Not chosen yet","canSubmit":false,"recoveryKey":null,"message":"Phone root: Network is unreachable (10.0.2.2:5193)"}
+  [32m✓[0m the directory on the storage follows the name (phone-new)
+  [32m✓[0m Choose folder… opens the All files access picker
+  [31m✗[0m local chosen
+      {"open":true,"joining":false,"loaded":false,"refusal":null,"error":"Cannot reach the server, so nothing was changed: Network is unreachable (10.0.2.2:5193)","storages":[],"folders":[],"name":"Phone new","root":"phone-new","mode":"TwoWay","storage":null,"folder":null,"local":"/storage/emulated/0/ASyncNew","localDisplay":"/storage/emulated/0/ASyncNew","canSubmit":false,"recoveryKey":null,"message":"Phone root: Network is unreachable (10.0.2.2:5193)"}
+jq: parse error: Invalid numeric literal at line 1, column 6
+  [31m✗[0m create
+      error: cannot submit {"open":true,"joining":false,"loaded":false,"refusal":null,"error":"Cannot reach the server, so nothing was changed: Network is unreachable (10.0.2.2:5193)","storages":[],"folders":[],"name":"Phone new","root":"phone-new","mode":"TwoWay","storage":null,"folder":null,"local":"/storage/emulated/0/ASyncNew","localDisplay":"/storage/emulated/0/ASyncNew","canSubmit":false,"recoveryKey":null,"message":"Phone root: Network is unreachable (10.0.2.2:5193)"}
+  [31m✗[0m new folder appears
+      {"page":"DashboardViewModel","message":"Phone root: Network is unreachable (10.0.2.2:5193)","state":"Connected","device":"Android SDK built for x86_64","enrollError":null,"enrollServer":"http://10.0.2.2:5193","enrollCode":"","useCode":true,"pendingCode":null,"approveHint":null,"dialog":false,"folderDialog":null,"allFiles":true,"settings":false,"addFolder":"new","batteryPrompt":true,"pushText":"No UnifiedPush distributor is installed. Install ntfy (F-Droid or GitHub) to let the server wake this phone.","folders":[{"id":1,"name":"Phone docs","mode":"TwoWay","path":"/storage/emulated/0/ASyncSmoke/docs","activity":"Idle","paused":false,"locked":false,"lastOk":true,"lastMessage":"0 up, 0 down, 0 deleted","lastAt":1794920040840,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":null},{"id":2,"name":"Phone photos","mode":"Backup","path":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fphotos","activity":"Idle","paused":false,"locked":false,"lastOk":true,"lastMessage":"Snapshot 32631463: 0 new, 0 changed, 2 unchanged, 0 B added","lastAt":1794920031116,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":"/storage/emulated/0/ASyncSmoke/photos"}]}
+jq: error (at <stdin>:0): Cannot index array with string "addedFromDevice"
+  [31m✗[0m server folder
+      [{"id":1,"name":"Phone docs","mode":"TwoWay","encryption":"Transport","kind":"Files","storageBackendId":1,"storageBackendName":"smoke","rootPath":"docs","intervalMinutes":60,"excludes":[],"retention":{"last":0,"hourly":0,"daily":7,"weekly":4,"monthly":12,"yearly":0,"withinHours":24},"versionsKeepDays":30,"trashKeepDays":30,"revision":7,"repositoryReady":true,"devices":[{"deviceId":"01a1e984-e9d7-77d6-860d-e5246ce30451","deviceName":"Android SDK built for x86_64","platform":"Android","localPath":"/storage/emulated/0/ASyncSmoke/docs","direction":null,"paused":false,"lastSyncAt":"2026-11-17T12:54:01.238771Z","lastSyncOk":true,"lastSyncMessage":"0 up, 0 down, 0 deleted","conditions":{"unmeteredOnly":false,"chargingOnly":false,"batteryNotLow":false},"media":null,"mediaCounts":null,"collections":null,"collectionCounts":null},{"deviceId":"01a1e985-fc9e-7c8c-9b5b-7d8062d0a51f","deviceName":"android-smoke-cli","platform":"Cli","localPath":"/mnt/git/ASync/.claude/worktrees/task-20-android-contacts-calendars/artifacts/android-smoke/cli-docs","direction":null,"paused":false,"lastSyncAt":"2026-11-17T12:46:27.991305Z","lastSyncOk":true,"lastSyncMessage":"0 up, 1 down, 0 deleted","conditions":{"unmeteredOnly":false,"chargingOnly":false,"batteryNotLow":false},"media":null,"mediaCounts":null,"collections":null,"collectionCounts":null}],"createdAt":"2026-11-17T12:39:27.54589Z","pruneIntervalDays":7,"checkIntervalDays":30,"checkReadDataPercent":10,"lastPrune":null,"lastCheck":null,"recoveryKeyCreatedAt":null,"recoveryKey":null,"usage":{"folderId":1,"bytes":0,"files":0,"historyBytes":null,"dataBytes":null,"snapshots":null,"pendingBytes":420081604,"scannedAt":null,"scanError":null},"addedFromDevice":null},{"id":2,"name":"Phone photos","mode":"Backup","encryption":"Transport","kind":"Files","storageBackendId":1,"storageBackendName":"smoke","rootPath":"photos","intervalMinutes":60,"excludes":[],"retention":{"last":5,"hourly":0,"daily":7,"weekly":4,"monthly":12,"yearly":0,"withinHours":24},"versionsKeepDays":30,"trashKeepDays":30,"revision":4,"repositoryReady":true,"devices":[{"deviceId":"01a1e984-e9d7-77d6-860d-e5246ce30451","deviceName":"Android SDK built for x86_64","platform":"Android","localPath":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fphotos","direction":null,"paused":false,"lastSyncAt":"2026-11-17T12:53:51.565944Z","lastSyncOk":true,"lastSyncMessage":"Snapshot 32631463: 0 new, 0 changed, 2 unchanged, 0 B added","conditions":{"unmeteredOnly":false,"chargingOnly":false,"batteryNotLow":false},"media":null,"mediaCounts":null,"collections":null,"collectionCounts":null},{"deviceId":"01a1e985-fc9e-7c8c-9b5b-7d8062d0a51f","deviceName":"android-smoke-cli","platform":"Cli","localPath":"/mnt/git/ASync/.claude/worktrees/task-20-android-contacts-calendars/artifacts/android-smoke/cli-photos-unused","direction":null,"paused":false,"lastSyncAt":null,"lastSyncOk":null,"lastSyncMessage":null,"conditions":{"unmeteredOnly":false,"chargingOnly":false,"batteryNotLow":false},"media":null,"mediaCounts":null,"collections":null,"collectionCounts":null}],"createdAt":"2026-11-17T12:43:08.870781Z","pruneIntervalDays":7,"checkIntervalDays":30,"checkReadDataPercent":10,"lastPrune":{"at":"2026-11-17T12:51:37.210952Z","ok":true,"message":"Nothing to remove","by":"server"},"lastCheck":{"at":"2026-11-17T12:51:37.336375Z","ok":true,"message":"6 snapshots, 3 packs, 1 read back","by":"server"},"recoveryKeyCreatedAt":"2026-11-17T12:43:08.949933Z","recoveryKey":null,"usage":{"folderId":2,"bytes":0,"files":0,"historyBytes":null,"dataBytes":null,"snapshots":null,"pendingBytes":3080333,"scannedAt":null,"scanError":null},"addedFromDevice":null},{"id":4,"name":"Phone root","mode":"TwoWay","encryption":"Transport","kind":"Files","storageBackendId":1,"storageBackendName":"smoke","rootPath":"root","intervalMinutes":60,"excludes":[],"retention":{"last":0,"hourly":0,"daily":7,"weekly":4,"monthly":12,"yearly":0,"withinHours":24},"versionsKeepDays":30,"trashKeepDays":30,"revision":5,"repositoryReady":true,"devices":[{"deviceId":"01a1e985-fc9e-7c8c-9b5b-7d8062d0a51f","deviceName":"android-smoke-cli","platform":"Cli","localPath":"/mnt/git/ASync/.claude/worktrees/task-20-android-contacts-calendars/artifacts/android-smoke/cli-root","direction":null,"paused":false,"lastSyncAt":"2026-11-17T12:52:19.689856Z","lastSyncOk":true,"lastSyncMessage":"1 up, 0 down, 0 deleted","conditions":{"unmeteredOnly":false,"chargingOnly":false,"batteryNotLow":false},"media":null,"mediaCounts":null,"collections":null,"collectionCounts":null}],"createdAt":"2026-11-17T12:50:40.705635Z","pruneIntervalDays":7,"checkIntervalDays":30,"checkReadDataPercent":10,"lastPrune":null,"lastCheck":null,"recoveryKeyCreatedAt":null,"recoveryKey":null,"usage":{"folderId":4,"bytes":0,"files":0,"historyBytes":null,"dataBytes":null,"snapshots":null,"pendingBytes":290,"scannedAt":null,"scanError":null},"addedFromDevice":null},{"id":3,"name":"Phone secrets","mode":"Backup","encryption":"EndToEnd","kind":"Files","storageBackendId":1,"storageBackendName":"smoke","rootPath":"secrets","intervalMinutes":60,"excludes":[],"retention":{"last":0,"hourly":0,"daily":7,"weekly":4,"monthly":12,"yearly":0,"withinHours":24},"versionsKeepDays":30,"trashKeepDays":30,"revision":5,"repositoryReady":true,"devices":[{"deviceId":"01a1e985-fc9e-7c8c-9b5b-7d8062d0a51f","deviceName":"android-smoke-cli","platform":"Cli","localPath":"/mnt/git/ASync/.claude/worktrees/task-20-android-contacts-calendars/artifacts/android-smoke/cli-secrets-unused","direction":null,"paused":false,"lastSyncAt":null,"lastSyncOk":null,"lastSyncMessage":null,"conditions":{"unmeteredOnly":false,"chargingOnly":false,"batteryNotLow":false},"media":null,"mediaCounts":null,"collections":null,"collectionCounts":null}],"createdAt":"2026-11-17T12:43:50.020282Z","pruneIntervalDays":7,"checkIntervalDays":30,"checkReadDataPercent":10,"lastPrune":{"at":"2026-11-17T12:45:02.358387Z","ok":true,"message":"Nothing to remove","by":"Android SDK built for x86_64"},"lastCheck":{"at":"2026-11-17T12:45:02.974989Z","ok":true,"message":"1 snapshot, 2 packs, 1 read back","by":"Android SDK built for x86_64"},"recoveryKeyCreatedAt":null,"recoveryKey":null,"usage":{"folderId":3,"bytes":0,"files":0,"historyBytes":null,"dataBytes":null,"snapshots":null,"pendingBytes":3077785,"scannedAt":null,"scanError":null},"addedFromDevice":null}]
+jq: parse error: Invalid numeric literal at line 1, column 10
+  [31m✗[0m new folder upload
+      error: FormatException: Format_InvalidStringWithValue, error: InvalidOperationException: No folder  on the dashboard.
+curl: (22) The requested URL returned error: 405

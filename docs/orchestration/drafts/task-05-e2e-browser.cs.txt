@@ -1,0 +1,24 @@
+/// <summary>A browser of its own: its own cookie jar, so its refresh cookie (its sign-in session) is separate.</summary>
+sealed class Browser(string server)
+{
+    private readonly HttpClient _http = new(new HttpClientHandler { CookieContainer = new CookieContainer(), UseCookies = true }) { BaseAddress = new Uri(server) };
+
+    /// <summary>The access token, or null when the sign-in is refused.</summary>
+    public async Task<string?> SignInAsync(string username, string password)
+    {
+        var r = await SendAsync(HttpMethod.Post, "/api/auth/login", new { username, password });
+        return r.Status == HttpStatusCode.OK ? r.Body?["accessToken"]?.GetValue<string>() : null;
+    }
+
+    public async Task<(HttpStatusCode Status, JsonNode? Body, string Raw)> SendAsync(HttpMethod method, string path, object? body = null, string? token = null)
+    {
+        using var req = new HttpRequestMessage(method, path);
+        if (body is not null) req.Content = JsonContent.Create(body);
+        if (token is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var res = await _http.SendAsync(req);
+        var text = await res.Content.ReadAsStringAsync();
+        var isJson = res.Content.Headers.ContentType?.MediaType?.Contains("json") == true;
+        return (res.StatusCode, isJson && !string.IsNullOrWhiteSpace(text) ? JsonNode.Parse(text) : null, $"{(int)res.StatusCode} {text}");
+    }
+}
+

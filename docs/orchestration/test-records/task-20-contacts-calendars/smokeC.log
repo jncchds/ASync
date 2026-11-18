@@ -1,0 +1,63 @@
+
+[1m── build and start[0m
+  [32m✓[0m APK ASync-0.1.6-android.apk (30M)
+  [32m✓[0m async-cli published
+  [32m✓[0m server on http://localhost:5193 (the phone uses http://10.0.2.2:5193), account admin, storage 1
+  [32m✓[0m device: Android SDK built for x86_64, Android 15
+  [32m✓[0m installed; the app starts on the enroll page
+
+[1m── enroll[0m
+  [32m✓[0m device-code flow: the code FGSP-B625 is shown
+  [32m✓[0m the phone's browser did not open: the code is approved on a computer
+  [32m✓[0m it says where: On your computer, open http://10.0.2.2:5193/devices/approve?code=FGSP-B625 (or Devices → Approve in the web UI), sign in and enter this code.
+  [32m✓[0m Cancel gives the request up
+  [32m✓[0m an opened async://pair link brings the app up with the server and code filled in
+  [32m✓[0m the QR scanner opens (camera preview, ZXing)
+  [32m✓[0m Back closes the scanner
+  [32m✓[0m enrolled by code (Enrolled "Android SDK built for x86_64". Attach folders to it in the web UI.)
+  [32m✓[0m the server lists the device as Android (01a1ea15-9f48-70bc-b76e-58deb8011ecf)
+  [32m✓[0m signed in: the server accepted the Keystore key's signature
+  [32m✓[0m device key: EC P-256 in the Android Keystore, not exportable (Software)
+  [32m✓[0m identity.json sealed with the Keystore AES key (only a key reference inside, no user name readable)
+
+[1m── a TwoWay folder on a SAF tree[0m
+  [32m✓[0m the folder attached in the web UI appears
+  [32m✓[0m the system picker opened at ASyncSmoke/docs: Use this folder
+  [32m✓[0m Allow ASync to access files in docs
+  [32m✓[0m the agent syncs the tree content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs
+  [32m✓[0m the server has the content URI as the local path
+  [32m✓[0m local tree contract on the SAF tree: 14/14 passed (SafTree)
+  [32m✓[0m async-cli put from-cli.txt on the server
+  [32m✓[0m Sync now: 0 up, 0 down, 0 deleted
+  [32m✓[0m down: from-cli.txt is on the phone
+  [32m✓[0m up: hello-phone.txt is on the server
+  [32m✓[0m and on the other device
+  [32m✓[0m the folder shows Syncing with live progress while it runs
+  [32m✓[0m the foreground-service notification (channel async-transfers) shows during the transfer
+  [32m✓[0m WorkManager's foreground service (type dataSync) holds the transfer
+  [32m✓[0m run finished: 1 up, 0 down, 0 deleted
+  [32m✓[0m the edit reached the phone
+  [32m✓[0m the 200 MB file went up in parts
+  [32m✓[0m the delete on the phone reached the server
+  [32m✓[0m video.bin arrived on the computer byte for byte
+  [32m✓[0m a second run changes nothing (SAF times are not set, nothing looks changed)
+
+[1m── pause, resume, back[0m
+  [32m✓[0m Pause
+  [32m✓[0m the server shows it paused
+  [32m✓[0m Resume
+  [32m✓[0m the Back button closes the settings
+  [32m✓[0m and the app stays open
+
+[1m── a Backup folder on a SAF tree, restored by async-cli[0m
+  [32m✓[0m picked ASyncSmoke/photos
+  [31m✗[0m photos path
+      {"page":"DashboardViewModel","message":"No route to host (10.0.2.2:5193)","state":"Connected","device":"Android SDK built for x86_64","enrollError":null,"enrollServer":"http://10.0.2.2:5193","enrollCode":"","useCode":true,"pendingCode":null,"approveHint":null,"dialog":false,"folderDialog":null,"allFiles":false,"settings":false,"addFolder":null,"batteryPrompt":true,"pushText":"No UnifiedPush distributor is installed. Install ntfy (F-Droid or GitHub) to let the server wake this phone.","folders":[{"id":1,"name":"Phone docs","mode":"TwoWay","path":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs","activity":"Idle","paused":false,"locked":false,"lastOk":true,"lastMessage":"0 up, 0 down, 0 deleted","lastAt":1794929114370,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":null},{"id":2,"name":"Phone photos","mode":"Backup","path":"choose on the phone","activity":"Idle","paused":false,"locked":false,"lastOk":false,"lastMessage":"net_http_client_execution_error","lastAt":1794929111691,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":null}]}
+  [31m✗[0m backup
+      {"ok":false,"message":"The folder choose on the phone does not exist (is the disk mounted?).","skipped":false}
+  [31m✗[0m cli snapshots
+error: There are no snapshots yet.
+  [31m✗[0m cli restore
+cat: /mnt/git/ASync/.claude/worktrees/task-20-android-contacts-calendars/artifacts/android-smoke/restored/cat.jpg: No such file or directory
+  [31m✗[0m restore content
+      ls: cannot access '/mnt/git/ASync/.claude/worktrees/task-20-android-contacts-calendars/artifacts/android-smoke/restored': No such file or directory

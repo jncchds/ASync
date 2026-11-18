@@ -1,0 +1,112 @@
+        private async Task LoopAsync()
+        {
+            var ct = _cts.Token;
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    // Wait for a trigger or the interval (or the next look at the run conditions), whichever comes first.
+                    var interval = TimeSpan.FromMinutes(Folder.IntervalMinutes);
+                    var wait = _nextWait ?? (_agent.RunOnInterval ? interval : Timeout.InfiniteTimeSpan);
+                    _nextWait = null;
+                    _nextRunAt = Folder.Paused ? null
+                        : wait != Timeout.InfiniteTimeSpan ? DateTimeOffset.UtcNow + wait
+                        : (_lastRunAt ?? DateTimeOffset.UtcNow) + interval; // roughly: the system's scheduler decides
+                    await _signal.WaitAsync(wait, ct);
+                    var (requests, allowMassDeletion, manual) = TakeRequests();
+
+                    // Automatic runs wait for the folder's run conditions; a person's request does not.
+                    if (!manual && !Folder.Paused && _agent.Conditions is { } probe
+                        && RunConditions.Blocked(Folder.Conditions, probe.Read()) is { } why)
+                    {
+                        var deferred = new FolderRunResult(Folder.FolderId, Folder.Name, true, why, Skipped: true, Deferred: true);
+                        if (_waiting != why)
+                        {
+                            _waiting = why;
+                            _logger.LogInformation("\"{Name}\": {Why}.", Folder.Name, why);
+                            _agent.RaiseFolder(Folder.FolderId);
+                        }
+                        foreach (var r in requests) r.TrySetResult(deferred);
+                        if (_agent.RunOnInterval) _nextWait = _agent.ConditionsRecheck < interval ? _agent.ConditionsRecheck : interval;
+                        continue;
+                    }
+                    if (_waiting is not null)
+                    {
+                        _waiting = null;
+                        _agent.RaiseFolder(Folder.FolderId);
+                    }
+
+                    FolderRunResult result;
+                    var progress = new RunProgress();
+                    _progress = progress;
+                    _nextRunAt = null;
+                    _activity = Folder.Paused ? WorkerActivity.Idle : Folder.Mode == SyncMode.Backup ? WorkerActivity.BackingUp : WorkerActivity.Syncing;
+                    _agent.RaiseFolder(Folder.FolderId);
+                    using var run = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    _run = run;
+                    try
+                    {
+                        result = await _agent.RunFolderAsync(Folder, run.Token, progress, allowMassDeletion ? true : null);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested && run.IsCancellationRequested)
+                    {
+                        // Stopped by CancelRun (the person, or the system ending background work): not a failure, not
+                        // reported; interrupted transfers continue on the next run.
+                        result = new FolderRunResult(Folder.FolderId, Folder.Name, true, "Stopped; it continues on the next run", Skipped: true, Deferred: true);
+                    }
+                    catch (Exception e)
+                    {
+                        foreach (var r in requests)
+                            if (e is OperationCanceledException) r.TrySetCanceled();
+                            else r.TrySetException(e);
+                        throw;
+                    }
+                    finally
+                    {
+                        _run = null;
+                        _activity = WorkerActivity.Idle;
+                        _progress = null;
+                    }
+                    _lastResult = result;
+                    _lastRunAt = DateTimeOffset.UtcNow;
+                    foreach (var r in requests) r.TrySetResult(result);
+                    _agent.RaiseFolder(Folder.FolderId);
+                    if (result.Skipped) _logger.LogDebug("\"{Name}\": {Message}.", Folder.Name, result.Message);
+                    else if (result.Ok) _logger.LogInformation("\"{Name}\": {Message}.", Folder.Name, result.Message);
+                    else _logger.LogWarning("\"{Name}\" failed: {Message}", Folder.Name, result.Message);
+                    if (result.Unsettled > 0) _settle.Change(_agent.SettleTime + TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
+                    if (result.Deferred) continue;
+                    if (result.Skipped && !Folder.Paused)
+                    {
+                        _nextRunAt = DateTimeOffset.UtcNow.AddSeconds(30);
+                        await Task.Delay(TimeSpan.FromSeconds(30), ct); // busy elsewhere: try again soon
+                        Trigger("retry");
+                    }
+                    else if (!result.Skipped)
+                    {
+                        List<(MaintenanceKind Kind, MaintenanceOutcome Outcome)> maintained;
+                        _activity = WorkerActivity.Maintenance;
+                        try { maintained = await _agent.RunDueMaintenanceAsync(Folder, ct); }
+                        finally { _activity = WorkerActivity.Idle; }
+                        if (maintained.Count > 0) _agent.RaiseFolder(Folder.FolderId);
+                        foreach (var (kind, outcome) in maintained)
+                        {
+                            var what = kind == MaintenanceKind.Prune ? "prune" : "check";
+                            if (outcome.Busy) _logger.LogInformation("\"{Name}\": {What} postponed: {Message}", Folder.Name, what, outcome.Message);
+                            else if (outcome.Ok) _logger.LogInformation("\"{Name}\": {What}: {Message}.", Folder.Name, what, outcome.Message);
+                            else _logger.LogWarning("\"{Name}\": {What} failed: {Message}", Folder.Name, what, outcome.Message);
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "\"{Name}\": unexpected error.", Folder.Name);
+                    await Task.Delay(TimeSpan.FromMinutes(1), ct).ContinueWith(_ => { });
+                }
+            }
+        }
+

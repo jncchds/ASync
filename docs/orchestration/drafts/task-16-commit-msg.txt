@@ -1,0 +1,21 @@
+feat(android): All files access: folders anywhere on the phone (task 16)
+
+Android's folder picker refuses a volume's root, Download and Android/...; like
+FolderSync, Solid Explorer and Syncthing-fork, the app can now ask for
+MANAGE_EXTERNAL_STORAGE (we distribute the APK ourselves).
+
+- Choose folder... explains in one screen and opens the system page for ASync
+  (fallback: the general page); declining keeps the SAF picker.
+- ASync's own picker over real paths: volumes from StorageManager with their
+  labels, volume roots and Download, Android/data and obb left out.
+- GuardedTree (Engine): FileSystemTree behind a permission check on every
+  call and hidden paths; a revoked permission stops the folder with "All files
+  access was turned off", nothing deleted, also in background runs.
+- Real paths stored on the server as people read them.
+- SAF folders are offered their real path; the sync state is carried over
+  (SyncState.Location + ILocalTreeFactory.SamePlace + FolderSyncer.Rebase).
+- Settings -> Folders on this phone shows the permission with a button.
+- Tests: GuardedTreeTests, AllFilesAccessTests; smoke-android.sh section.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01LEFDEupGC6YUCLAdh6R95Q

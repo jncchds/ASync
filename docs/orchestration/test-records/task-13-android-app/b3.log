@@ -1,0 +1,20 @@
+Build started 11/16/2026 1:14:33 AM.
+     1>Project "/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj" on node 1 (Restore target(s)).
+     1>_GetAllRestoreProjectPathItems:
+         Determining projects to restore...
+     1>Project "/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj" (1) is building "/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj" (1:5) on node 1 (_GenerateRestoreGraphProjectEntry target(s)).
+     1>/home/chds/.local/dotnet-ms/sdk/10.0.404/Sdks/Microsoft.NET.Sdk/targets/Microsoft.NET.Sdk.FrameworkReferenceResolution.targets(120,5): error NETSDK1083: The specified RuntimeIdentifier 'android-arm64;android-x64' is not recognized. See https://aka.ms/netsdk1083 for more information. [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+     1>Done Building Project "/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj" (_GenerateRestoreGraphProjectEntry target(s)) -- FAILED.
+     1>Done Building Project "/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj" (Restore target(s)) -- FAILED.
+
+Build FAILED.
+
+       "/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj" (Restore target) (1) ->
+       "/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj" (_GenerateRestoreGraphProjectEntry target) (1:5) ->
+       (ProcessFrameworkReferences target) -> 
+         /home/chds/.local/dotnet-ms/sdk/10.0.404/Sdks/Microsoft.NET.Sdk/targets/Microsoft.NET.Sdk.FrameworkReferenceResolution.targets(120,5): error NETSDK1083: The specified RuntimeIdentifier 'android-arm64;android-x64' is not recognized. See https://aka.ms/netsdk1083 for more information. [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+
+    0 Warning(s)
+    1 Error(s)
+
+Time Elapsed 00:00:01.37

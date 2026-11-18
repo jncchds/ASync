@@ -1,0 +1,16 @@
+fix(android): readable picker on light theme; provider write test waits for the save
+
+- The in-app folder picker drew folder names in the primary button's white on the
+  light theme's white card; entry buttons use the page's text colour now (headless
+  test checks the colour).
+- Documents provider smoke check "a replaced file keeps a version" failed
+  intermittently: the automation's write answered before the provider handled the
+  descriptor's close (delivered on its handler thread after close() returned), so no
+  save was pending yet. It now waits for AndroidDocuments.ClosesHandled first.
+- Automation answers carry Java exceptions' own messages; the rename check prints the
+  provider's log on failure.
+- Screenshots android-allfiles-* (explanation, system page, picker, Settings; light
+  and dark) and the README block; AGENTS.md test status.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01LEFDEupGC6YUCLAdh6R95Q

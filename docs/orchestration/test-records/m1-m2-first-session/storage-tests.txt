@@ -1,0 +1,16 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  ASync.Contracts -> /mnt/git/ASync/.claude/worktrees/m0-scaffold/src/ASync.Contracts/bin/Debug/net10.0/ASync.Contracts.dll
+  ASync.Engine -> /mnt/git/ASync/.claude/worktrees/m0-scaffold/src/ASync.Engine/bin/Debug/net10.0/ASync.Engine.dll
+  ASync.Core -> /mnt/git/ASync/.claude/worktrees/m0-scaffold/src/ASync.Core/bin/Debug/net10.0/ASync.Core.dll
+  ASync.Infrastructure -> /mnt/git/ASync/.claude/worktrees/m0-scaffold/src/ASync.Infrastructure/bin/Debug/net10.0/ASync.Infrastructure.dll
+  ASync.Storage -> /mnt/git/ASync/.claude/worktrees/m0-scaffold/src/ASync.Storage/bin/Debug/net10.0/ASync.Storage.dll
+  ASync.Api -> /mnt/git/ASync/.claude/worktrees/m0-scaffold/src/ASync.Api/bin/Debug/net10.0/ASync.Api.dll
+  ASync.Tests -> /mnt/git/ASync/.claude/worktrees/m0-scaffold/src/ASync.Tests/bin/Debug/net10.0/ASync.Tests.dll
+Test run for /mnt/git/ASync/.claude/worktrees/m0-scaffold/src/ASync.Tests/bin/Debug/net10.0/ASync.Tests.dll (.NETCoreApp,Version=v10.0)
+VSTest version 18.0.2 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:    41, Skipped:     0, Total:    41, Duration: 7 s - ASync.Tests.dll (net10.0)

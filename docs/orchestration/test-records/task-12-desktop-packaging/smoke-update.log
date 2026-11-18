@@ -1,0 +1,36 @@
+
+[1m── build A (0.1.900) and B (0.1.901)[0m
+  [32m✓[0m A's AppImage (57 MB); B's feed: ASync.Desktop-0.1.901-linux-x64-full.nupkg ASync.Desktop-linux-x64.AppImage RELEASES-linux-x64 assets.linux-x64.json releases.linux-x64.json 
+  [32m✓[0m Xvfb :95, private D-Bus session
+
+[1m── A: install the agent from the AppImage[0m
+  [32m✓[0m the app is 0.1.900
+  [32m✓[0m no agent yet: the app offers to install it
+  [32m✓[0m the agent runs and answers (enroll page)
+  [32m✓[0m the user unit runs the AppImage file itself, not its mount
+  [32m✓[0m the agent is 0.1.900
+
+[1m── A finds B[0m
+  [32m✓[0m update found: ASync 0.1.901 is available (you have 0.1.900). Installing it restarts the app and the agent.
+  [32m✓[0m tray: "Update to ASync 0.1.901…"
+  [32m✓[0m screenshots desktop-update-available-{light,dark}.png
+  [32m✓[0m Settings show the update: ASync 0.1.901 is available (you have 0.1.900). Installing it restarts the app and the agent.
+  [32m✓[0m screenshots desktop-update-settings-{light,dark}.png
+
+[1m── install B[0m
+  [32m✓[0m the app restarted as 0.1.901
+  [32m✓[0m the AppImage file was replaced in place
+  [32m✓[0m the agent runs 0.1.901 too
+  [32m✓[0m … in a new process (284615 → 286001)
+  [32m✓[0m async-agent.service is active
+  [32m✓[0m message: ASync was updated to 0.1.901; the agent runs it too.
+  [32m✓[0m B finds nothing newer
+  [32m✓[0m screenshots desktop-update-done-{light,dark}.png
+
+[1m── uninstall[0m
+  [32m✓[0m ASync.AppImage uninstall: Stopped the agent and removed /home/chds/.config/systemd/user/async-agent.service. Kept this device's identity, keys and settings in /mnt/git/ASync/.claude/worktrees/task-12/artifacts/update-smoke/config (delete the folder, or run `async-desktop uninstall --remove-data`, to remove them). Now delete /mnt/git/ASync/.claude/worktrees/task-12/artifacts/update-smoke/ASync.AppImage. 
+  [32m✓[0m the service is gone
+  [32m✓[0m the config directory is kept
+  [32m✓[0m uninstall --remove-data deletes it
+
+All update checks passed.

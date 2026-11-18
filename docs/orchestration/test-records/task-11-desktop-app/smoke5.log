@@ -1,0 +1,94 @@
+
+[1m── build, server stack, display[0m
+  [32m✓[0m async-desktop and async-cli published
+  [32m✓[0m server on http://localhost:5192
+  [32m✓[0m account admin, storage back-end 1
+  [32m✓[0m Xvfb :98, private D-Bus session
+
+[1m── no agent: the app installs it[0m
+  [32m✓[0m without an agent the app offers to install it
+  [32m✓[0m tray: problem (no agent)
+  [32m✓[0m screenshots desktop-service-setup-{light,dark}.png
+  [32m✓[0m Install and start: the agent runs and answers (enroll page)
+  [32m✓[0m the user unit runs async-desktop service run
+  [32m✓[0m async-agent.service is active
+
+[1m── enroll[0m
+  [32m✓[0m screenshots desktop-enroll-{light,dark}.png
+  [32m✓[0m screenshots desktop-enroll-small-{light,dark}.png
+  [32m✓[0m device-code flow: the code is shown
+  [32m✓[0m the approval page was opened (S4JS-GYJ4)
+  [32m✓[0m screenshots desktop-enroll-device-code-{light,dark}.png
+  [32m✓[0m Cancel gives up the request
+  [32m✓[0m enrolled by code: the dashboard shows desktop-smoke
+  [32m✓[0m the server lists the device (01a1e09d-a30f-709d-89da-a655e8f7b211, platform Linux)
+  [32m✓[0m connected
+  [32m✓[0m tray: ok
+  [32m✓[0m screenshots desktop-dashboard-empty-{light,dark}.png
+
+[1m── a folder attached in the web UI[0m
+  [32m✓[0m the folder appears live (no reload)
+  [32m✓[0m choose a local folder: the agent now syncs /mnt/git/ASync/.claude/worktrees/task-11-desktop-app/artifacts/desktop-smoke/docs
+  [32m✓[0m the server has the new local path
+  [32m✓[0m the folder synced: hello.txt is on the server
+
+[1m── sync with live progress[0m
+  [32m✓[0m the folder shows Syncing while it runs
+  [32m✓[0m live progress from the event stream: 0 of 1 files · 0 B of 143 MB
+  [32m✓[0m tray: syncing
+  [32m✓[0m screenshots desktop-dashboard-syncing-{light,dark}.png
+  [32m✓[0m the run finished: 1 up, 0 down, 0 deleted
+  [32m✓[0m big.bin is on the server
+
+[1m── pause and resume[0m
+  [32m✓[0m Pause (folder card)
+  [32m✓[0m the server shows it paused
+  [32m✓[0m Resume (folder card)
+  [32m✓[0m tray: Pause all
+  [32m✓[0m tray: Resume all
+  [32m✓[0m Open folder opens /mnt/git/ASync/.claude/worktrees/task-11-desktop-app/artifacts/desktop-smoke/docs in the file manager
+
+[1m── end-to-end folder: unlock[0m
+  [32m✓[0m a second device (async-cli) set up the end-to-end folder Vault
+  [32m✓[0m Vault appears, locked on this device
+  [32m✓[0m tray: problem (a locked folder)
+  [32m✓[0m screenshots desktop-dashboard-{light,dark}.png
+  [32m✓[0m the unlock dialog opens
+  [32m✓[0m a wrong passphrase keeps the dialog open
+  [32m✓[0m screenshots desktop-unlock-{light,dark}.png
+  [32m✓[0m unlocked with the passphrase
+  [32m✓[0m Vault backed up: Snapshot 189d0ada: 1 new, 0 changed, 0 unchanged, 9 B added
+  [32m✓[0m the passphrase never reaches a log (app log, journal)
+
+[1m── a failing folder notifies[0m
+  [32m✓[0m the folder fails: Failed: Cannot read /mnt/git/ASync/.claude/worktrees/task-11-desktop-app/artifac
+  [32m✓[0m desktop notification: --app-name=ASync --icon=folder-sync Sync failed: Documents Cannot read /mnt/git/ASync/.cla
+  [32m✓[0m screenshots desktop-dashboard-failed-{light,dark}.png
+  [32m✓[0m nothing was deleted on the server meanwhile
+  [32m✓[0m syncs again after the fix
+  [32m✓[0m notification: Documents syncs again
+
+[1m── settings, web UI, start at login[0m
+  [32m✓[0m settings open
+  [32m✓[0m screenshots desktop-settings-{light,dark}.png
+  [32m✓[0m start at login: /home/chds/.config/autostart/ua.pp.chds.async.desktop
+  [32m✓[0m start at login off: removed
+  [32m✓[0m Open the web UI opens http://localhost:5192
+  [32m✓[0m screenshots desktop-dashboard-small-{light,dark}.png
+  [32m✓[0m tray icons desktop-tray-{ok,syncing,problem}.png
+
+[1m── window, tray and single instance[0m
+  [32m✓[0m closing the window keeps the app running in the tray
+  [32m✓[0m a second start exits at once
+  [32m✓[0m … and brings the first one's window back
+  [32m✓[0m Quit ends the app
+  [32m✓[0m … but not the agent service
+
+[1m── sign out, enroll again with an approval in the web UI[0m
+  [32m✓[0m screenshots desktop-settings-sign-out-{light,dark}.png
+  [32m✓[0m signed out: back to the enroll page
+  [32m✓[0m the identity is gone from /mnt/git/ASync/.claude/worktrees/task-11-desktop-app/artifacts/desktop-smoke/config
+  [32m✓[0m approved in the web UI: enrolled as desktop-smoke-2
+
+All desktop checks passed.
+exit 0

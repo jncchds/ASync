@@ -1,0 +1,83 @@
+
+/// <summary>
+/// A minimal HTTP listener for webhook alerts: accepts POSTs on every address of this machine (so the server's
+/// container reaches it via host.docker.internal), answers 200 and keeps each body with its Authorization header.
+/// </summary>
+sealed class WebhookListener : IDisposable
+{
+    private readonly TcpListener _listener = new(IPAddress.Any, 0);
+    private readonly CancellationTokenSource _stop = new();
+    private readonly ConcurrentQueue<(string Raw, JsonNode? Body, string? Authorization)> _queue = new();
+    public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+    public IReadOnlyList<(string Raw, JsonNode? Body, string? Authorization)> Received => [.. _queue];
+
+    public WebhookListener()
+    {
+        _listener.Start();
+        _ = Task.Run(AcceptAsync);
+    }
+
+    private async Task AcceptAsync()
+    {
+        while (!_stop.IsCancellationRequested)
+        {
+            TcpClient client;
+            try { client = await _listener.AcceptTcpClientAsync(_stop.Token); }
+            catch (Exception) { return; }
+            _ = Task.Run(() => HandleAsync(client));
+        }
+    }
+
+    private async Task HandleAsync(TcpClient client)
+    {
+        using (client)
+        {
+            try
+            {
+                var stream = client.GetStream();
+                var buffer = new List<byte>();
+                var chunk = new byte[8192];
+                int headerEnd;
+                while ((headerEnd = IndexOf(buffer, "\r\n\r\n"u8.ToArray())) < 0)
+                {
+                    var n = await stream.ReadAsync(chunk);
+                    if (n == 0) return;
+                    buffer.AddRange(chunk.AsSpan(0, n).ToArray());
+                }
+                var lines = Encoding.ASCII.GetString(buffer.GetRange(0, headerEnd).ToArray()).Split("\r\n");
+                string? Header(string name) => lines.Skip(1).Select(l => l.Split(':', 2))
+                    .Where(p => p.Length == 2 && p[0].Trim().Equals(name, StringComparison.OrdinalIgnoreCase)).Select(p => p[1].Trim()).FirstOrDefault();
+                var length = int.TryParse(Header("Content-Length"), out var l) ? l : 0;
+                while (buffer.Count - headerEnd - 4 < length)
+                {
+                    var n = await stream.ReadAsync(chunk);
+                    if (n == 0) break;
+                    buffer.AddRange(chunk.AsSpan(0, n).ToArray());
+                }
+                var body = Encoding.UTF8.GetString(buffer.Skip(headerEnd + 4).Take(length).ToArray());
+                JsonNode? json = null;
+                try { json = JsonNode.Parse(body); } catch (System.Text.Json.JsonException) { }
+                _queue.Enqueue(($"{lines[0]} {body}", json, Header("Authorization")));
+                await stream.WriteAsync("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray());
+            }
+            catch (IOException) { }
+        }
+    }
+
+    private static int IndexOf(List<byte> data, byte[] pattern)
+    {
+        for (var i = 0; i + pattern.Length <= data.Count; i++)
+        {
+            var match = true;
+            for (var j = 0; j < pattern.Length && match; j++) match = data[i + j] == pattern[j];
+            if (match) return i;
+        }
+        return -1;
+    }
+
+    public void Dispose()
+    {
+        _stop.Cancel();
+        _listener.Stop();
+    }
+}

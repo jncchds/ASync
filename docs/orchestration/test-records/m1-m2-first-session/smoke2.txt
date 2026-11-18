@@ -1,0 +1,25 @@
+/mnt/git/ASync/.claude/worktrees/m0-scaffold/scripts/smoke-storage.cs(94,89): warning CS8625: Cannot convert null literal to non-nullable reference type.
+PASS  admin admin signs in
+PASS  admin may create Local back-ends under ["/data"]
+PASS  test of a Local back-end → ok
+PASS  Local outside the allowed roots refused → Local back-ends must be inside /data (set Storage__LocalRoots to allow more).
+PASS  create Local back-end → OK
+PASS  saved back-end test passes
+PASS  list shows the back-end as working
+PASS  create S3 back-end → OK 
+PASS  secret access key is not returned
+PASS  secretsSet reports the stored key
+PASS  missing bucket explained → The bucket 'async-smoke' does not exist. Create it with your storage provider first.
+PASS  test bucket created → OK
+PASS  S3 test → ok
+PASS  update without re-typing the secret → OK
+PASS  stored secret was kept: test still passes
+PASS  second user signs in
+PASS  user cannot create a Local back-end → Only admins can create back-ends on the server's own disk.
+PASS  user does not see the admin's personal back-ends
+PASS  user cannot test with someone else's stored secrets → NotFound
+PASS  user cannot delete it → NotFound
+PASS  delete Local back-end
+PASS  delete S3 back-end
+
+All checks passed.

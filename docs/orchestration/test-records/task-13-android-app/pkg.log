@@ -1,0 +1,188 @@
+Signing with the debug keystore (no ASYNC_ANDROID_KEYSTORE).
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: Failed to get the Java SDK version because the returned value does not appear to contain a valid version number. `java -version` returned: ```openjdk version "17.0.21.0.3" 2026-10-24 [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: OpenJDK Runtime Environment (build 17.0.21.0.3+1-1-26.04.1-Ubuntu) [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: OpenJDK 64-Bit Server VM (build 17.0.21.0.3+1-1-26.04.1-Ubuntu, mixed mode, sharing) [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: ``` [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+  ASync.Contracts -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.Contracts.dll
+  ASync.Engine -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.Engine.dll
+  ASync.Agent.Control -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.Agent.Control.dll
+  ASync.Client.Core -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.Client.Core.dll
+  ASync.App -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.App.dll
+  ASync.Agent -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.Agent.dll
+  ASync.App.Android -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.App.Android.dll
+  ASync.Contracts -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.Contracts.dll
+  ASync.Engine -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.Engine.dll
+  ASync.Agent.Control -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.Agent.Control.dll
+  ASync.Client.Core -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.Client.Core.dll
+  ASync.App -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.App.dll
+  ASync.Agent -> /mnt/git/ASync/.claude/worktrees/task-13-android-app/artifacts/android-build/ASync.Agent.dll
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: Failed to get the Java SDK version because the returned value does not appear to contain a valid version number. `java -version` returned: ```openjdk version "17.0.21.0.3" 2026-10-24 [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: OpenJDK Runtime Environment (build 17.0.21.0.3+1-1-26.04.1-Ubuntu) [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: OpenJDK 64-Bit Server VM (build 17.0.21.0.3+1-1-26.04.1-Ubuntu, mixed mode, sharing) [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: ``` [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+  Optimizing assemblies for size may change the behavior of the app. Be sure to test after publishing. See: https://aka.ms/dotnet-illink
+  Optimizing assemblies for size. This process might take a while.
+  [1/136] _Microsoft.Android.Resource.Designer.dll -> _Microsoft.Android.Resource.Designer.dll.so
+  [2/136] ASync.Agent.dll -> ASync.Agent.dll.so
+  [3/136] ASync.Agent.Control.dll -> ASync.Agent.Control.dll.so
+  [4/136] ASync.App.dll -> ASync.App.dll.so
+  [5/136] ASync.App.Android.dll -> ASync.App.Android.dll.so
+  [6/136] ASync.Client.Core.dll -> ASync.Client.Core.dll.so
+  [7/136] ASync.Contracts.dll -> ASync.Contracts.dll.so
+  [8/136] Avalonia.DesignerSupport.dll -> Avalonia.DesignerSupport.dll.so
+  [9/136] ASync.Engine.dll -> ASync.Engine.dll.so
+  [10/136] Avalonia.Dialogs.dll -> Avalonia.Dialogs.dll.so
+  [11/136] Avalonia.Markup.dll -> Avalonia.Markup.dll.so
+  [12/136] Avalonia.Markup.Xaml.dll -> Avalonia.Markup.Xaml.dll.so
+  [13/136] Avalonia.Metal.dll -> Avalonia.Metal.dll.so
+  [14/136] Avalonia.OpenGL.dll -> Avalonia.OpenGL.dll.so
+  [15/136] Avalonia.dll -> Avalonia.dll.so
+  [16/136] Avalonia.Vulkan.dll -> Avalonia.Vulkan.dll.so
+  [17/136] Avalonia.Fonts.Inter.dll -> Avalonia.Fonts.Inter.dll.so
+  [18/136] Avalonia.HarfBuzz.dll -> Avalonia.HarfBuzz.dll.so
+  [19/136] Avalonia.Android.dll -> Avalonia.Android.dll.so
+  [20/136] Avalonia.Remote.Protocol.dll -> Avalonia.Remote.Protocol.dll.so
+  [21/136] Avalonia.Skia.dll -> Avalonia.Skia.dll.so
+  [22/136] CommunityToolkit.Mvvm.dll -> CommunityToolkit.Mvvm.dll.so
+  [23/136] HarfBuzzSharp.dll -> HarfBuzzSharp.dll.so
+  [24/136] Microsoft.AspNetCore.Connections.Abstractions.dll -> Microsoft.AspNetCore.Connections.Abstractions.dll.so
+  [25/136] Microsoft.AspNetCore.Http.Connections.Client.dll -> Microsoft.AspNetCore.Http.Connections.Client.dll.so
+  [26/136] Microsoft.AspNetCore.Http.Connections.Common.dll -> Microsoft.AspNetCore.Http.Connections.Common.dll.so
+  [27/136] Microsoft.AspNetCore.SignalR.Client.dll -> Microsoft.AspNetCore.SignalR.Client.dll.so
+  [28/136] Avalonia.Controls.dll -> Avalonia.Controls.dll.so
+  [29/136] Microsoft.AspNetCore.SignalR.Common.dll -> Microsoft.AspNetCore.SignalR.Common.dll.so
+  [30/136] Microsoft.AspNetCore.SignalR.Protocols.Json.dll -> Microsoft.AspNetCore.SignalR.Protocols.Json.dll.so
+  [31/136] Microsoft.AspNetCore.SignalR.Client.Core.dll -> Microsoft.AspNetCore.SignalR.Client.Core.dll.so
+  [32/136] Microsoft.Extensions.Configuration.dll -> Microsoft.Extensions.Configuration.dll.so
+  [33/136] Microsoft.Extensions.Configuration.Abstractions.dll -> Microsoft.Extensions.Configuration.Abstractions.dll.so
+  [34/136] Microsoft.Extensions.Configuration.Binder.dll -> Microsoft.Extensions.Configuration.Binder.dll.so
+  [35/136] Microsoft.Extensions.Configuration.CommandLine.dll -> Microsoft.Extensions.Configuration.CommandLine.dll.so
+  [36/136] Microsoft.Extensions.Configuration.EnvironmentVariables.dll -> Microsoft.Extensions.Configuration.EnvironmentVariables.dll.so
+  [37/136] Microsoft.Extensions.Configuration.FileExtensions.dll -> Microsoft.Extensions.Configuration.FileExtensions.dll.so
+  [38/136] Microsoft.Extensions.Configuration.Json.dll -> Microsoft.Extensions.Configuration.Json.dll.so
+  [39/136] Microsoft.Extensions.Configuration.UserSecrets.dll -> Microsoft.Extensions.Configuration.UserSecrets.dll.so
+  [40/136] Microsoft.Extensions.DependencyInjection.Abstractions.dll -> Microsoft.Extensions.DependencyInjection.Abstractions.dll.so
+  [41/136] Microsoft.Extensions.DependencyInjection.dll -> Microsoft.Extensions.DependencyInjection.dll.so
+  [42/136] Microsoft.Extensions.Diagnostics.dll -> Microsoft.Extensions.Diagnostics.dll.so
+  [43/136] Microsoft.Extensions.Diagnostics.Abstractions.dll -> Microsoft.Extensions.Diagnostics.Abstractions.dll.so
+  [44/136] Microsoft.Extensions.Features.dll -> Microsoft.Extensions.Features.dll.so
+  [45/136] Microsoft.Extensions.FileProviders.Abstractions.dll -> Microsoft.Extensions.FileProviders.Abstractions.dll.so
+  [46/136] Avalonia.Themes.Fluent.dll -> Avalonia.Themes.Fluent.dll.so
+  [47/136] Microsoft.Extensions.FileProviders.Physical.dll -> Microsoft.Extensions.FileProviders.Physical.dll.so
+  [48/136] Microsoft.Extensions.Hosting.dll -> Microsoft.Extensions.Hosting.dll.so
+  [49/136] Microsoft.Extensions.FileSystemGlobbing.dll -> Microsoft.Extensions.FileSystemGlobbing.dll.so
+  [50/136] Microsoft.Extensions.Hosting.Abstractions.dll -> Microsoft.Extensions.Hosting.Abstractions.dll.so
+  [51/136] Microsoft.Extensions.Hosting.WindowsServices.dll -> Microsoft.Extensions.Hosting.WindowsServices.dll.so
+  [52/136] Microsoft.Extensions.Hosting.Systemd.dll -> Microsoft.Extensions.Hosting.Systemd.dll.so
+  [53/136] Microsoft.Extensions.Logging.dll -> Microsoft.Extensions.Logging.dll.so
+  [54/136] Microsoft.Extensions.Logging.Configuration.dll -> Microsoft.Extensions.Logging.Configuration.dll.so
+  [55/136] Microsoft.Extensions.Logging.Abstractions.dll -> Microsoft.Extensions.Logging.Abstractions.dll.so
+  [56/136] Avalonia.Base.dll -> Avalonia.Base.dll.so
+  [57/136] Microsoft.Extensions.Logging.Debug.dll -> Microsoft.Extensions.Logging.Debug.dll.so
+  [58/136] Microsoft.Extensions.Logging.EventLog.dll -> Microsoft.Extensions.Logging.EventLog.dll.so
+  [59/136] Microsoft.Extensions.Logging.Console.dll -> Microsoft.Extensions.Logging.Console.dll.so
+  [60/136] Microsoft.Extensions.Logging.EventSource.dll -> Microsoft.Extensions.Logging.EventSource.dll.so
+  [61/136] Microsoft.Extensions.Options.ConfigurationExtensions.dll -> Microsoft.Extensions.Options.ConfigurationExtensions.dll.so
+  [62/136] Microsoft.Extensions.Options.dll -> Microsoft.Extensions.Options.dll.so
+  [63/136] Microsoft.Extensions.Primitives.dll -> Microsoft.Extensions.Primitives.dll.so
+  [64/136] System.Diagnostics.EventLog.dll -> System.Diagnostics.EventLog.dll.so
+  [65/136] System.Security.Cryptography.ProtectedData.dll -> System.Security.Cryptography.ProtectedData.dll.so
+  [66/136] System.ServiceProcess.ServiceController.dll -> System.ServiceProcess.ServiceController.dll.so
+  [67/136] Xamarin.AndroidX.Activity.dll -> Xamarin.AndroidX.Activity.dll.so
+  [68/136] SkiaSharp.dll -> SkiaSharp.dll.so
+  [69/136] Xamarin.AndroidX.CustomView.dll -> Xamarin.AndroidX.CustomView.dll.so
+  [70/136] Xamarin.AndroidX.DrawerLayout.dll -> Xamarin.AndroidX.DrawerLayout.dll.so
+  [71/136] Xamarin.AndroidX.Lifecycle.Common.Jvm.dll -> Xamarin.AndroidX.Lifecycle.Common.Jvm.dll.so
+  [72/136] Xamarin.AndroidX.Lifecycle.LiveData.Core.dll -> Xamarin.AndroidX.Lifecycle.LiveData.Core.dll.so
+  [73/136] Xamarin.AndroidX.Lifecycle.ViewModel.Android.dll -> Xamarin.AndroidX.Lifecycle.ViewModel.Android.dll.so
+  [74/136] Xamarin.AndroidX.Fragment.dll -> Xamarin.AndroidX.Fragment.dll.so
+  [75/136] Xamarin.AndroidX.AppCompat.dll -> Xamarin.AndroidX.AppCompat.dll.so
+  [76/136] Xamarin.AndroidX.SavedState.SavedState.Android.dll -> Xamarin.AndroidX.SavedState.SavedState.Android.dll.so
+  [77/136] Xamarin.AndroidX.Loader.dll -> Xamarin.AndroidX.Loader.dll.so
+  [78/136] Xamarin.AndroidX.NavigationEvent.Android.dll -> Xamarin.AndroidX.NavigationEvent.Android.dll.so
+  [79/136] Xamarin.AndroidX.Window.dll -> Xamarin.AndroidX.Window.dll.so
+  [80/136] Xamarin.AndroidX.Core.dll -> Xamarin.AndroidX.Core.dll.so
+  [81/136] Xamarin.KotlinX.Coroutines.Core.Jvm.dll -> Xamarin.KotlinX.Coroutines.Core.Jvm.dll.so
+  [82/136] Microsoft.Win32.Primitives.dll -> Microsoft.Win32.Primitives.dll.so
+  [83/136] Xamarin.Kotlin.StdLib.dll -> Xamarin.Kotlin.StdLib.dll.so
+  [84/136] System.Collections.Concurrent.dll -> System.Collections.Concurrent.dll.so
+  [85/136] System.Collections.NonGeneric.dll -> System.Collections.NonGeneric.dll.so
+  [86/136] System.Collections.Specialized.dll -> System.Collections.Specialized.dll.so
+  [87/136] System.ComponentModel.Primitives.dll -> System.ComponentModel.Primitives.dll.so
+  [88/136] System.ComponentModel.dll -> System.ComponentModel.dll.so
+  [89/136] System.Collections.dll -> System.Collections.dll.so
+  [90/136] System.Console.dll -> System.Console.dll.so
+  [91/136] System.ComponentModel.TypeConverter.dll -> System.ComponentModel.TypeConverter.dll.so
+  [92/136] System.Diagnostics.DiagnosticSource.dll -> System.Diagnostics.DiagnosticSource.dll.so
+  [93/136] System.Diagnostics.Process.dll -> System.Diagnostics.Process.dll.so
+  [94/136] System.IO.Compression.Brotli.dll -> System.IO.Compression.Brotli.dll.so
+  [95/136] System.Formats.Asn1.dll -> System.Formats.Asn1.dll.so
+  [96/136] System.IO.Compression.dll -> System.IO.Compression.dll.so
+  [97/136] System.IO.FileSystem.Watcher.dll -> System.IO.FileSystem.Watcher.dll.so
+  [98/136] System.IO.Pipes.AccessControl.dll -> System.IO.Pipes.AccessControl.dll.so
+  [99/136] System.IO.Pipelines.dll -> System.IO.Pipelines.dll.so
+  [100/136] System.Linq.Expressions.dll -> System.Linq.Expressions.dll.so
+  [101/136] System.IO.Pipes.dll -> System.IO.Pipes.dll.so
+  [102/136] System.Net.Http.Json.dll -> System.Net.Http.Json.dll.so
+  [103/136] System.Memory.dll -> System.Memory.dll.so
+  [104/136] zxing.dll -> zxing.dll.so
+  [105/136] System.Net.NameResolution.dll -> System.Net.NameResolution.dll.so
+  [106/136] System.Net.NetworkInformation.dll -> System.Net.NetworkInformation.dll.so
+  [107/136] System.Linq.dll -> System.Linq.dll.so
+  [108/136] System.Net.Requests.dll -> System.Net.Requests.dll.so
+  [109/136] System.Net.ServerSentEvents.dll -> System.Net.ServerSentEvents.dll.so
+  [110/136] System.Net.Primitives.dll -> System.Net.Primitives.dll.so
+  [111/136] System.Net.WebHeaderCollection.dll -> System.Net.WebHeaderCollection.dll.so
+  [112/136] System.Net.WebSockets.Client.dll -> System.Net.WebSockets.Client.dll.so
+  [113/136] System.Net.Security.dll -> System.Net.Security.dll.so
+  [114/136] System.Net.Sockets.dll -> System.Net.Sockets.dll.so
+  [115/136] System.ObjectModel.dll -> System.ObjectModel.dll.so
+  [116/136] System.Private.Xml.dll -> System.Private.Xml.dll.so
+  [117/136] System.Net.WebSockets.dll -> System.Net.WebSockets.dll.so
+  [118/136] System.Runtime.InteropServices.dll -> System.Runtime.InteropServices.dll.so
+  [119/136] System.Runtime.dll -> System.Runtime.dll.so
+  [120/136] System.Private.Uri.dll -> System.Private.Uri.dll.so
+  [121/136] System.Security.AccessControl.dll -> System.Security.AccessControl.dll.so
+  [122/136] System.Security.Principal.Windows.dll -> System.Security.Principal.Windows.dll.so
+  [123/136] System.Runtime.Numerics.dll -> System.Runtime.Numerics.dll.so
+  [124/136] System.Text.Encodings.Web.dll -> System.Text.Encodings.Web.dll.so
+  [125/136] System.Net.Http.dll -> System.Net.Http.dll.so
+  [126/136] System.Threading.Channels.dll -> System.Threading.Channels.dll.so
+  [127/136] System.Threading.Thread.dll -> System.Threading.Thread.dll.so
+  [128/136] System.Threading.dll -> System.Threading.dll.so
+  [129/136] System.Security.Cryptography.dll -> System.Security.Cryptography.dll.so
+  [130/136] System.dll -> System.dll.so
+  [131/136] Mono.Android.Runtime.dll -> Mono.Android.Runtime.dll.so
+  [132/136] System.Text.RegularExpressions.dll -> System.Text.RegularExpressions.dll.so
+  [133/136] Java.Interop.dll -> Java.Interop.dll.so
+  [134/136] System.Text.Json.dll -> System.Text.Json.dll.so
+  [135/136] Mono.Android.dll -> Mono.Android.dll.so
+  [136/136] System.Private.CoreLib.dll -> System.Private.CoreLib.dll.so
+
+Build succeeded.
+
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: Failed to get the Java SDK version because the returned value does not appear to contain a valid version number. `java -version` returned: ```openjdk version "17.0.21.0.3" 2026-10-24 [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: OpenJDK Runtime Environment (build 17.0.21.0.3+1-1-26.04.1-Ubuntu) [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: OpenJDK 64-Bit Server VM (build 17.0.21.0.3+1-1-26.04.1-Ubuntu, mixed mode, sharing) [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: ``` [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: Failed to get the Java SDK version because the returned value does not appear to contain a valid version number. `java -version` returned: ```openjdk version "17.0.21.0.3" 2026-10-24 [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: OpenJDK Runtime Environment (build 17.0.21.0.3+1-1-26.04.1-Ubuntu) [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: OpenJDK 64-Bit Server VM (build 17.0.21.0.3+1-1-26.04.1-Ubuntu, mixed mode, sharing) [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+/home/chds/.local/dotnet-ms/packs/Microsoft.Android.Sdk.Linux/36.1.2/targets/Microsoft.Android.Sdk.Tooling.targets(22,5): warning XA0033: ``` [/mnt/git/ASync/.claude/worktrees/task-13-android-app/src/ASync.App.Android/ASync.App.Android.csproj]
+    2 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:08:33.24
+Signer #1 certificate DN: CN=Android Debug, O=Android, C=US
+Signer #1 certificate SHA-256 digest: 05e6e141b01b50d2405774cd6848f4bbfad50684c15b289a79caee353e7cff6f
+total 28064
+drwxrwxr-x  6 chds chds     4096 Nov 16 02:58 .
+drwxrwxr-x  4 chds chds     4096 Nov 16 03:10 ..
+-rw-rw-r--  1 chds chds 28707795 Nov 16 03:10 ASync-0.1.4-android.apk
+drwxrwxr-x 16 chds chds     4096 Nov 16 02:08 cli
+drwx------  3 chds chds     4096 Nov 16 02:54 cli-config
+drwxrwxr-x  3 chds chds     4096 Nov 16 02:56 cli-docs
+-rw-rw-r--  1 chds chds     1328 Nov 16 02:51 compose-up.log
+drwxrwxr-x  3 chds chds     4096 Nov 16 02:58 restored

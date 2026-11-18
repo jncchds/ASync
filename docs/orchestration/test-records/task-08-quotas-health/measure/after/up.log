@@ -1,0 +1,156 @@
+ Image async-measure-after-async-server Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 580B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 2.40kB done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for mcr.microsoft.com/dotnet/aspnet:10.0
+#3 DONE 0.1s
+
+#4 [internal] load metadata for mcr.microsoft.com/dotnet/sdk:10.0
+#4 DONE 0.1s
+
+#5 [internal] load metadata for docker.io/library/node:22-alpine
+#5 DONE 0.2s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 150B done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [api-build  1/12] FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb
+#8 resolve mcr.microsoft.com/dotnet/sdk:10.0@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb 0.1s done
+#8 DONE 0.1s
+
+#9 [runtime 1/6] FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e
+#9 resolve mcr.microsoft.com/dotnet/aspnet:10.0@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e 0.1s done
+#9 DONE 0.1s
+
+#10 [ui-build 1/7] FROM docker.io/library/node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+#10 resolve docker.io/library/node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a 0.1s done
+#10 DONE 0.1s
+
+#7 [internal] load build context
+#7 transferring context: 32.78kB 0.0s done
+#7 DONE 0.0s
+
+#11 [api-build  4/12] COPY src/ASync.Contracts/ASync.Contracts.csproj src/ASync.Contracts/
+#11 CACHED
+
+#12 [api-build  9/12] COPY src/ASync.Api/ASync.Api.csproj src/ASync.Api/
+#12 CACHED
+
+#13 [api-build  5/12] COPY src/ASync.Core/ASync.Core.csproj src/ASync.Core/
+#13 CACHED
+
+#14 [api-build  2/12] WORKDIR /src
+#14 CACHED
+
+#15 [api-build  3/12] COPY ASync.slnx Directory.Build.props Directory.Packages.props VERSION ./
+#15 CACHED
+
+#16 [api-build  7/12] COPY src/ASync.Storage/ASync.Storage.csproj src/ASync.Storage/
+#16 CACHED
+
+#17 [api-build  6/12] COPY src/ASync.Engine/ASync.Engine.csproj src/ASync.Engine/
+#17 CACHED
+
+#18 [api-build  8/12] COPY src/ASync.Infrastructure/ASync.Infrastructure.csproj src/ASync.Infrastructure/
+#18 CACHED
+
+#19 [api-build 10/12] RUN dotnet restore src/ASync.Api/ASync.Api.csproj
+#19 CACHED
+
+#20 [api-build 11/12] COPY src/ src/
+#20 DONE 0.3s
+
+#21 [api-build 12/12] RUN dotnet publish src/ASync.Api/ASync.Api.csproj -c Release -o /app/publish --no-restore
+#21 7.677   ASync.Contracts -> /src/src/ASync.Contracts/bin/Release/net10.0/ASync.Contracts.dll
+#21 10.57   ASync.Engine -> /src/src/ASync.Engine/bin/Release/net10.0/ASync.Engine.dll
+#21 11.54   ASync.Core -> /src/src/ASync.Core/bin/Release/net10.0/ASync.Core.dll
+#21 11.81   ASync.Storage -> /src/src/ASync.Storage/bin/Release/net10.0/ASync.Storage.dll
+#21 14.36   ASync.Infrastructure -> /src/src/ASync.Infrastructure/bin/Release/net10.0/ASync.Infrastructure.dll
+#21 18.62   ASync.Api -> /src/src/ASync.Api/bin/Release/net10.0/ASync.Api.dll
+#21 18.69   ASync.Api -> /app/publish/
+#21 DONE 21.3s
+
+#22 [runtime 2/6] RUN apt-get update && apt-get install -y --no-install-recommends libgssapi-krb5-2 && rm -rf /var/lib/apt/lists/*
+#22 CACHED
+
+#23 [ui-build 3/7] COPY src/async-ui/package*.json ./
+#23 CACHED
+
+#24 [ui-build 4/7] RUN npm ci
+#24 CACHED
+
+#25 [ui-build 5/7] COPY src/async-ui/ ./
+#25 CACHED
+
+#26 [ui-build 6/7] COPY VERSION /VERSION
+#26 CACHED
+
+#27 [ui-build 2/7] WORKDIR /ui
+#27 CACHED
+
+#28 [runtime 3/6] WORKDIR /app
+#28 CACHED
+
+#29 [ui-build 7/7] RUN npx vite build --outDir ./dist --emptyOutDir
+#29 CACHED
+
+#30 [runtime 4/6] COPY --from=api-build /app/publish ./
+#30 DONE 0.5s
+
+#31 [runtime 5/6] COPY --from=ui-build /ui/dist ./wwwroot
+#31 DONE 0.1s
+
+#32 [runtime 6/6] RUN mkdir -p /data && chown app:app /data
+#32 DONE 0.4s
+
+#33 exporting to image
+#33 exporting layers
+#33 exporting layers 0.9s done
+#33 exporting manifest sha256:161f53e51abfd52bc9b3dbd1595d78b1af52abdf0dd885482ed63453056f6954 0.0s done
+#33 exporting config sha256:5d6bb228afd7c9b94a05fb6fce81e267a8d1b87ec76742670ab5269bfa748751 0.0s done
+#33 exporting attestation manifest sha256:61e700104ae5446e7cbd7d657feacf7079570ce41df0d8a9ae29f2e18cddaa06 0.0s done
+#33 exporting manifest list sha256:3a5c88fd28b6de8971a188c19607b508c2bd64032e5abd38536c978da0621eb5 0.0s done
+#33 naming to docker.io/library/async-measure-after-async-server:latest
+#33 naming to docker.io/library/async-measure-after-async-server:latest done
+#33 unpacking to docker.io/library/async-measure-after-async-server:latest
+#33 unpacking to docker.io/library/async-measure-after-async-server:latest 0.2s done
+#33 DONE 1.3s
+
+#34 resolving provenance for metadata file
+#34 DONE 0.0s
+ Image async-measure-after-async-server Built 
+ Network async-measure-after_default Creating 
+ Volume async-measure-after_async_data Creating 
+ Network async-measure-after_default Creating 
+ Volume async-measure-after_async_data Creating 
+ Volume async-measure-after_postgres_data Creating 
+ Volume async-measure-after_postgres_data Creating 
+ Volume async-measure-after_async_data Created 
+ Volume async-measure-after_async_data Created 
+ Volume async-measure-after_postgres_data Created 
+ Volume async-measure-after_postgres_data Created 
+ Network async-measure-after_default Created 
+ Network async-measure-after_default Created 
+ Container async-measure-after-postgres-1 Creating 
+ Container async-measure-after-postgres-1 Created 
+ Container async-measure-after-async-server-1 Creating 
+ Container async-measure-after-async-server-1 Created 
+ Container async-measure-after-postgres-1 Starting 
+ Container async-measure-after-postgres-1 Started 
+ Container async-measure-after-postgres-1 Waiting 
+ Container async-measure-after-postgres-1 Healthy 
+ Container async-measure-after-async-server-1 Starting 
+ Container async-measure-after-async-server-1 Started 
+ Container async-measure-after-postgres-1 Waiting 
+ Container async-measure-after-async-server-1 Waiting 
+ Container async-measure-after-async-server-1 Healthy 
+ Container async-measure-after-postgres-1 Healthy 

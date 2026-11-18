@@ -1,0 +1,2 @@
+libdebuggerd_client: failed to read status response from tombstoned: timeout reached?
+debuggerd: failed to dump process 2068

@@ -1,0 +1,259 @@
+Building async-cli…
+Building the async-cli image…
+Starting the server stack on port 5190…
+
+── setup through the API ──
+PASS  register as admin
+PASS  create Local back-end /data/e2e-20261114212951 → OK
+PASS  e2e-A: enroll with a one-time code
+PASS  e2e-A: enrolling twice is refused
+PASS  e2e-B: enroll with a one-time code
+PASS  e2e-B: enrolling twice is refused
+PASS  both devices are listed for the account under their names
+PASS  A: status reaches the server, no folders yet
+PASS  A keeps its access token between commands (token.json)
+PASS  A: `sync` without folders says so
+
+── TwoWay ──
+PASS  create TwoWay Transport folder "two" → OK
+PASS  attach e2e-A to "two" → OK
+PASS  attach e2e-B to "two" → OK
+PASS  B: `folders` lists the TwoWay folder
+PASS  B: `sync --folder` with someone else's folder id is refused
+PASS  e2e-A: A uploads three files
+PASS  e2e-B: B downloads them
+PASS  A → B: files are byte-identical on B
+PASS  e2e-B: B uploads a new file and an edit
+PASS  e2e-A: A downloads them
+PASS  B → A: the new file and the edit reach A
+
+── TwoWay conflict ──
+PASS  e2e-A: A uploads clash.txt
+PASS  e2e-B: B downloads clash.txt
+PASS  e2e-A: A uploads its edit
+PASS  e2e-B: B syncs its concurrent edit
+PASS  B reports one conflict
+PASS  B keeps its version as a conflict copy
+PASS  the original name holds the version synced first (A's)
+PASS  e2e-A: A syncs
+PASS  the conflict copy reaches A
+
+── TwoWay deletion ──
+PASS  e2e-A: A uploads a deletion
+PASS  e2e-B: B applies it
+PASS  the file is gone on B
+PASS  B moved it to .async/trash (content intact)
+PASS  the storage keeps it in .async/trash
+PASS  the storage keeps the overwritten hello.txt in .async/versions
+PASS  e2e-A: A syncs again
+PASS  a sync without changes transfers nothing
+
+── pause, set-path, mass-deletion guard ──
+PASS  B: a paused folder is skipped
+PASS  B: resume
+PASS  create TwoWay Transport folder "bulk" → OK
+PASS  attach e2e-A to "bulk" → OK
+PASS  attach e2e-B to "bulk" → OK
+PASS  e2e-A: A uploads 12 files
+PASS  B: set-path moves the folder
+PASS  e2e-B: B downloads them into the new path
+PASS  B has all 12 files
+PASS  deleting all 12 files is refused without --allow-mass-delete
+PASS  A: --allow-mass-delete applies it
+PASS  B refuses to delete them all on its side too, and keeps them
+PASS  a missing local folder (unmounted disk) is not synced
+
+── Mirror Upload → Download ──
+PASS  create Mirror Transport folder "mirror" → OK
+PASS  attach e2e-A to "mirror" (Upload) → OK
+PASS  attach e2e-B to "mirror" (Download) → OK
+PASS  e2e-A: A (Upload) uploads
+PASS  e2e-B: B (Download) downloads
+PASS  B is a copy of A
+PASS  B's extra file is removed (Download makes it equal)
+PASS  e2e-B: B syncs its local edit
+PASS  B's local edit is replaced by the storage's version
+PASS  e2e-A: A syncs
+PASS  A (Upload) is not changed by B
+PASS  e2e-A: A uploads a deletion and an edit
+PASS  e2e-B: B follows
+PASS  the deletion and the edit reach B
+
+── Backup (Transport) ──
+PASS  create Backup Transport folder "backup" → OK
+PASS  attach e2e-A to "backup" → OK
+PASS  attach e2e-B to "backup" → OK
+PASS  the server prunes and checks the new Transport folder on its own schedule
+PASS  e2e-A: A backs up
+PASS  e2e-A: A backs up again
+PASS  the second snapshot reuses unchanged files
+PASS  B lists A's two snapshots, under A's device name
+PASS  B restores the newest snapshot
+PASS  the restore is byte-identical to A's folder
+PASS  a partial restore (--path notes) restores only that directory
+
+── Transport recovery key ──
+PASS  creating a Transport Backup folder shows its recovery key
+PASS  the folder afterwards says when its key was made, never the key
+PASS  e2e-A: A backs up the folder
+PASS  e2e-A: A backs it up again
+PASS  a device token cannot get a recovery key → Forbidden
+PASS  a new recovery key needs the owner's password
+PASS  the owner gets a new recovery key with the password
+PASS  copy the folder's directory off the storage
+PASS  offline: `snapshots --repo` lists both snapshots with the recovery key
+PASS  offline: `restore --repo` is byte-identical, with no server and no enrolled device
+PASS  the offline agent has no identity (it never talked to a server)
+PASS  the replaced recovery key no longer opens it
+PASS  `--repo` and `--folder` together are refused
+PASS  delete the folder (its row and server key; the storage stays)
+PASS  a new folder on the existing repository without its key is refused
+PASS  …and with a wrong key
+PASS  with its recovery key, the new folder takes the repository over
+PASS  the web UI lists the old snapshots of the taken-over folder
+PASS  e2e-A: A backs up into the taken-over folder
+PASS  the backup continues from the old snapshots (unchanged files reused)
+PASS  the history is intact: 3 snapshots
+PASS  the repository has two key files: the new server key and the recovery key (the old server key is removed)
+PASS  `secrets export-folder-keys` prints the folder's server key
+PASS  offline: the exported server key opens the repository too
+PASS  the server's log holds no recovery key
+
+── prune ──
+PASS  `prune` on a TwoWay folder is refused
+PASS  A: `prune` with every snapshot still kept removes nothing
+PASS  the folder's retention and maintenance schedule can be edited
+PASS  e2e-A: A backs up without the big file
+PASS  the backup forgets the two older snapshots
+PASS  forgetting snapshots alone frees no space on the storage
+PASS  A: `prune` reports what it removed
+PASS  the space is actually reclaimed on the storage (5,246,170 → 1,001 bytes)
+PASS  a restore after the prune is still byte-identical
+PASS  the server shows the device's prune (who, ok, bytes freed)
+
+── check ──
+PASS  B: `check --read-data 100` passes on the good repository
+PASS  A: `check` without --folder checks every Backup folder of the device
+PASS  alter a pack file on the storage
+PASS  B: `check` reports the altered pack and exits with 1
+PASS  the server shows the failed check for the folder
+
+── Backup (end-to-end) ──
+PASS  create Backup EndToEnd folder "e2e" → OK
+PASS  attach e2e-A to "e2e" → OK
+PASS  attach e2e-B to "e2e" → OK
+PASS  a backup before init-encryption is refused with a hint
+PASS  A: init-encryption prints a recovery key
+PASS  init-encryption a second time is refused
+PASS  e2e-A: A backs up end-to-end encrypted
+PASS  the storage holds no plaintext
+PASS  B cannot restore before unlocking
+PASS  B: unlock with a wrong passphrase fails
+PASS  B: unlock with the recovery key
+PASS  B restores A's end-to-end snapshot byte-identically
+PASS  e2e-B: B backs up into the same end-to-end repository
+PASS  A sees B's snapshot
+
+── run mode (SignalR) ──
+PASS  B: `run` starts a worker per folder
+PASS  e2e-A: A uploads live.txt (and tells the server)
+PASS  B's agent downloads it after folder.changed, without polling
+PASS  B's agent uploads a local change it noticed by itself
+PASS  B's agent prunes and checks the end-to-end folder on schedule and reports both
+PASS  A: `check` works on the end-to-end folder too
+PASS  A: `prune` works on the end-to-end folder too
+PASS  create TwoWay Transport folder "late" → OK
+PASS  attach e2e-A to "late" → OK
+PASS  e2e-A: A fills a new folder
+PASS  attach B to a new folder while it runs
+PASS  B's agent picks up the new folder (config.changed) and syncs it
+
+── agent in Docker (async-cli:e2e) ──
+PASS  start the async-cli container (enrolls from ASYNC_ENROLL_CODE)
+PASS  the container enrolled itself (platform Cli)
+PASS  attach the container to the TwoWay folder at /data/two
+PASS  the container downloads the folder into its /data mount
+
+── alerts (webhook) ──
+PASS  a webhook with a non-http(s) address is refused
+PASS  add a webhook channel (its Authorization header is stored, never shown)
+FAIL  "Send test" reaches the webhook, with the Authorization header
+      200 {"ok":true,"error":null}
+PASS  a device token cannot read alert channels → Forbidden
+PASS  create TwoWay Transport folder "watch" → OK
+PASS  attach e2e-A to "watch" → OK
+PASS  e2e-A: A syncs the watched folder once
+FAIL  after the (shortened) grace, the webhook gets an overdue alert for A on "watch"
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1
+FAIL  the alert has the documented payload (version, user, title, text)
+PASS  the web UI lists the open incident
+PASS  the overdue alert is sent once, not on every scan
+PASS  e2e-A: A syncs again
+FAIL  the webhook gets a "back to normal" message
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1 
+      POST /hook HTTP/1.1
+FAIL  the incident is resolved
+      [{"id":21,"kind":"Overdue","folderId":9,"folderName":"watch","deviceId":"01a1dbf7-7f37-7606-9c55-9cdff5964bcc","deviceName":"e2e-A","detail":"No successful run since 2026-11-14 21:33 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:33:50.813478Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:33:50.813478Z"},{"id":20,"kind":"Overdue","folderId":9,"folderName":"watch","deviceId":"01a1dbf7-7f37-7606-9c55-9cdff5964bcc","deviceName":"e2e-A","detail":"No successful run since 2026-11-14 21:31 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:31:44.544994Z","resolvedAt":"2026-11-14T21:33:29.759224Z","notifiedAt":"2026-11-14T21:31:44.544994Z"},{"id":19,"kind":"Overdue","folderId":8,"folderName":"late","deviceId":"01a1dbf7-8174-7eeb-ba7c-edd56521a145","deviceName":"e2e-B","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:31:14.46166Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:31:14.46166Z"},{"id":18,"kind":"Overdue","folderId":1,"folderName":"two","deviceId":"01a1dbf8-5970-7650-8505-a1fe8fbe8c4c","deviceName":"e2e-docker","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:31:11.443355Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:31:11.443355Z"},{"id":17,"kind":"Overdue","folderId":1,"folderName":"two","deviceId":"01a1dbf7-8174-7eeb-ba7c-edd56521a145","deviceName":"e2e-B","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:31:11.443355Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:31:11.443355Z"},{"id":16,"kind":"Overdue","folderId":8,"folderName":"late","deviceId":"01a1dbf7-7f37-7606-9c55-9cdff5964bcc","deviceName":"e2e-A","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:31:08.426689Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:31:08.426689Z"},{"id":15,"kind":"Overdue","folderId":1,"folderName":"two","deviceId":"01a1dbf7-7f37-7606-9c55-9cdff5964bcc","deviceName":"e2e-A","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:31:08.426689Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:31:08.426689Z"},{"id":14,"kind":"Overdue","folderId":7,"folderName":"e2e","deviceId":"01a1dbf7-8174-7eeb-ba7c-edd56521a145","deviceName":"e2e-B","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:30:56.391893Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:30:56.391893Z"},{"id":13,"kind":"Overdue","folderId":4,"folderName":"backup","deviceId":"01a1dbf7-8174-7eeb-ba7c-edd56521a145","deviceName":"e2e-B","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:30:56.391893Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:30:56.391893Z"},{"id":12,"kind":"Overdue","folderId":3,"folderName":"mirror","deviceId":"01a1dbf7-8174-7eeb-ba7c-edd56521a145","deviceName":"e2e-B","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:30:56.391893Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:30:56.391893Z"},{"id":11,"kind":"Overdue","folderId":7,"folderName":"e2e","deviceId":"01a1dbf7-7f37-7606-9c55-9cdff5964bcc","deviceName":"e2e-A","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:30:53.339617Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:30:53.339617Z"},{"id":10,"kind":"Overdue","folderId":4,"folderName":"backup","deviceId":"01a1dbf7-7f37-7606-9c55-9cdff5964bcc","deviceName":"e2e-A","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:30:47.322484Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:30:47.322484Z"},{"id":9,"kind":"Overdue","folderId":6,"folderName":"recovered","deviceId":"01a1dbf7-7f37-7606-9c55-9cdff5964bcc","deviceName":"e2e-A","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:30:41.302137Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:30:41.302137Z"},{"id":8,"kind":"Overdue","folderId":4,"folderName":"backup","deviceId":"01a1dbf7-8174-7eeb-ba7c-edd56521a145","deviceName":"e2e-B","detail":"No successful run since it was attached 2026-11-14 21:30 UTC (expected within 20 s).","openedAt":"2026-11-14T21:30:32.243725Z","resolvedAt":"2026-11-14T21:30:35.257917Z","notifiedAt":"2026-11-14T21:30:32.243725Z"},{"id":7,"kind":"Overdue","folderId":3,"folderName":"mirror","deviceId":"01a1dbf7-7f37-7606-9c55-9cdff5964bcc","deviceName":"e2e-A","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:30:32.243725Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:30:32.243725Z"},{"id":6,"kind":"Overdue","folderId":3,"folderName":"mirror","deviceId":"01a1dbf7-8174-7eeb-ba7c-edd56521a145","deviceName":"e2e-B","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:30:32.243725Z","resolvedAt":"2026-11-14T21:30:35.257917Z","notifiedAt":"2026-11-14T21:30:32.243725Z"},{"id":5,"kind":"CheckFailed","folderId":4,"folderName":"backup","deviceId":null,"deviceName":null,"detail":"The integrity check by e2e-B on 2026-11-14 21:30 UTC found problems: 2 problems: Tree f45b1bd1 cannot be read: The computed authentication tag did not match the input authentication tag.","openedAt":"2026-11-14T21:30:29.227513Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:30:29.227513Z"},{"id":4,"kind":"Overdue","folderId":2,"folderName":"bulk","deviceId":"01a1dbf7-7f37-7606-9c55-9cdff5964bcc","deviceName":"e2e-A","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:30:29.227513Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:30:29.227513Z"},{"id":3,"kind":"Failing","folderId":2,"folderName":"bulk","deviceId":"01a1dbf7-8174-7eeb-ba7c-edd56521a145","deviceName":"e2e-B","detail":"3 runs in a row failed since 2026-11-14 21:30 UTC: The folder /mnt/git/ASync/.claude/worktrees/task-04/artifacts/e2e/run/B/not-there does not exist (is the disk mounted?). Create it to start syncing into it.","openedAt":"2026-11-14T21:30:29.227513Z","resolvedAt":null,"notifiedAt":"2026-11-14T21:30:29.227513Z"},{"id":2,"kind":"Overdue","folderId":1,"folderName":"two","deviceId":"01a1dbf7-8174-7eeb-ba7c-edd56521a145","deviceName":"e2e-B","detail":"No successful run since it was resumed 2026-11-14 21:30 UTC (expected within 20 s).","openedAt":"2026-11-14T21:30:26.203808Z","resolvedAt":"2026-11-14T21:30:35.257917Z","notifiedAt":"2026-11-14T21:30:26.203808Z"},{"id":1,"kind":"Overdue","folderId":1,"folderName":"two","deviceId":"01a1dbf7-7f37-7606-9c55-9cdff5964bcc","deviceName":"e2e-A","detail":"No successful run since 2026-11-14 21:30 UTC (expected at least every 20 s).","openedAt":"2026-11-14T21:30:23.100768Z","resolvedAt":"2026-11-14T21:30:38.28397Z","notifiedAt":"2026-11-14T21:30:23.100768Z"}]
+PASS  the webhook's secret never appears in the server log
+
+── revocation ──
+PASS  remove B in the web UI → NoContent
+PASS  B's commands are refused afterwards
+PASS  B cannot sync any more
+PASS  e2e-A: A keeps syncing
+FAIL  B's running agent is disconnected and stops with an explanation
+      2026-11-14 22:30:33 info: agent[0] ASync agent 0.1.4: e2e-B → http://localhost:5190
+      2026-11-14 22:30:33 info: agent[0] Syncing "backup" (Backup) at /mnt/git/ASync/.claude/worktrees/task-04/artifacts/e2e/run/B/backup-b.
+      2026-11-14 22:30:33 dbug: agent[0] "backup": run requested (started).
+      2026-11-14 22:30:33 info: agent[0] Syncing "bulk" (TwoWay) at /mnt/git/ASync/.claude/worktrees/task-04/artifacts/e2e/run/B/not-there.
+      2026-11-14 22:30:33 dbug: agent[0] "bulk": run requested (started).
+      2026-11-14 22:30:33 info: agent[0] Syncing "e2e" (Backup) at /mnt/git/ASync/.claude/worktrees/task-04/artifacts/e2e/run/B/e2e-b.
+      2026-11-14 22:30:33 dbug: agent[0] "e2e": run requested (started).
+      2026-11-14 22:30:33 info: agent[0] Syncing "mirror" (Mirror) at /mnt/git/ASync/.claude/worktrees/task-04/artifacts/e2e/run/B/mirror.
+      2026-11-14 22:30:33 dbug: agent[0] "mirror": run requested (started).
+      2026-11-14 22:30:33 info: agent[0] Syncing "two" (TwoWay) at /mnt/git/ASync/.claude/worktrees/task-04/artifacts/e2e/run/B/two.
+      2026-11-14 22:30:33 dbug: agent[0] "two": run requested (started).
+      2026-11-14 22:30:33 warn: agent[0] "bulk" failed: The folder /mnt/git/ASync/.claude/worktrees/task-04/artifacts/e2e/run/B/not-there does not exist (is the disk mounted?). Create it to start syncing into it.
+      2026-11-14 22:30:33 info: agent[0] "two": 0 up, 0 down, 0 deleted.
+      2026-11-14 22:30:33 info: agent[0] "mirror": 0 up, 0 down, 0 deleted.
+      2026-11-14 22:30:33 info: agent[0] "e2e": Snapshot 274d5568: 0 new, 0 changed, 1 unchanged, 0 B added.
+      2026-11-14 22:30:33 info: agent[0] "backup": Snapshot 839d671c: 0 new, 0 changed, 0 unchanged, 0 B added.
+      2026-11-14 22:30:34 info: agent[0] "e2e": prune: Nothing to remove.
+      2026-11-14 22:30:34 info: agent[0] "e2e": check: 3 snapshots, 4 packs, 1 read back.
+      2026-11-14 22:30:37 dbug: agent[0] "two": run requested (changed on another device).
+      2026-11-14 22:30:37 info: agent[0] "two": 0 up, 1 down, 0 deleted.
+      2026-11-14 22:30:43 dbug: agent[0] "two": run requested (files changed).
+      2026-11-14 22:30:43 info: agent[0] "two": 1 up, 0 down, 0 deleted.
+      2026-11-14 22:30:47 info: agent[0] Syncing "late" (TwoWay) at /mnt/git/ASync/.claude/worktrees/task-04/artifacts/e2e/run/B/late.
+      2026-11-14 22:30:47 dbug: agent[0] "late": run requested (started).
+      2026-11-14 22:30:47 info: agent[0] "late": 0 up, 1 down, 0 deleted.
+      2026-11-14 22:30:48 info: agent[0] Syncing "two" (TwoWay) at /mnt/git/ASync/.claude/worktrees/task-04/artifacts/e2e/run/B/two.
+      2026-11-14 22:30:48 dbug: agent[0] "two": run requested (started).
+      2026-11-14 22:30:48 info: agent[0] "two": 0 up, 0 down, 0 deleted.
+      2026-11-14 22:30:52 dbug: agent[0] "late": run requested (files changed).
+      2026-11-14 22:30:52 info: agent[0] "late": 0 up, 0 down, 0 deleted.
+PASS  B never received the change made after the revocation
+PASS  the server closed B's live-updates connection
+PASS  A is unaffected
+
+6 check(s) failed:
+  - "Send test" reaches the webhook, with the Authorization header
+  - after the (shortened) grace, the webhook gets an overdue alert for A on "watch"
+  - the alert has the documented payload (version, user, title, text)
+  - the webhook gets a "back to normal" message
+  - the incident is resolved
+  - B's running agent is disconnected and stops with an explanation
+Kept the stack (remove it with: docker compose -p async-e2e down -v) and /mnt/git/ASync/.claude/worktrees/task-04/artifacts/e2e.

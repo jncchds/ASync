@@ -1,0 +1,274 @@
+
+[1m── build and start[0m
+  [32m✓[0m APK ASync-0.1.5-android.apk (30M)
+  [32m✓[0m async-cli published
+  [32m✓[0m server on http://localhost:5193 (the phone uses http://10.0.2.2:5193), account admin, storage 1
+  [32m✓[0m device: Android SDK built for x86_64, Android 15
+  [32m✓[0m installed; the app starts on the enroll page
+
+[1m── enroll[0m
+  [32m✓[0m device-code flow: the code 96JT-K4X4 is shown
+  [32m✓[0m the phone's browser did not open: the code is approved on a computer
+  [32m✓[0m it says where: On your computer, open http://10.0.2.2:5193/devices/approve?code=96JT-K4X4 (or Devices → Approve in the web UI), sign in and enter this code.
+  [32m✓[0m Cancel gives the request up
+  [32m✓[0m an opened async://pair link brings the app up with the server and code filled in
+  [32m✓[0m the QR scanner opens (camera preview, ZXing)
+  [32m✓[0m Back closes the scanner
+  [32m✓[0m enrolled by code (Enrolled "Android SDK built for x86_64". Attach folders to it in the web UI.)
+  [32m✓[0m the server lists the device as Android (01a1e82c-b237-74b7-832b-41de596845d2)
+  [32m✓[0m signed in: the server accepted the Keystore key's signature
+  [32m✓[0m device key: EC P-256 in the Android Keystore, not exportable (Software)
+  [32m✓[0m identity.json sealed with the Keystore AES key (only a key reference inside, no user name readable)
+
+[1m── a TwoWay folder on a SAF tree[0m
+  [32m✓[0m the folder attached in the web UI appears
+  [32m✓[0m the system picker opened at ASyncSmoke/docs: Use this folder
+  [32m✓[0m Allow ASync to access files in docs
+  [32m✓[0m the agent syncs the tree content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs
+  [32m✓[0m the server has the content URI as the local path
+  [32m✓[0m local tree contract on the SAF tree: 14/14 passed (SafTree)
+  [32m✓[0m async-cli put from-cli.txt on the server
+  [32m✓[0m Sync now: 0 up, 0 down, 0 deleted
+  [32m✓[0m down: from-cli.txt is on the phone
+  [32m✓[0m up: hello-phone.txt is on the server
+  [32m✓[0m and on the other device
+  [32m✓[0m the folder shows Syncing with live progress while it runs
+  [32m✓[0m the foreground-service notification (channel async-transfers) shows during the transfer
+  [32m✓[0m WorkManager's foreground service (type dataSync) holds the transfer
+  [32m✓[0m run finished: 1 up, 0 down, 0 deleted
+  [32m✓[0m the edit reached the phone
+  [32m✓[0m the 200 MB file went up in parts
+  [32m✓[0m the delete on the phone reached the server
+  [32m✓[0m video.bin arrived on the computer byte for byte
+  [32m✓[0m a second run changes nothing (SAF times are not set, nothing looks changed)
+
+[1m── pause, resume, back[0m
+  [32m✓[0m Pause
+  [32m✓[0m the server shows it paused
+  [32m✓[0m Resume
+  [32m✓[0m the Back button closes the settings
+  [32m✓[0m and the app stays open
+
+[1m── a Backup folder on a SAF tree, restored by async-cli[0m
+  [32m✓[0m picked ASyncSmoke/photos
+  [32m✓[0m backed up: Snapshot f3e792aa: 0 new, 0 changed, 2 unchanged, 0 B added
+  [32m✓[0m async-cli lists the phone's snapshot
+  [32m✓[0m async-cli restored it
+  [32m✓[0m the restored files match the phone's byte for byte
+
+[1m── an end-to-end Backup folder set up on the phone[0m
+  [32m✓[0m the new end-to-end folder shows "Not set up" on the phone
+  [32m✓[0m set up in the app; the recovery key is shown once
+  [32m✓[0m the server knows the repository is ready
+  [32m✓[0m and the folder is unlocked on the phone
+  [32m✓[0m backed up end-to-end encrypted: Snapshot 16d30323: 0 new, 0 changed, 2 unchanged, 0 B added
+  [32m✓[0m async-cli unlocks it with the passphrase chosen on the phone
+  [32m✓[0m and restores the phone's files byte for byte
+
+[1m── documents provider: ASync in the Files app[0m
+  [32m✓[0m another caller without MANAGE_DOCUMENTS (the adb shell) is refused
+  [32m✓[0m one root: ASync — 10.0.2.2 (admin)
+  [32m✓[0m its folders: Phone docs, Phone photos
+  [32m✓[0m Phone docs lists from-cli.txt, video.bin (not .async)
+  [32m✓[0m a file uploaded by async-cli, read by another process with a grant for it, byte for byte (from the cache)
+  [32m✓[0m a document without a grant stays refused to it
+  [32m✓[0m the 200 MB file streams through a proxy descriptor (/mnt/appfuse/10180_0/2), byte for byte, not cached
+  [32m✓[0m the transfer notification kept the network for it
+  [32m✓[0m created f/1/provider-note.txt
+  [32m✓[0m the write is on the server at once
+  [32m✓[0m async-cli syncs it down byte for byte
+  [32m✓[0m the phone's own synced copy (the SAF folder) got it through the run the write triggered
+  [32m✓[0m replacing it keeps the old content as a version
+  [32m✓[0m and the phone's copy follows again
+  [32m✓[0m no conflict copies from the provider's own writes
+  [32m✓[0m renamed to f/1/provider-renamed.txt
+  [32m✓[0m a new directory (f/1/Scans) is listed (kept on the phone until a file goes in)
+  [32m✓[0m copied into it: f/1/Scans/provider-renamed.txt
+  [32m✓[0m deleted into the folder's trash (restorable in the web UI)
+  [32m✓[0m search finds provider-renamed.txt
+  [32m✓[0m recent documents list it
+  [32m✓[0m a thumbnail of an image: 67x150
+  [32m✓[0m the Backup folder shows its snapshots: 2026-11-17 07:28 · 48e38edb, 2026-11-17 07:28 · f3e792aa, 2026-11-17 07:28 · 6b0e8240
+  [32m✓[0m a snapshot's tree, read-only: 2026, cat.jpg
+  [32m✓[0m a file from the snapshot opens byte for byte (cached)
+  [32m✓[0m and streamed (proxy descriptor, chunks located through the index) byte for byte
+  [32m✓[0m writing into a snapshot is refused (error: FileNotFoundException: This document is read-only.)
+
+[1m── background work: WorkManager, battery, conditions[0m
+  [32m✓[0m the dashboard explains why and offers the battery-optimisation exemption
+  [32m✓[0m Allow opens the system's question; ASync is exempt now
+  [32m✓[0m and the prompt is gone
+  [32m✓[0m each folder has its periodic WorkManager job
+  [32m✓[0m JobScheduler holds the job of Phone docs (work 61fc3c50-e37c-4160-8f06-432b0c5ab466, job androidx.work.systemjobscheduler 23)
+  [32m✓[0m the work is due in 25 s; the app is in the background and its process is gone (am kill)
+  [32m✓[0m while-asleep.txt synced down with the app closed
+    (the app's process was started for: nothing since the log was cleared)
+  [32m✓[0m the scheduled run: Background run of "Phone docs" (scheduled): 0 up, 0 down, 0 deleted
+  [32m✓[0m without the app coming to the front
+
+[1m── background work: a Wi-Fi-only folder on mobile data[0m
+  [32m✓[0m Wi-Fi only, set in the web UI, reaches the phone
+  [32m✓[0m Wi-Fi off: the phone is on the emulator's (metered) mobile network
+  [32m✓[0m the folder's job waits for an unmetered network (Unsatisfied constraints: TIMING_DELAY CONNECTIVITY [0x90000000])
+  [32m✓[0m a wake-up on mobile data: the run waits ("Waiting for Wi-Fi")
+  [32m✓[0m nothing was downloaded over mobile data
+  [32m✓[0m the app shows why it waits
+  [32m✓[0m Wi-Fi back
+  [32m✓[0m on Wi-Fi the file comes down
+  [32m✓[0m through the folder's job, now that its constraint holds
+
+[1m── background work: UnifiedPush wake-ups (ntfy)[0m
+  [32m✓[0m the ntfy app is installed (the UnifiedPush distributor)
+  [32m✓[0m ntfy's default server is http://172.31.250.10:8093
+  [32m✓[0m ASync finds ntfy as a distributor
+  [32m✓[0m registered with ntfy; the endpoint went to the server
+  [32m✓[0m the Devices page shows UnifiedPush through the ntfy server (its host; the endpoint itself is not shown)
+  [32m✓[0m the app is closed again (process killed)
+  [32m✓[0m the change reached the closed app through a UnifiedPush wake-up
+  [32m✓[0m logged: woken by the server (changed)
+  [32m✓[0m the server recorded the wake-up as delivered
+  [32m✓[0m closed once more, to be browsed
+  [32m✓[0m the Devices page says it is asleep and can be woken for browsing
+  [32m✓[0m browsing it woke the closed app, which connected and answered in 2 s ("Android SDK built for x86_64" has no All files access: choo…)
+  [32m✓[0m logged: woken by the server for browsing (no folder run)
+  [32m✓[0m no folder ran for it
+  [32m✓[0m the local reminder notification: Phone docs: nothing synced for 3 days
+  [32m✓[0m reminders are scheduled (moved on after each successful run)
+
+[1m── All files access: folders anywhere on the phone[0m
+  [32m✓[0m a test volume: the virtual SD card at /storage/C9D1-1C13
+  [32m✓[0m the device list says the phone needs All files access to be browsed
+  [32m✓[0m browsing it from the API: 409 ""Android SDK built for x86_64" has no All files access: choose the folder in the app, or t…"
+  [31m✗[0m root folder appears
+      {"page":"DashboardViewModel","message":null,"state":"Connected","device":"Android SDK built for x86_64","enrollError":null,"enrollServer":"http://10.0.2.2:5193","enrollCode":"","useCode":true,"pendingCode":null,"approveHint":null,"dialog":false,"folderDialog":null,"allFiles":false,"settings":false,"addFolder":null,"batteryPrompt":false,"pushText":"The server can wake this phone through ntfy.","folders":[{"id":1,"name":"Phone docs","mode":"TwoWay","path":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs","activity":"Idle","paused":false,"locked":false,"lastOk":null,"lastMessage":null,"lastAt":null,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":null},{"id":2,"name":"Phone photos","mode":"Backup","path":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fphotos","activity":"Idle","paused":false,"locked":false,"lastOk":null,"lastMessage":null,"lastAt":null,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":null}]}
+  [31m✗[0m explanation
+      {}
+  [31m✗[0m system page
+          topResumedActivity=ActivityRecord{e814742 u0 ua.pp.chds.async/.MainActivity t219}
+    (the switch was not tapped: granted with appops)
+  [31m✗[0m picker after grant
+      {"page":"DashboardViewModel","message":null,"state":"Connected","device":"Android SDK built for x86_64","enrollError":null,"enrollServer":"http://10.0.2.2:5193","enrollCode":"","useCode":true,"pendingCode":null,"approveHint":null,"dialog":false,"folderDialog":null,"allFiles":true,"settings":false,"addFolder":null,"batteryPrompt":false,"pushText":"The server can wake this phone through ntfy.","folders":[{"id":1,"name":"Phone docs","mode":"TwoWay","path":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs","activity":"Idle","paused":false,"locked":false,"lastOk":true,"lastMessage":"0 up, 0 down, 0 deleted","lastAt":1794897640759,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":"/storage/emulated/0/ASyncSmoke/docs"},{"id":2,"name":"Phone photos","mode":"Backup","path":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fphotos","activity":"Idle","paused":false,"locked":false,"lastOk":true,"lastMessage":"Snapshot 941b71e1: 0 new, 0 changed, 2 unchanged, 0 B added","lastAt":1794897640739,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":"/storage/emulated/0/ASyncSmoke/photos"},{"id":4,"name":"Phone root","mode":"TwoWay","path":"choose on the phone","activity":"Idle","paused":false,"locked":false,"lastOk":false,"lastMessage":"The folder /choose on the phone does not exist (is the disk mounted?). Create it to start syncing into it.","lastAt":1794897641105,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":null}]} {}
+  [31m✗[0m picker root
+      {}
+jq: parse error: Invalid numeric literal at line 1, column 6
+  [31m✗[0m android data offered
+      error: InvalidOperationException: No folder dialog.
+  [32m✓[0m with the access the device list says the phone can be browsed
+  [32m✓[0m browsing it from the API lists the storage's root (["Alarms","Android","ASyncSmoke","Audiobooks","DCIM","Documents"])
+  [32m✓[0m and Android/ without data and obb (["media"])
+  [32m✓[0m Android/data itself is refused (422: out of reach)
+  [32m✓[0m the volumes: Internal storage (/storage/emulated/0), Virtual SD card (/storage/C9D1-1C13)
+jq: parse error: Invalid numeric literal at line 1, column 6
+  [31m✗[0m sd root
+      error: InvalidOperationException: No folder dialog.
+  [31m✗[0m root path
+      error: InvalidOperationException: No folder dialog. {"page":"DashboardViewModel","message":null,"state":"Connected","device":"Android SDK built for x86_64","enrollError":null,"enrollServer":"http://10.0.2.2:5193","enrollCode":"","useCode":true,"pendingCode":null,"approveHint":null,"dialog":false,"folderDialog":null,"allFiles":true,"settings":false,"addFolder":null,"batteryPrompt":false,"pushText":"The server can wake this phone through ntfy.","folders":[{"id":1,"name":"Phone docs","mode":"TwoWay","path":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fdocs","activity":"Idle","paused":false,"locked":false,"lastOk":true,"lastMessage":"0 up, 0 down, 0 deleted","lastAt":1794897640759,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":"/storage/emulated/0/ASyncSmoke/docs"},{"id":2,"name":"Phone photos","mode":"Backup","path":"content://com.android.externalstorage.documents/tree/primary%3AASyncSmoke%2Fphotos","activity":"Idle","paused":false,"locked":false,"lastOk":true,"lastMessage":"Snapshot 941b71e1: 0 new, 0 changed, 2 unchanged, 0 B added","lastAt":1794897640739,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":"/storage/emulated/0/ASyncSmoke/photos"},{"id":4,"name":"Phone root","mode":"TwoWay","path":"choose on the phone","activity":"Idle","paused":false,"locked":false,"lastOk":false,"lastMessage":"The folder /choose on the phone does not exist (is the disk mounted?). Create it to start syncing into it.","lastAt":1794897641105,"waiting":null,"needsSetup":false,"unmeteredOnly":false,"realPathOffer":null}]}
+  [31m✗[0m server real path
+      {"id":4,"name":"Phone root","mode":"TwoWay","encryption":"Transport","kind":"Files","storageBackendId":1,"storageBackendName":"smoke","rootPath":"root","intervalMinutes":60,"excludes":[],"retention":{"last":0,"hourly":0,"daily":7,"weekly":4,"monthly":12,"yearly":0,"withinHours":24},"versionsKeepDays":30,"trashKeepDays":30,"revision":2,"repositoryReady":true,"devices":[{"deviceId":"01a1e82c-b237-74b7-832b-41de596845d2","deviceName":"Android SDK built for x86_64","platform":"Android","localPath":"choose on the phone","direction":null,"paused":false,"lastSyncAt":"2026-11-17T06:40:41.870565Z","lastSyncOk":false,"lastSyncMessage":"The folder /choose on the phone does not exist (is the disk mounted?). Create it to start syncing into it.","conditions":{"unmeteredOnly":false,"chargingOnly":false,"batteryNotLow":false},"media":null,"mediaCounts":null}],"createdAt":"2026-11-17T06:37:39.43292Z","pruneIntervalDays":7,"checkIntervalDays":30,"checkReadDataPercent":10,"lastPrune":null,"lastCheck":null,"recoveryKeyCreatedAt":null,"recoveryKey":null,"usage":null,"addedFromDevice":null}
+  [31m✗[0m real path tree contract
+      0/14 passed (FileSystemTree)
+      FAIL root exists and starts empty: IOException: Read-only file system : '/choose on the phone'
+      FAIL write, stat and read a file: IOException: Read-only file system : '/choose on the phone'
+      FAIL append continues a file: IOException: Read-only file system : '/choose on the phone'
+      FAIL writing creates parent directories: IOException: Read-only file system : '/choose on the phone'
+      FAIL list shows files and directories: IOException: Read-only file system : '/choose on the phone'
+      FAIL stat of a missing path is null: IOException: Read-only file system : '/choose on the phone'
+      FAIL move renames in place: IOException: Read-only file system : '/choose on the phone'
+      FAIL move into another directory: IOException: Read-only file system : '/choose on the phone'
+      FAIL move refuses an existing target unless overwriting: IOException: Read-only file system : '/choose on the phone'
+      FAIL delete file and directory: IOException: Read-only file system : '/choose on the phone'
+      FAIL deleting what is missing does nothing: IOException: Read-only file system : '/choose on the phone'
+      FAIL modification time set or reported unsupported: IOException: Read-only file system : '/choose on the phone'
+      FAIL listing a missing directory throws: IOException: Read-only file system : '/choose on the phone'
+      FAIL names with spaces and unicode: IOException: Read-only file system : '/choose on the phone'
+  [31m✗[0m root sync
+      {"ok":false,"message":"The folder /choose on the phone does not exist (is the disk mounted?). Create it to start syncing into it.","skipped":false}
+  [31m✗[0m root upload
+  [32m✓[0m nothing of Android/data or Android/obb went up
+  [32m✓[0m and on the other device
+  [31m✗[0m root download
+      {"ok":false,"message":"The folder /choose on the phone does not exist (is the disk mounted?). Create it to start syncing into it.","skipped":false}
+  [31m✗[0m root idempotent
+      The folder /choose on the phone does not exist (is the disk mounted?). Create it to start syncing into it.
+  [32m✓[0m Phone docs (a document tree) is offered its real path /storage/emulated/0/ASyncSmoke/docs
+  [32m✓[0m switched: "Phone docs" now syncs at /storage/emulated/0/ASyncSmoke/docs.
+  [32m✓[0m its sync state was kept: 0 up, 0 down, 0 deleted (no upload again, no conflicts)
+  [32m✓[0m the server's files are as before
+  [32m✓[0m no conflict copies on the phone
+  [32m✓[0m Settings shows All files access as allowed
+  [32m✓[0m turned off: Android stops the app's process
+  [31m✗[0m revoked run
+      {"ok":false,"message":"The folder /choose on the phone does not exist (is the disk mounted?). Create it to start syncing into it.","skipped":false}
+  [32m✓[0m nothing was deleted on the server
+  [32m✓[0m nor on the phone
+  [31m✗[0m background revoked
+      [{"id":1,"name":"Phone docs","activity":"Idle","waiting":null,"lastMessage":"All files access was turned off for ASync, so this folder cannot be reached. Nothing was changed here or on the server. Turn it on again in Settings → Folders on this phone, or choose the folder with the system picker.","lastAt":1794897789439},{"id":2,"name":"Phone photos","activity":"Idle","waiting":null,"lastMessage":"Snapshot 7d3cd4c9: 0 new, 0 changed, 2 unchanged, 0 B added","lastAt":1794897790303},{"id":4,"name":"Phone root","activity":"Idle","waiting":null,"lastMessage":"The folder /choose on the phone does not exist (is the disk mounted?). Create it to start syncing into it.","lastAt":1794897789431}]
+  [32m✓[0m the app does not crash
+  [31m✗[0m after re-grant
+      {"ok":false,"message":"The folder /choose on the phone does not exist (is the disk mounted?). Create it to start syncing into it.","skipped":false}
+
+[1m── adding folders from the app (task 18)[0m
+  [32m✓[0m the phone (enrolled with a one-time code) may add folders
+  [32m✓[0m New folder… asks the server what the phone may use: ["smoke (server disk)"]
+  [32m✓[0m the directory on the storage follows the name (phone-new)
+  [32m✓[0m Choose folder… opens the All files access picker
+  [32m✓[0m the real path is the form's local folder (/storage/emulated/0/ASyncNew)
+  [32m✓[0m created: "Phone new" was created and syncs /storage/emulated/0/ASyncNew.
+  [32m✓[0m it is on the dashboard at once, syncing /storage/emulated/0/ASyncNew
+  [32m✓[0m the web UI sees it: TwoWay, only the phone, "added from Android SDK built for x86_64"
+  [32m✓[0m up: the phone's file is on the server (0 up, 0 down, 0 deleted)
+  [32m✓[0m async-cli gets it
+  [32m✓[0m down: async-cli's file arrived on the phone (0 up, 0 down, 0 deleted)
+  [32m✓[0m Add to a folder… lists the account's folders the phone is not in: ["Phone root","Phone secrets","Shared"]
+  [32m✓[0m joined: This device now syncs "Shared" at /storage/emulated/0/ASyncJoined.
+  [32m✓[0m Shared is on the dashboard
+  [32m✓[0m the phone downloads the folder's files (0 up, 0 down, 0 deleted)
+  [32m✓[0m the web UI lists both devices in it
+  [32m✓[0m with "May add folders" off: "Adding folders from this device is turned off. Allowed in the web UI under Devices ("May add folders")."
+  [32m✓[0m allowed again, Try again shows the form
+  [32m✓[0m the owner deletes both in the web UI
+  [32m✓[0m and they leave the phone's dashboard
+
+[1m── photos and videos (task 19)[0m
+/mnt/git/ASync/.claude/worktrees/task-19-android-photos/artifacts/android-smoke/media/cam-1.jpg: 1 file pushed, 0 skipped. 11.9 MB/s (848 bytes in 0.000s)
+/mnt/git/ASync/.claude/worktrees/task-19-android-photos/artifacts/android-smoke/media/cam-2.jpg: 1 file pushed, 0 skipped. 20.1 MB/s (847 bytes in 0.000s)
+/mnt/git/ASync/.claude/worktrees/task-19-android-photos/artifacts/android-smoke/media/clip.mp4: 1 file pushed, 0 skipped. 282.7 MB/s (300000 bytes in 0.001s)
+3 files pushed, 0 skipped. 2.7 MB/s (301695 bytes in 0.108s)
+/mnt/git/ASync/.claude/worktrees/task-19-android-photos/artifacts/android-smoke/media/trip-1.jpg: 1 file pushed, 0 skipped. 7.6 MB/s (734 bytes in 0.000s)
+/mnt/git/ASync/.claude/worktrees/task-19-android-photos/artifacts/android-smoke/media/trip-copy.jpg: 1 file pushed, 0 skipped. 13.9 MB/s (848 bytes in 0.000s)
+2 files pushed, 0 skipped. 0.0 MB/s (1582 bytes in 0.055s)
+  [32m✓[0m seeded the library: SmokeCamera (2 photos, 1 video) and SmokeTrip (2 photos, one a copy of a SmokeCamera photo)
+  [32m✓[0m a Photos folder made in the web UI (folder 7, with its recovery key)
+  [32m✓[0m it is on the phone's dashboard
+  [32m✓[0m without permission the Photos screen explains why ASync asks
+  [32m✓[0m the system's question: Allow all
+  [32m✓[0m ASync may read all photos and videos now
+  [32m✓[0m the album list comes live from the phone: ["SmokeCamera 2+1","SmokeTrip 2+0"]
+  [32m✓[0m SmokeCamera chosen in the web UI; the phone's agent has it: "1 album: SmokeCamera"
+  [32m✓[0m backed up: Snapshot 0b3fd5c5: 2 photos, 1 video (294.6 KB), 0 new, 0 changed, 6 unchanged, 0 B added
+  [32m✓[0m the web UI shows 2 photos, 1 video for the phone
+  [32m✓[0m async-cli restored the snapshot offline (copy of the repository + recovery key)
+  [32m✓[0m the tree is <year>/<month>/<name>~<id>.<ext> plus a .json each, SmokeCamera only: 2026/11/cam-1~1000002304.jpg 2026/11/cam-1~1000002304.json 2026/11/cam-2~1000002305.jpg 2026/11/cam-2~1000002305.json 2026/11/clip~1000002306.json 2026/11/clip~1000002306.mp4 
+  [32m✓[0m the originals are byte-identical to the phone's files (EXIF location kept: requireOriginal)
+  [32m✓[0m its sidecar: id, name, type, size, dates, dimensions, location, album, relative path
+  [32m✓[0m the web snapshot browser lists 2026/11 and downloads the original
+  [32m✓[0m the media content trigger is scheduled
+/mnt/git/ASync/.claude/worktrees/task-19-android-photos/artifacts/android-smoke/media/cam-3.jpg: 1 file pushed, 0 skipped. 1.9 MB/s (734 bytes in 0.000s)
+  [32m✓[0m the new photo started a backup by itself: Snapshot 64774a27: 3 photos, 1 video (295.3 KB), 2 new, 0 changed, 6 unchanged, 1.3 KB added
+  [32m✓[0m and it holds 3 photos now
+  [32m✓[0m and the next trigger is waiting
+  [32m✓[0m Restore into the library… offers the snapshots, newest first: just now (2026-11-17 07:47) · this phone · 8 files · 9637d49c
+  [32m✓[0m SmokeCamera wiped on the phone
+  [31m✗[0m empty selection
+      {"ok":false,"message":"The photo library shows nothing of what this folder backs up now (were the photos deleted or moved, or ASync\u0027s access narrowed?). No snapshot was made: the last one keeps them. Restore it, or choose other albums.","skipped":false}
+  [32m✓[0m restored into the library: 4 restored, 0 already in the library
+  [32m✓[0m back in DCIM/SmokeCamera, byte for byte, and in MediaStore
+  [32m✓[0m a second restore skips what is there: 0 restored, 4 already in the library
+  [32m✓[0m the Photos folder deleted in the web UI
+
+[1m── restart[0m
+  [32m✓[0m after a restart: still enrolled, signed in again, both folders there
+
+[1m── result[0m
+18 check(s) failed.
+exit 1

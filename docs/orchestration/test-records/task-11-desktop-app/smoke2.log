@@ -1,0 +1,84 @@
+
+[1m── build, server stack, display[0m
+  [32m✓[0m async-desktop and async-cli published
+  [32m✓[0m server on http://localhost:5192
+  [32m✓[0m account admin, storage back-end 1
+  [32m✓[0m Xvfb :90, private D-Bus session
+
+[1m── no agent: the app installs it[0m
+  [32m✓[0m without an agent the app offers to install it
+  [32m✓[0m tray: problem (no agent)
+  [32m✓[0m Install and start: the agent runs and answers (enroll page)
+  [32m✓[0m the user unit runs async-desktop service run
+  [32m✓[0m async-agent.service is active
+
+[1m── enroll[0m
+  [32m✓[0m device-code flow: the code is shown
+  [32m✓[0m the approval page was opened (AFQR-BRMQ)
+  [32m✓[0m Cancel gives up the request
+  [32m✓[0m enrolled by code: the dashboard shows desktop-smoke
+  [32m✓[0m the server lists the device (01a1e094-5530-7f43-af53-34854fb4b30b, platform Linux)
+  [32m✓[0m connected
+  [32m✓[0m tray: ok
+
+[1m── a folder attached in the web UI[0m
+  [32m✓[0m the folder appears live (no reload)
+  [32m✓[0m choose a local folder: the agent now syncs /mnt/git/ASync/.claude/worktrees/task-11-desktop-app/artifacts/desktop-smoke/docs
+  [32m✓[0m the server has the new local path
+  [32m✓[0m the folder synced: hello.txt is on the server
+
+[1m── sync with live progress[0m
+  [32m✓[0m the folder shows Syncing while it runs
+  [32m✓[0m live progress from the event stream: 0 of 1 files · 0 B of 143 MB
+  [32m✓[0m tray: syncing
+  [32m✓[0m the run finished: 1 up, 0 down, 0 deleted
+  [32m✓[0m big.bin is on the server
+
+[1m── pause and resume[0m
+  [32m✓[0m Pause (folder card)
+  [32m✓[0m the server shows it paused
+  [32m✓[0m Resume (folder card)
+  [32m✓[0m tray: Pause all
+  [32m✓[0m tray: Resume all
+  [31m✗[0m open folder
+      http://localhost:5192/devices/approve?code=AFQR-BRMQ
+      /mnt/git/ASync/.claude/worktrees/task-11-desktop-app/artifacts/desktop-smoke/docs/
+
+[1m── end-to-end folder: unlock[0m
+  [32m✓[0m a second device (async-cli) set up the end-to-end folder Vault
+  [32m✓[0m Vault appears, locked on this device
+  [32m✓[0m tray: problem (a locked folder)
+  [32m✓[0m the unlock dialog opens
+  [32m✓[0m a wrong passphrase keeps the dialog open
+  [32m✓[0m unlocked with the passphrase
+  [32m✓[0m Vault backed up: Snapshot cf7308f7: 1 new, 0 changed, 0 unchanged, 9 B added
+  [32m✓[0m the passphrase never reaches a log (app log, journal)
+
+[1m── a failing folder notifies[0m
+  [31m✗[0m failure
+      {"page": "DashboardViewModel", "settings": false, "dialog": null, "tray": "Ok", "trayToolTip": "ASync: up to date", "message": "Documents: 0 up, 0 down, 2 deleted", "messageIsError": false, "windowVisible": true, "agentState": "Connected", "device": "desktop-smoke", "enrollError": null, "userCode": null, "folders": [{"id": 1, "name": "Documents", "state": "Up to date", "localPath": "/mnt/git/ASync/.claude/worktrees/task-11-desktop-app/artifacts/desktop-smoke/docs", "paused": false, "locked": false, "busy": false, "progress": "", "lastResult": "0 up, 0 down, 2 deleted", "lastOk": true, "next": "Every 60 min", "alert": null}, {"id": 2, "name": "Vault", "state": "Up to date", "localPath": "/mnt/git/ASync/.claude/worktrees/task-11-desktop-app/artifacts/desktop-smoke/vault", "paused": false, "locked": false, "busy": false, "progress": "", "lastResult": "Snapshot cf7308f7: 1 new, 0 changed, 0 unchanged, 9 B added", "lastOk": true, "next": "Every 60 min", "alert": null}]}
+  [32m✓[0m desktop notification: --app-name=ASync --icon=folder-sync Sync failed: Documents The folder /mnt/git/ASync/.clau
+  [32m✓[0m syncs again after the fix
+  [32m✓[0m notification: Documents syncs again
+
+[1m── settings, web UI, start at login[0m
+  [32m✓[0m settings open
+  [32m✓[0m start at login: /home/chds/.config/autostart/ua.pp.chds.async.desktop
+  [32m✓[0m start at login off: removed
+  [31m✗[0m web UI
+      http://localhost:5192/
+
+[1m── window, tray and single instance[0m
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+  File "/usr/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/usr/lib/python3.14/json/decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/json/decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+Kept the stack (remove it with: docker compose -p async-desktop-smoke down -v) and /mnt/git/ASync/.claude/worktrees/task-11-desktop-app/artifacts/desktop-smoke.
+exit 1

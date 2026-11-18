@@ -1,0 +1,7 @@
+
+[1m── build and start[0m
+  [32m✓[0m APK ASync-0.1.6-android.apk (30M)
+  [32m✓[0m async-cli published
+  [32m✓[0m server on http://localhost:5193 (the phone uses http://10.0.2.2:5193), account admin, storage 1
+  [32m✓[0m device: Android SDK built for x86_64, Android 15
+  [32m✓[0m installed; the app starts on the enroll page
