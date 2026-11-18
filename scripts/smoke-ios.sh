@@ -472,14 +472,18 @@ if [[ -n "$shots" ]]; then
   ctl photos-ask >/dev/null
   sleep 3
   shot_system photos-permission-dialog
-  # The same for contacts and calendars (task 24), each from a fresh launch so the questions do not stack.
+  # The same for contacts and calendars (task 24). An open question outlives the app's relaunch (task 24's first run showed the
+  # photo question again), so the simulator is restarted before each.
+  reboot_sim() { xcrun simctl shutdown "$udid"; xcrun simctl boot "$udid"; xcrun simctl bootstatus "$udid" -b >/dev/null; }
   xcrun simctl privacy "$udid" reset contacts "$bundle" >/dev/null 2>&1 || true
   xcrun simctl privacy "$udid" reset calendar "$bundle" >/dev/null 2>&1 || true
+  reboot_sim
   launch 11
   ctl "notifications off" >/dev/null
   ctl "pim-ask contacts" >/dev/null
   sleep 3
   shot_system contacts-permission-dialog
+  reboot_sim
   launch 12
   ctl "notifications off" >/dev/null
   ctl "pim-ask calendars" >/dev/null

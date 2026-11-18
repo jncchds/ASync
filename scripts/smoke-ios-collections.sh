@@ -149,9 +149,11 @@ api GET "/api/folders/$kf" | jq -e '.devices[0].collectionCounts.items == 3 and 
   && pass "the web UI shows 3 events in 1 calendar for the iPhone" || fail "counts on the server" "$(api GET "/api/folders/$kf")"
 shot contacts-dashboard
 ctl "pim-dialog $cf" >/dev/null
+ctl "pim-choose iPhone" >/dev/null # the list shown (not saved: the folder keeps everything)
 shot contacts-accounts
 ctl back >/dev/null
 ctl "pim-dialog $kf" >/dev/null
+ctl "pim-choose ASync smoke" >/dev/null
 shot calendars-calendars
 ctl back >/dev/null
 
