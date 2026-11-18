@@ -413,8 +413,10 @@ jobs:
         include:
           - image: async-server
             dockerfile: Dockerfile
+            summary: "Self-hosted sync and backup server for all your devices: web UI, many users, S3/WebDAV/SFTP/SMB"
           - image: async-cli
             dockerfile: Dockerfile.cli
+            summary: "ASync headless agent: syncs and backs up a server's folders through an ASync server"
 
     steps:
       - name: Checkout
@@ -466,3 +468,20 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      # Docker Hub's description is the README with its links pointing to GitHub and a link to the repository.
+      # Only from release tags, so a manual run of another ref doesn't replace it.
+      - name: Prepare Docker Hub description
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node .github/scripts/dockerhub-readme.mjs README.md > "$RUNNER_TEMP/dockerhub-readme.md"
+
+      # Needs a Docker Hub token with the "Read, Write, Delete" scope (a "Read & Write" token can push but not edit descriptions).
+      - name: Update Docker Hub description
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}
+          short-description: ${{ matrix.summary }}
+          readme-filepath: ${{ runner.temp }}/dockerhub-readme.md
