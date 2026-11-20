@@ -62,6 +62,12 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
     A file that changed within the wait is left for the next run even when something else starts one (the interval, or
     another device's change), up to the same cap; *Sync now* on a device takes everything as it is. While changes wait, the
     device's row on *Folders* and the folder in the apps say *Changes waiting* and when they will sync.
+  - **Only what changed is looked at:** on computers (and on Android phones with *All files access*), the agent watches each
+    folder and a run looks only at the files and directories that changed since the last run, instead of reading through the
+    whole folder; backups reuse what they stored for directories nothing changed in. The whole folder is still read in full on
+    the first run after the agent starts, after the watcher missed changes (too many at once), and on the occasional full rescan.
+    On Linux every directory needs one inotify watch: with very large folders raise `fs.inotify.max_user_watches` (the log
+    says so; until then the folder is read in full on each run, as before).
   - **Browse…** next to the local folder picks it on the device itself instead of typing the path: see
     [Choosing a device's folder from the web](#choosing-a-devices-folder-from-the-web).
   - Folders can also be created from the apps, which then show *added from <device>*: see

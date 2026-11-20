@@ -584,7 +584,9 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
 
 **Mirror and TwoWay** (`FolderSyncer`):
 - It compares, file by file, the local file, the remote listing, and both as they were after the last sync
-  (`SyncState`, `sync-state.json` in the device's state directory). The remote size and LastModified are only
+  (`SyncState`, `sync-state.json` in the device's state directory). The local side is a walk of the whole tree, or (task 26)
+  only the paths the agent's watcher recorded since the last run: see "Change tracking and full rescans".
+  The remote size and LastModified are only
   change tokens. That is why the S3 `Stat` and listing report the same LastModified.
 - **TwoWay:**
   - A change on one side is copied to the other.
@@ -611,6 +613,8 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
 
 **Backup** (`BackupJob`): one snapshot per run, with Source = the device id and the device's newest snapshot as
 parent. After each run, snapshots are forgotten per the folder's retention.
+- **Only changed directories are walked (task 26):** with the agent's recorded changes, directories without a change keep the
+  parent's tree unread (`BackupOptions.ChangedPaths`; see "Change tracking and full rescans").
 - **No snapshot when nothing changed (task 26):** `BackupOptions.SkipIfUnchanged` (set by `BackupJob`): when the walk ends with
   the parent's root tree id and no unreadable file, `BackupRunner` saves no snapshot and hands back the parent (with this run's
   stats; `BackupRunner.IsUnchanged`), and `BackupJob` runs no forget (`BackupJobResult.Unchanged`). The run is a success ("No
@@ -734,6 +738,44 @@ afresh), and the first watcher event the run waited for counts as the earliest s
 the cap goes anyway, still changing, and counts afresh from then. The run's `SyncResult.SettlesAt` (the earliest a held-back path
 may go: settled, or capped) sets when the worker runs again. A person's run (*Sync now*) holds back only for the platform's
 `SettleTime` (Android's 10 s, nothing elsewhere), as before: it takes every file as it is now. Backups are never held back.
+
+**Incremental local scans** (`LocalWatcher` + `LocalChangeSet` in `ASync.Client.Core/Sync`, `FolderSyncer.ScanChanged`):
+- **What is recorded:** every folder on a watchable tree (a directory on disk; `FolderKind.Files`, any mode, Backup and Mirror
+  Download included) has a watcher that records relative paths: written, deleted and a rename's old name as *paths* (look at
+  them), created and a rename's new name as *subtrees* (a directory that appeared is walked whole: what was in it arrived without
+  events of its own). `.async/` is ignored; an excluded or `.async-tmp` path records the directory holding it instead (its
+  content is not synced, but its coming and going changed that directory's time, which a backup records). Only TwoWay and Mirror
+  Upload folders also *run* on events.
+- **A run** takes the set (`Take`) and starts a new one, so events during the run belong to the next. With a trustworthy set,
+  `ScanChanged` stats only those paths: a file is stat'ed; a directory is listed (files in it stat'ed, subdirectories nobody knows
+  walked whole); a path that is gone takes every known path under it with it. Every other path the sync state knows is taken as
+  the state recorded it (unchanged, since nothing was recorded). The result feeds the same `Decide`; the remote side is still a
+  full listing (until "Remote changes" below). `ScanLocal` stays for full scans.
+- **Full scans happen** (the reason is in the run's log line: `"Docs": 3 up, 0 down, 0 deleted. [full scan (the change watcher
+  overflowed)]`, or `[12 changed paths]`) when: there is no watcher (Android's document trees and shared storage, iOS, photo
+  libraries, address books and calendars); it is the first run since the agent (or the folder's worker, after a settings change)
+  started; the watcher overflowed (`InternalBufferOverflowException`) or failed; the sync state is missing or was made at another
+  location (`SyncState.Location`); more than `LocalChangeSet.Limit` (20,000) paths changed between two runs (stat'ing that many one
+  by one costs about a walk, and it is usually a tree being copied in); the root itself was replaced; the full-rescan schedule
+  (below) is due.
+- **Handing on:** a run that went through hands what it could not finish back to the set (`SyncResult.Retry`: files still
+  settling, failed transfers, paths it could not look at, uploads refused by the quota); a run that did not get through (skipped,
+  stopped, refused, failed) gives back everything it took (`Restore`).
+- **Safety, unchanged:** the missing-folder refusal and the mass-deletion check work on the merged result as before; a directory
+  that cannot be listed refuses the run as in a full scan. **A path that cannot be looked at is never taken as deleted:** .NET's
+  stat says "not there" also when it is not allowed to look, so a missing path counts as gone only when a listing of its parent
+  confirms it (`ConfirmedAbsent`, up to the folder itself); otherwise it is an error for that path, nothing is done to it (or under
+  it, on either side), and it is looked at again next run.
+- **Linux:** inotify needs one watch per directory (`fs.inotify.max_user_watches`, often 8,192 or 65,536 per user). A watcher that
+  cannot be created, or fails later (out of watches), marks the set broken: the folder is scanned in full on every run (with its
+  interval, as before task 26), and the log says so once ("… raise fs.inotify.max_user_watches").
+- **Backup** (`BackupOptions.ChangedPaths`, set by `BackupJob.Changes`): a directory with no recorded path in or under it keeps
+  the parent snapshot's tree id for it without being listed; the per-directory tree blobs make that the tree a full walk would
+  build (the root is always listed). This changes `BackupRunner`'s inputs only, not the repository format. The changes count from
+  the snapshot the worker's previous run ended with (`LocalChanges.BaseSnapshot`): they are used only when that is still the
+  device's newest snapshot (one forgotten or made elsewhere meanwhile means a full walk), and a run with unreadable files makes the
+  next one full (they are not in the set any more). Stats of a reused directory are not counted ("N unchanged" counts only what was
+  looked at).
 
 **Status.** While changes wait, `FolderState.ChangesWaitingUntil` (control channel `FolderInfo.ChangesWaitingUntil`) says when
 they run: the apps show the pill *Changes waiting* and "Changes waiting: syncs in 25 min". Folders with a quiet period of 30 s or

@@ -59,6 +59,9 @@ public static class RepositoryAccess
 /// </summary>
 public sealed record BackupJobResult(Snapshot Snapshot, int Forgotten, bool Unchanged)
 {
+    /// <summary>How the folder was walked ("full scan (why)", "N changed paths").</summary>
+    public string Scan { get; init; } = "full scan";
+
     public void Deconstruct(out Snapshot snapshot, out int forgotten)
     {
         snapshot = Snapshot;
@@ -74,6 +77,15 @@ public sealed record BackupJobResult(Snapshot Snapshot, int Forgotten, bool Unch
 /// <param name="local">What is backed up: by default the folder's local path as a directory.</param>
 public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid deviceId, string? deviceName = null, ILocalTree? local = null)
 {
+    /// <summary>
+    /// What changed in the folder since this device's last backup run (task 26, the agent's watcher): with a trustworthy set,
+    /// directories without a change keep the newest snapshot's tree unread. Null or full: every directory is walked.
+    /// </summary>
+    public LocalChanges? Changes { get; init; }
+
+    /// <summary>How the last run walked the folder ("full scan (why)", "N changed paths"), for the log.</summary>
+    public string Scan { get; private set; } = "full scan";
+
     /// <summary>One device's backups of a folder form one source (retention applies per source).</summary>
     public string Source => deviceId.ToString("N");
 
@@ -107,11 +119,17 @@ public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid devi
             Excludes = folder.Excludes,
             Parent = parent,
             SkipIfUnchanged = true,
+            ChangedPaths = Changes is { Incremental: true } c && parent is not null && c.BaseSnapshot == parent.Id
+                ? c.All.ToHashSet(StringComparer.Ordinal) : null,
         };
+        Scan = options.ChangedPaths is { } paths
+            ? $"{paths.Count} changed path{(paths.Count == 1 ? "" : "s")}"
+            : $"full scan ({(parent is null ? "no snapshot yet"
+                : Changes?.FullReason ?? (Changes is null ? "no change tracking" : "the newest snapshot is not the last run's"))})";
         var snapshot = await new BackupRunner(repository).RunAsync(tree, options, progress, ct);
         // Nothing new: the retention would forget nothing it did not forget after the last snapshot (it counts from the
         // newest snapshot, not from now), so it is not run either.
-        if (BackupRunner.IsUnchanged(snapshot, options)) return new BackupJobResult(snapshot, 0, Unchanged: true);
+        if (BackupRunner.IsUnchanged(snapshot, options)) return new BackupJobResult(snapshot, 0, Unchanged: true) { Scan = Scan };
 
         var r = folder.Retention;
         var policy = new RetentionPolicy
@@ -120,6 +138,6 @@ public sealed class BackupJob(Repo repository, DeviceFolderDto folder, Guid devi
             Within = r.WithinHours is int h and > 0 ? TimeSpan.FromHours(h) : null,
         };
         var forgotten = await new RepositoryMaintenance(repository).ForgetAsync(policy, ct);
-        return new BackupJobResult(snapshot, forgotten.Count, Unchanged: false);
+        return new BackupJobResult(snapshot, forgotten.Count, Unchanged: false) { Scan = Scan };
     }
 }

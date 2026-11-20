@@ -1,5 +1,7 @@
 // Measures what a sync or backup run that finds nothing changed costs on a large folder (task 26):
-//   dotnet run scripts/bench-scan.cs -- --work DIR [--files 100000] [--runs 3] [--mode sync|backup|both]
+//   dotnet run scripts/bench-scan.cs -- --work DIR [--files 100000] [--runs 3] [--mode sync|backup|both] [--changed 10]
+// With --changed N (task 26, step 3) it also edits N files between runs and measures a run given just those paths
+// (LocalChanges, as the agent's watcher records them) against a full scan of the same edits.
 // The folder (DIR/src, small files in directories of 100) is made once and reused; the storage is a Local back-end in
 // DIR (no server), so the numbers are the device's own work: walking the tree, listing the storage, and what the run writes
 // locally. "written" is this process's write_bytes from /proc/self/io (Linux), i.e. what reached the block layer: the sync
@@ -30,6 +32,25 @@ var files = int.Parse(Arg("--files", "100000"));
 var runs = int.Parse(Arg("--runs", "3"));
 var mode = Arg("--mode", "both");
 var src = Path.Combine(work, "src");
+var changed = int.Parse(Arg("--changed", "0"));
+var editRound = 0;
+
+// Edits N files spread over the tree (new content and time); returns their relative paths.
+HashSet<string> Edit()
+{
+    editRound++;
+    var paths = new HashSet<string>(StringComparer.Ordinal);
+    for (var k = 0; k < changed; k++)
+    {
+        var i = (int)((long)k * files / Math.Max(1, changed) + editRound) % files;
+        var relative = $"d{i / 10000:000}/e{i / 100 % 100:00}/f{i:000000}.txt";
+        var full = Path.Combine(src, relative);
+        File.WriteAllText(full, $"file {i} edit {editRound}\n");
+        File.SetLastWriteTimeUtc(full, new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(editRound * 1000 + k));
+        paths.Add(relative);
+    }
+    return paths;
+}
 
 if (!Directory.Exists(src))
 {
@@ -91,6 +112,26 @@ if (mode is "sync" or "both")
         var r = await new FolderSyncer(backend, src, state, options).RunAsync();
         return $"{r.Uploaded} up, {r.Downloaded} down, state file modified {File.GetLastWriteTimeUtc(stateFile):HH:mm:ss}";
     });
+    if (changed > 0)
+    {
+        await Measure($"sync {changed} edited, full scan", async () =>
+        {
+            Edit();
+            var r = await new FolderSyncer(backend, src, state, options).RunAsync();
+            return $"{r.Uploaded} up, {r.Scan}";
+        });
+        await Measure($"sync {changed} edited, incremental", async () =>
+        {
+            var paths = Edit();
+            var r = await new FolderSyncer(backend, src, state, options with { LocalChanges = new LocalChanges(paths, new HashSet<string>(), null) }).RunAsync();
+            return $"{r.Uploaded} up, {r.Scan}";
+        });
+        await Measure("sync no-change, incremental", async () =>
+        {
+            var r = await new FolderSyncer(backend, src, state, options with { LocalChanges = new LocalChanges(new HashSet<string>(), new HashSet<string>(), null) }).RunAsync();
+            return $"{r.Uploaded} up, {r.Scan}";
+        });
+    }
 }
 
 if (mode is "backup" or "both")
@@ -115,4 +156,25 @@ if (mode is "backup" or "both")
         await new BackupJob(repo, folder, device, "bench").RunAsync();
         return $"{(await repo.ListSnapshotsAsync()).Count} snapshots";
     });
+    if (changed > 0)
+    {
+        await Measure($"backup {changed} edited, full walk", async () =>
+        {
+            Edit();
+            var job = new BackupJob(repo, folder, device, "bench");
+            var r = await job.RunAsync();
+            return $"{r.Snapshot.Stats.FilesChanged} changed, {job.Scan}";
+        });
+        await Measure($"backup {changed} edited, incremental", async () =>
+        {
+            var paths = Edit();
+            var newest = (await repo.ListSnapshotsAsync()).Where(s => s.Source == device.ToString("N")).MaxBy(s => s.Time)!;
+            var job = new BackupJob(repo, folder, device, "bench")
+            {
+                Changes = new LocalChanges(paths, new HashSet<string>(), null) { BaseSnapshot = newest.Id },
+            };
+            var r = await job.RunAsync();
+            return $"{r.Snapshot.Stats.FilesChanged} changed, {job.Scan}";
+        });
+    }
 }

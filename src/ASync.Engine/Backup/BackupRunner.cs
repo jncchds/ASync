@@ -23,6 +23,13 @@ public sealed record BackupOptions
     /// nothing to the repository (no snapshot file, no new retention bucket). The caller tells by <c>result.Id == Parent.Id</c> (<see cref="BackupRunner.IsUnchanged"/>).
     /// </summary>
     public bool SkipIfUnchanged { get; init; }
+    /// <summary>
+    /// The paths (relative, <c>/</c>-separated) that changed since <see cref="Parent"/> was made, from a change watcher (task 26).
+    /// A directory none of them is in or under keeps the parent's tree for it without being listed: the per-directory tree blobs
+    /// make that the same tree a full walk would build. Null: every directory is walked. Only for a parent that is the source's
+    /// newest snapshot and a change set that has been complete since it was made; nothing of the repository format changes.
+    /// </summary>
+    public IReadOnlySet<string>? ChangedPaths { get; init; }
 }
 
 public sealed record BackupProgress(string CurrentPath, int Files, long BytesProcessed, long BytesAdded);
@@ -55,6 +62,23 @@ public sealed class BackupRunner(Repository.Repository repository)
         await repository.LoadIndexAsync(ct); // dedup against everything stored so far, by anyone
         var excludes = new Glob(options.Excludes);
         var stats = new SnapshotStats();
+        // Directories with a recorded change in or under them (every ancestor of a changed path, and the path itself).
+        HashSet<string>? touched = null;
+        if (options.ChangedPaths is { } changed && options.Parent is not null)
+        {
+            touched = new HashSet<string>(StringComparer.Ordinal) { "" };
+            foreach (var p in changed)
+                for (var q = p; q.Length > 0; q = q.LastIndexOf('/') is var i and >= 0 ? q[..i] : "")
+                    if (!touched.Add(q)) break;
+        }
+        bool Unchanged(string relative)
+        {
+            if (touched is null || touched.Contains(relative)) return false;
+            // Under a changed path (a directory that was replaced or renamed into place): walked.
+            for (var q = relative; q.Length > 0; q = q.LastIndexOf('/') is var i and >= 0 ? q[..i] : "")
+                if (options.ChangedPaths!.Contains(q)) return false;
+            return true;
+        }
         var lastRefresh = DateTimeOffset.UtcNow;
 
         async Task RefreshLockIfDueAsync()
@@ -71,6 +95,7 @@ public sealed class BackupRunner(Repository.Repository repository)
 
         async Task<BlobId> BackupDirectoryAsync(string relative, BlobId? parentTreeId)
         {
+            if (parentTreeId is BlobId same && Unchanged(relative) && repository.HasBlob(same)) return same; // nothing changed in it
             Dictionary<string, TreeNode> previous = [];
             if (parentTreeId is BlobId pid)
             {

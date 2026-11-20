@@ -14,6 +14,12 @@
   two-way folders more chance of a conflict with another device. While changes wait, the apps and the web UI's *Folders* page
   say *Changes waiting* and when they will sync. Also fixed: a file written without pause (a log) no longer keeps the watcher's
   sync from ever starting.
+- perf(sync): **runs look only at what changed.** The agent records which files and directories change in each folder, and a run
+  looks at just those instead of reading through the whole folder; a backup reuses what it stored for directories nothing changed
+  in. On 100,000 files with 10 edited: a two-way sync 1.5 s → 0.9 s, a backup 1.3 s → 0.3 s (warm cache; much more on a phone
+  or a cold disk). The folder is still read in full when changes may have been missed (the first run after a start, an overflow
+  of the watcher, too many changes at once), with the reason in the log. A file that cannot be looked at is never taken for
+  deleted. On Linux, very large folders may need a higher `fs.inotify.max_user_watches`; the log says so.
 - feat(ios): **your ASync folders in the iPhone's Files app.** With a signed build (iOS 16 and later), *Files → Browse* has the
   location **ASync — <your server>** and every app's file picker reaches it: two-way folders to browse, open, save, rename, move
   and delete (an overwritten file keeps its old content as a version, a deleted one goes to the folder's trash), mirror folders
