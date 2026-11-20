@@ -91,6 +91,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(f => f.CheckReadDataPercent).HasDefaultValue(MaintenanceDefaults.CheckReadDataPercent).HasSentinel(-1);
             e.Property(f => f.ChangeDelaySeconds).HasDefaultValue(ChangeDelayDefaults.QuietSeconds).HasSentinel(-1);
             e.Property(f => f.ChangeMaxDelaySeconds).HasDefaultValue(ChangeDelayDefaults.MaxSeconds).HasSentinel(-1);
+            e.Property(f => f.FullRescanHours).HasDefaultValue(ChangeDelayDefaults.FullRescanHours).HasSentinel(-1);
             e.Property(f => f.LastPruneMessage).HasMaxLength(1000);
             e.Property(f => f.LastPruneBy).HasMaxLength(100);
             e.Property(f => f.LastCheckMessage).HasMaxLength(1000);

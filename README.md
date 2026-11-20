@@ -68,6 +68,9 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
     the first run after the agent starts, after the watcher missed changes (too many at once), and on the occasional full rescan.
     On Linux every directory needs one inotify watch: with very large folders raise `fs.inotify.max_user_watches` (the log
     says so; until then the folder is read in full on each run, as before).
+  - **Read the whole folder** (every folder of files; default *twice a day*, from every 6 hours to once a week): how often a
+    device reads through the whole folder anyway, to catch what watching cannot see. Phones do it only on Wi-Fi and the charger;
+    until then their runs look only at what changed.
   - **Browse…** next to the local folder picks it on the device itself instead of typing the path: see
     [Choosing a device's folder from the web](#choosing-a-devices-folder-from-the-web).
   - Folders can also be created from the apps, which then show *added from <device>*: see

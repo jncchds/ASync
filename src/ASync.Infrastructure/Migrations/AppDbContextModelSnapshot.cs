@@ -383,6 +383,11 @@ namespace ASync.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text[]");
 
+                    b.Property<int>("FullRescanHours")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(12);
+
                     b.Property<int>("IntervalMinutes")
                         .HasColumnType("integer");
 

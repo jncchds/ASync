@@ -54,6 +54,9 @@ public sealed record AgentOptions
     public bool RunAtStart { get; init; } = true;
     public bool RunOnInterval { get; init; } = true;
 
+    /// <summary>See <see cref="SyncAgent.FullRescanConditions"/> (phones: Wi-Fi and the charger).</summary>
+    public RunConditionsDto? FullRescanConditions { get; init; }
+
     /// <summary>
     /// What the web UI may browse on this device (a computer's starting points by default; the Android app's volumes). Null:
     /// no browsing at all.
@@ -350,6 +353,7 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         {
             AllowMassDeletion = _options.AllowMassDeletion, LocalTrees = _options.LocalTrees, Conditions = _options.Conditions,
             SettleTime = _options.SettleTime, RunAtStart = _options.RunAtStart, RunOnInterval = _options.RunOnInterval,
+            FullRescanConditions = _options.FullRescanConditions,
             Media = _options.Media, MediaSource = _options.MediaSource,
             Contacts = _options.Contacts, Calendars = _options.Calendars, ContactsSource = _options.ContactsSource, CalendarsSource = _options.CalendarsSource,
             // The config directory (the device's key; the Docker image's /config volume) is never offered as a starting point.

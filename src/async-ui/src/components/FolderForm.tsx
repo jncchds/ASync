@@ -16,6 +16,15 @@ const CHANGE_DELAYS: { seconds: number; label: string }[] = [
   { seconds: 1800, label: '30 minutes' },
 ]
 
+/** How often a device reads the whole folder although it follows recorded changes (hours). */
+const FULL_RESCANS: { hours: number; label: string }[] = [
+  { hours: 6, label: 'Every 6 hours' },
+  { hours: 12, label: 'Twice a day' },
+  { hours: 24, label: 'Once a day' },
+  { hours: 72, label: 'Every 3 days' },
+  { hours: 168, label: 'Once a week' },
+]
+
 const RETENTION_FIELDS: { key: keyof Retention; label: string }[] = [
   { key: 'withinHours', label: 'Keep all made within (hours)' },
   { key: 'last', label: 'Newest' },
@@ -56,6 +65,7 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
   const [checkPercent, setCheckPercent] = useState(existing?.checkReadDataPercent ?? 10)
   const [changeDelay, setChangeDelay] = useState(existing?.changeDelaySeconds ?? 5)
   const [changeCap, setChangeCap] = useState(existing?.changeMaxDelaySeconds ?? changeCapFor(existing?.changeDelaySeconds ?? 5))
+  const [fullRescan, setFullRescan] = useState(existing?.fullRescanHours ?? 12)
   const [takeOver, setTakeOver] = useState(false)
   const [takeOverKey, setTakeOverKey] = useState('')
   const [busy, setBusy] = useState(false)
@@ -100,7 +110,7 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
       excludes: excludes.split('\n').map(x => x.trim()).filter(Boolean),
       retention, versionsKeepDays: versionsDays, trashKeepDays: trashDays,
       pruneIntervalDays: pruneDays, checkIntervalDays: checkDays, checkReadDataPercent: checkPercent,
-      changeDelaySeconds: changeDelay, changeMaxDelaySeconds: changeCap,
+      changeDelaySeconds: changeDelay, changeMaxDelaySeconds: changeCap, fullRescanHours: fullRescan,
       expectedRevision: startRevision,
       recoveryKey: !existing && canTakeOver && takeOver ? takeOverKey.trim() : undefined,
     }
@@ -178,6 +188,20 @@ export default function FolderForm({ backends, existing, onSaved, onCancel, onRe
                 ? `Changed files sync within seconds (at the latest ${formatWait(changeCap)} after the first change while they keep changing).`
                 : `Syncs once no file changed for ${formatWait(changeDelay)}, at the latest ${formatWait(changeCap)} after the first change. ` +
                   'Longer waits mean fewer runs and fewer stored versions' + (mode === 'TwoWay' ? ', but more chance of a conflict with another device.' : '.')}
+            </span>
+          </label>
+        )}
+        {kind === 'Files' && (
+          <label>
+            Read the whole folder
+            <select value={fullRescan} onChange={e => setFullRescan(Number(e.target.value))}>
+              {!FULL_RESCANS.some(r => r.hours === fullRescan) && <option value={fullRescan}>Every {fullRescan} hours</option>}
+              {FULL_RESCANS.map(r => <option key={r.hours} value={r.hours}>{r.label}</option>)}
+            </select>
+            <span className="field-hint">
+              Devices look only at what changed since their last run; this often they read through everything, to catch what
+              watching cannot see (files changed while the device was off are caught at its start anyway). Phones do it on Wi-Fi
+              and the charger.
             </span>
           </label>
         )}

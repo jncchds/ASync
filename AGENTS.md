@@ -232,6 +232,8 @@ Implemented (task 26, the wait after local changes; migration `FolderChangeDelay
   `ChangeDelayDefaults`). Database defaults, so folders from before the migration behave as before plus the cap. In
   `FolderDto`, `SaveFolderRequest` and `DeviceFolderDto`. The devices' "changes waiting until" is not stored: it is kept with
   their hub connection (`DeviceConnections`) and added to `FolderDeviceDto.ChangesWaitingUntil` by `GET /api/folders`.
+- **Folder.FullRescanHours** (migration `FolderFullRescan`, default 12, 1–720): how often devices that follow recorded changes
+  scan the folder in full anyway (see "Change tracking and full rescans"). In the same three DTOs.
 
 ## Auth
 
@@ -776,6 +778,32 @@ may go: settled, or capped) sets when the worker runs again. A person's run (*Sy
   device's newest snapshot (one forgotten or made elsewhere meanwhile means a full walk), and a run with unreadable files makes the
   next one full (they are not in the set any more). Stats of a reused directory are not counted ("N unchanged" counts only what was
   looked at).
+
+**The full-rescan schedule** (`Folder.FullRescanHours`, default 12, 1 h–30 days; `FullRescanSchedule`): a folder that follows
+recorded changes is still walked in full (and, with the change feed, its storage listed in full) every `FullRescanHours` after the
+last full scan that went through, with a spread of ±20 % so devices and folders that started together do not all walk at once.
+Why 12 h: the cases change tracking cannot see are rare and bounded (a change while the watcher was broken without noticing, a
+write straight to the storage outside ASync), changes while the agent was stopped are caught by the first run after a start
+anyway, and a full walk of 100,000 files costs seconds on a computer: twice a day is no wear, and a missed change shows within
+half a day. The schedule lives in the worker (in memory): the first full scan after a start sets it.
+- **Phones:** `SyncAgent.FullRescanConditions` (Android and iOS: Wi-Fi and the charger, `UnmeteredOnly` + `ChargingOnly`, on top
+  of the folder's own run conditions): a due full rescan waits until they hold, and runs stay incremental until then (logged once
+  per due rescan). There is no separate background job for it: on Android, WorkManager's periodic job for the folder runs with the
+  folder's own constraints, and the first of its runs that finds Wi-Fi and the charger after the rescan is due does the full scan
+  (typically at night); on iOS, the `BGProcessingTask` (minutes, usually at night on the charger) is where it happens, while the
+  short `BGAppRefreshTask` runs stay incremental. What a platform cannot see never blocks ("Run conditions").
+- **Where nothing is watched** (Android's document trees and shared storage without All files access, iOS's folders, photo
+  libraries, contacts and calendars), every run is a full local scan, as before; the remote change feed (below) still saves the
+  storage listing.
+
+**Next steps (not in task 26):**
+- **Resumable platform journals**, so the first run after a start need not be full: the Windows USN change journal (a journal id
+  and the last USN per volume, kept in the state: changes while the agent was stopped are read from the journal), macOS FSEvents
+  event ids (`kFSEventStreamCreateFlagFileEvents` with `sinceWhen` = the last event id), Android MediaStore's generation
+  (`MediaStore.getGeneration`, for shared storage without a watcher). Linux has no persistent journal (fanotify does not replay).
+- **The sync state as a journal:** `sync-state.json` is still rewritten whole when anything changed (11 MB for 100,000 files):
+  an append-only journal of changed entries, compacted now and then, or SQLite, would make a run that changed 10 files write
+  kilobytes.
 
 **Status.** While changes wait, `FolderState.ChangesWaitingUntil` (control channel `FolderInfo.ChangesWaitingUntil`) says when
 they run: the apps show the pill *Changes waiting* and "Changes waiting: syncs in 25 min". Folders with a quiet period of 30 s or

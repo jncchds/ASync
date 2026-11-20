@@ -59,12 +59,12 @@ public class FolderService(
         f.LastPruneAt is { } pruned ? new MaintenanceStatusDto(pruned, f.LastPruneOk == true, f.LastPruneMessage, f.LastPruneBy) : null,
         f.LastCheckAt is { } checkedAt ? new MaintenanceStatusDto(checkedAt, f.LastCheckOk == true, f.LastCheckMessage, f.LastCheckBy) : null,
         f.RecoveryKeyCreatedAt, AddedFromDevice: f.CreatedByDeviceName,
-        ChangeDelaySeconds: f.ChangeDelaySeconds, ChangeMaxDelaySeconds: f.ChangeMaxDelaySeconds);
+        ChangeDelaySeconds: f.ChangeDelaySeconds, ChangeMaxDelaySeconds: f.ChangeMaxDelaySeconds, FullRescanHours: f.FullRescanHours);
 
     public static DeviceFolderDto ToDeviceDto(Folder f, FolderDevice m) => new(
         f.Id, f.Name, f.Mode, f.Encryption, f.Kind, f.IntervalMinutes, f.Excludes, Retention(f), f.VersionsKeepDays, f.TrashKeepDays,
         f.Revision, f.RepositoryReady, m.LocalPath, m.Direction, m.Paused, Conditions(m), Media(f.Kind, m), Collections(f.Kind, m),
-        f.ChangeDelaySeconds, f.ChangeMaxDelaySeconds);
+        f.ChangeDelaySeconds, f.ChangeMaxDelaySeconds, f.FullRescanHours);
 
     public static RunConditionsDto Conditions(FolderDevice m) => new(m.UnmeteredOnly, m.ChargingOnly, m.BatteryNotLow);
 
@@ -417,6 +417,8 @@ public class FolderService(
             return "The wait after changes must be between 1 second and 1 day.";
         if (req.ChangeMaxDelaySeconds < req.ChangeDelaySeconds || req.ChangeMaxDelaySeconds > ChangeDelayDefaults.Limit)
             return "The longest wait after changes must be at least the wait itself, and at most 1 day.";
+        if (req.FullRescanHours is < 1 or > ChangeDelayDefaults.FullRescanLimitHours)
+            return "A full rescan must come every 1 hour to 30 days.";
         return null;
     }
 
@@ -432,6 +434,7 @@ public class FolderService(
         folder.CheckReadDataPercent = req.CheckReadDataPercent;
         folder.ChangeDelaySeconds = req.ChangeDelaySeconds;
         folder.ChangeMaxDelaySeconds = req.ChangeMaxDelaySeconds;
+        folder.FullRescanHours = req.FullRescanHours;
     }
 
     private static bool Overlaps(string a, string b) =>

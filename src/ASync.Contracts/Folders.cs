@@ -28,7 +28,8 @@ public record FolderDto(
     int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent,
     MaintenanceStatusDto? LastPrune = null, MaintenanceStatusDto? LastCheck = null,
     DateTime? RecoveryKeyCreatedAt = null, string? RecoveryKey = null, FolderUsageDto? Usage = null, string? AddedFromDevice = null,
-    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds);
+    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds,
+    int FullRescanHours = ChangeDelayDefaults.FullRescanHours);
 
 /// <summary>
 /// The wait after local changes (task 26; TwoWay and Mirror Upload folders): a run starts once no file changed for the quiet
@@ -47,6 +48,17 @@ public static class ChangeDelayDefaults
 
     /// <summary>The forms' presets (seconds of quiet): "Immediately" is the default 5 seconds.</summary>
     public static readonly int[] Presets = [QuietSeconds, 60, 300, 900, 1800];
+
+    /// <summary>
+    /// Hours between full rescans of a folder that follows recorded changes (task 26): twice a day. A full walk of 100,000 files
+    /// costs seconds to a few minutes, so twice a day is no wear and little battery (phones do it only on the charger and Wi-Fi),
+    /// and whatever change tracking missed (a write straight to the storage, a change while the watcher was broken) is seen
+    /// within half a day.
+    /// </summary>
+    public const int FullRescanHours = 12;
+
+    /// <summary>The longest gap between full rescans a folder may have (30 days).</summary>
+    public const int FullRescanLimitHours = 720;
 }
 
 /// <summary>Defaults of a Backup folder's housekeeping schedule (days between runs; 0 = off).</summary>
@@ -91,7 +103,8 @@ public record SaveFolderRequest(
     long? ExpectedRevision = null,
     int PruneIntervalDays = MaintenanceDefaults.PruneIntervalDays, int CheckIntervalDays = MaintenanceDefaults.CheckIntervalDays,
     int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent, string? RecoveryKey = null,
-    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds);
+    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds,
+    int FullRescanHours = ChangeDelayDefaults.FullRescanHours);
 
 /// <summary>
 /// Make a new recovery key for a Transport Backup folder (it replaces the previous one). People with a password
@@ -119,7 +132,8 @@ public record DeviceFolderDto(
     int IntervalMinutes, string[] Excludes, RetentionDto Retention, int VersionsKeepDays, int TrashKeepDays,
     long Revision, bool RepositoryReady, string LocalPath, MirrorDirection? Direction, bool Paused, RunConditionsDto? Conditions = null,
     MediaSelectionDto? Media = null, CollectionSelectionDto? Collections = null,
-    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds);
+    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds,
+    int FullRescanHours = ChangeDelayDefaults.FullRescanHours);
 
 /// <summary>A device changing its own settings for a folder (from the device's UI or CLI). Null = unchanged.</summary>
 /// <summary>

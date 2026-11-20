@@ -72,6 +72,8 @@ public static class AndroidAgent
                 SettleTime = SettleTime,
                 RunAtStart = false,
                 RunOnInterval = false,
+                // A due full rescan of a watched folder (All files access) waits for Wi-Fi and the charger (task 26).
+                FullRescanConditions = new ASync.Contracts.RunConditionsDto(UnmeteredOnly: true, ChargingOnly: true),
                 // The web UI may browse the shared storage's real paths, with All files access only (task 17).
                 Browse = new PhoneBrowseScope(AndroidStorage.Instance),
                 // Photos folders back up MediaStore (task 19); its albums are listed for the web UI under the same browsing setting.

@@ -401,10 +401,13 @@ public class FolderMaintenanceTests : IAsyncLifetime
         Assert.Contains("between 1 second and 1 day", (await _folderService.CreateAsync(Alice, Request(86401, 86401), default)).Error);
         Assert.Contains("at least the wait itself", (await _folderService.CreateAsync(Alice, Request(1800, 600), default)).Error);
         Assert.Contains("at most 1 day", (await _folderService.CreateAsync(Alice, Request(60, 86401), default)).Error);
+        Assert.Contains("every 1 hour to 30 days", (await _folderService.CreateAsync(Alice, Request(5, 600) with { FullRescanHours = 0 }, default)).Error);
+        Assert.Contains("every 1 hour to 30 days", (await _folderService.CreateAsync(Alice, Request(5, 600) with { FullRescanHours = 721 }, default)).Error);
 
         var defaults = (await _folderService.CreateAsync(Alice, new SaveFolderRequest("plain", SyncMode.TwoWay, FolderEncryption.Transport,
             FolderKind.Files, _backend.Id, "plain"), default)).Value!.Folder;
-        Assert.Equal((5, 600), (defaults.ChangeDelaySeconds, defaults.ChangeMaxDelaySeconds));
+        Assert.Equal((5, 600, 12), (defaults.ChangeDelaySeconds, defaults.ChangeMaxDelaySeconds, defaults.FullRescanHours));
+        Assert.Equal(12, FolderService.ToDeviceDto(defaults, Attach(defaults, "nas")).FullRescanHours);
 
         var created = await _folderService.CreateAsync(Alice, Request(1800, 7200), default);
         Assert.True(created.Success, created.Error);

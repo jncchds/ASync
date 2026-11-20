@@ -193,6 +193,12 @@ public sealed class SyncAgent : IAsyncDisposable
     /// <summary>The device's network and power, for the folders' run conditions (null: conditions are not checked).</summary>
     public IDeviceConditionsProbe? Conditions { get; init; }
 
+    /// <summary>
+    /// What a folder's due full rescan waits for, on top of the folder's own run conditions (task 26): phones set Wi-Fi and the
+    /// charger, so the walk of a large folder does not spend battery or data; until they hold, runs stay incremental. Null: none.
+    /// </summary>
+    public RunConditionsDto? FullRescanConditions { get; init; }
+
     /// <summary>How long a just-modified file waits before it is uploaded (<see cref="SyncOptions.SettleTime"/>).</summary>
     public TimeSpan SettleTime { get; init; }
 
@@ -1128,7 +1134,7 @@ public sealed class SyncAgent : IAsyncDisposable
                         manual ? null : _changes.Cap, _firstSeenChanging, changedSince);
 
                     // What changed locally since the last run (task 26): null without a watcher, a full scan when it cannot be trusted.
-                    var localChanges = Folder.Paused ? null : _watcher?.Changes.Take() is { } taken ? taken with { BaseSnapshot = _lastSnapshot } : null;
+                    var localChanges = Folder.Paused ? null : _watcher?.Changes.Take(FullRescanDue()) is { } taken ? taken with { BaseSnapshot = _lastSnapshot } : null;
 
                     FolderRunResult result;
                     var progress = new RunProgress();
@@ -1170,6 +1176,7 @@ public sealed class SyncAgent : IAsyncDisposable
                         if (result.NextFull is { } nextFull) _watcher.Changes.Lost(nextFull);
                     }
                     if (result.Snapshot is { } snapshotId) _lastSnapshot = snapshotId;
+                    if (result.Retry is not null && result.Scan?.StartsWith("full scan", StringComparison.Ordinal) == true) ScheduleFullRescan();
                     _lastResult = result;
                     _lastRunAt = DateTimeOffset.UtcNow;
                     foreach (var r in requests) r.TrySetResult(result);
@@ -1215,6 +1222,21 @@ public sealed class SyncAgent : IAsyncDisposable
         }
 
         private static TimeSpan Max(TimeSpan a, TimeSpan b) => a > b ? a : b;
+
+        private FullRescanSchedule? _fullRescans;
+
+        private void ScheduleFullRescan() =>
+            (_fullRescans ??= new FullRescanSchedule(Folder.FullRescanHours, _agent.Clock, _agent.FullRescanConditions, _agent.Conditions)).Done();
+
+        /// <summary>When the full-rescan schedule asks for a full scan now (and the device's conditions for one hold), why.</summary>
+        private string? FullRescanDue()
+        {
+            if (_fullRescans is not { } schedule) return null; // no full scan went through yet: the first one is full anyway
+            var due = schedule.Due(out var postponed);
+            if (postponed is not null)
+                _logger.LogInformation("\"{Name}\": the full rescan waits ({Why}); runs follow the recorded changes until then.", Folder.Name, postponed);
+            return due;
+        }
 
         public async ValueTask DisposeAsync()
         {

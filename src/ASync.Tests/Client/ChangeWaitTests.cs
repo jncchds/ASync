@@ -1,4 +1,5 @@
 using System.Text;
+using ASync.Client.Core;
 using ASync.Client.Core.Sync;
 using ASync.Contracts;
 using ASync.Engine.Storage;
@@ -10,6 +11,15 @@ namespace ASync.Tests.Client;
 /// Task 26, step 2: the wait after local changes (a quiet period with a cap) and the per-file settle time with the same cap.
 /// The agent's use of it (timers on its clock, which triggers wait) is in <see cref="ChangeWaitAgentTests"/>.
 /// </summary>
+internal static class FullRescanScheduleExtensions
+{
+    public static DateTimeOffset? DoneAndNext(this FullRescanSchedule schedule)
+    {
+        schedule.Done();
+        return schedule.Next;
+    }
+}
+
 public class ChangeWaitTests : IDisposable
 {
     private static readonly DateTimeOffset T0 = new(2026, 11, 20, 12, 0, 0, TimeSpan.Zero);
@@ -33,6 +43,49 @@ public class ChangeWaitTests : IDisposable
         Assert.Equal(T0, wait.Reset());
         Assert.Null(wait.Due);
         Assert.Equal(T0.AddMinutes(30), wait.Record(T0.AddMinutes(25))); // a new first event
+    }
+
+    private sealed class Probe(DeviceConditions now) : ASync.Client.Core.IDeviceConditionsProbe
+    {
+        public DeviceConditions Now = now;
+        public DeviceConditions Read() => Now;
+    }
+
+    [Fact]
+    public void TheFullRescan_ComesEveryFolderHoursWithASpread_AndOnPhonesWaitsForWiFiAndTheCharger()
+    {
+        var clock = new Clock(T0);
+        var random = 0.5;
+        var schedule = new FullRescanSchedule(12, clock, random: () => random);
+        Assert.Null(schedule.Due(out _)); // nothing went through yet: the first run is full anyway
+        schedule.Done();
+        Assert.Equal(T0.AddHours(12), schedule.Next);
+        random = 0;
+        schedule.Done();
+        Assert.Equal(T0.AddMinutes(576), schedule.Next); // −20 %
+        random = 1;
+        schedule.Done();
+        Assert.Equal(T0.AddMinutes(864), schedule.Next); // +20 %
+        clock.Now = T0.AddHours(14);
+        Assert.Null(schedule.Due(out _));
+        clock.Now = T0.AddHours(15);
+        Assert.Equal("the full rescan is due", schedule.Due(out var postponed));
+        Assert.Null(postponed);
+
+        var phone = new Probe(new DeviceConditions(Metered: true, Charging: false, BatteryLow: false));
+        var gated = new FullRescanSchedule(12, clock, new RunConditionsDto(UnmeteredOnly: true, ChargingOnly: true), phone, () => 0.5);
+        gated.Done();
+        clock.Now = clock.Now.AddHours(13);
+        Assert.Null(gated.Due(out postponed));
+        Assert.Contains("Wi-Fi", postponed);          // said once
+        Assert.Null(gated.Due(out postponed));
+        Assert.Null(postponed);
+        phone.Now = new DeviceConditions(Metered: false, Charging: true, BatteryLow: false);
+        Assert.Equal("the full rescan is due", gated.Due(out _));
+        phone.Now = DeviceConditions.Unknown;         // what a platform cannot see never blocks
+        Assert.Equal("the full rescan is due", gated.Due(out _));
+
+        Assert.Equal(T0.AddHours(720 * 1.0), new FullRescanSchedule(100_000, new Clock(T0), random: () => 0.5).DoneAndNext());
     }
 
     [Fact]

@@ -1,6 +1,6 @@
 # Release notes
 
-## v0.1.6 — 2026-11-20
+## v0.1.6 — 2026-11-21
 
 - perf(sync): **a run that finds nothing changed writes nothing on the device.** A two-way or mirror folder's sync state
   (`sync-state.json`, several MB on a large folder) was written at the end of every run, even when nothing changed: it is now
@@ -20,6 +20,9 @@
   or a cold disk). The folder is still read in full when changes may have been missed (the first run after a start, an overflow
   of the watcher, too many changes at once), with the reason in the log. A file that cannot be looked at is never taken for
   deleted. On Linux, very large folders may need a higher `fs.inotify.max_user_watches`; the log says so.
+- feat(sync): **an occasional full rescan.** A new folder setting, *Read the whole folder* (twice a day by default), makes
+  devices read through the whole folder now and then although they follow what changed, so a change watching missed shows
+  within hours. Devices spread it out so they do not all do it at once, and phones do it only on Wi-Fi and the charger.
 - feat(ios): **your ASync folders in the iPhone's Files app.** With a signed build (iOS 16 and later), *Files → Browse* has the
   location **ASync — <your server>** and every app's file picker reaches it: two-way folders to browse, open, save, rename, move
   and delete (an overwritten file keeps its old content as a version, a deleted one goes to the folder's trash), mirror folders

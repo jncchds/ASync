@@ -135,6 +135,7 @@ public class ChangeWaitAgentTests : IDisposable
         {
             await File.WriteAllTextAsync(Path.Combine(Local, name), Guid.NewGuid().ToString());
             await Until(() => State.ChangesWaitingUntil == until, $"changes waiting until {until:HH:mm:ss}");
+            await Task.Delay(300); // the write's trailing events (size, time) land before the test goes on
         }
     }
 

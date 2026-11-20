@@ -551,6 +551,8 @@ export interface Folder {
   /** TwoWay and Mirror (uploading devices): a run starts once no file changed for this long, at most the cap after the first change. */
   changeDelaySeconds: number
   changeMaxDelaySeconds: number
+  /** Devices that follow recorded changes still read the whole folder (and list the whole storage) this often. */
+  fullRescanHours: number
 }
 
 /**
@@ -636,6 +638,7 @@ export interface SaveFolder {
   checkReadDataPercent: number
   changeDelaySeconds?: number
   changeMaxDelaySeconds?: number
+  fullRescanHours?: number
   expectedRevision?: number
   /** Creating a standard-encryption Backup folder: take over the repository already in the directory. */
   recoveryKey?: string

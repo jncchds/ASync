@@ -46,6 +46,11 @@ public class Folder
     public int ChangeDelaySeconds { get; set; } = ChangeDelayDefaults.QuietSeconds;
     /// <summary>…but no later than this many seconds after the first change that is not synced yet (≥ the quiet period).</summary>
     public int ChangeMaxDelaySeconds { get; set; } = ChangeDelayDefaults.MaxSeconds;
+    /// <summary>
+    /// Hours between full rescans (task 26): devices that follow recorded changes still walk the whole folder (and, with the change
+    /// feed, list the whole storage) this often, with a random spread, to catch what change tracking cannot see.
+    /// </summary>
+    public int FullRescanHours { get; set; } = ChangeDelayDefaults.FullRescanHours;
     /// <summary>The last prune: by the server (Transport) or reported by a device.</summary>
     public DateTime? LastPruneAt { get; set; }
     public bool? LastPruneOk { get; set; }
