@@ -17,6 +17,12 @@ public sealed record BackupOptions
     /// without being read again, which makes repeated backups fast.
     /// </summary>
     public Snapshot? Parent { get; init; }
+    /// <summary>
+    /// When the walk ends with the parent's root tree (nothing changed, nothing unreadable), save no snapshot and return the
+    /// <see cref="Parent"/> itself (with this run's <see cref="Snapshot.Stats"/>, not saved): a run that found no change adds
+    /// nothing to the repository (no snapshot file, no new retention bucket). The caller tells by <c>result.Id == Parent.Id</c> (<see cref="BackupRunner.IsUnchanged"/>).
+    /// </summary>
+    public bool SkipIfUnchanged { get; init; }
 }
 
 public sealed record BackupProgress(string CurrentPath, int Files, long BytesProcessed, long BytesAdded);
@@ -147,6 +153,8 @@ public sealed class BackupRunner(Repository.Repository repository)
 
         var treeId = await BackupDirectoryAsync("", options.Parent?.Tree);
         await repository.FlushAsync(ct); // data before the snapshot that refers to it
+        if (options.SkipIfUnchanged && options.Parent is { } parent && parent.Tree == treeId && stats.Errors.Count == 0)
+            return parent with { Stats = stats }; // the same content as the parent: no new snapshot (this run's counts, not saved)
 
         var snapshot = new Snapshot
         {
@@ -163,6 +171,9 @@ public sealed class BackupRunner(Repository.Repository repository)
         await repository.SaveSnapshotAsync(snapshot, ct);
         return snapshot;
     }
+
+    /// <summary>Whether <paramref name="result"/> is the parent handed back by <see cref="BackupOptions.SkipIfUnchanged"/>.</summary>
+    public static bool IsUnchanged(Snapshot result, BackupOptions options) => options.Parent is { } p && result.Id == p.Id;
 
     internal static long Ms(DateTime utc) => FileSystemTree.Ms(utc);
 }

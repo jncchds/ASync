@@ -592,9 +592,23 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
   - Local deletions go to `<folder>/.async/trash`; remote ones to the plain layout's trash and versions.
   - Clean-up runs once a day.
 - Only files are synced. Empty directories and symlinks are not.
+- **Writes of the state (task 26):** `sync-state.json` is written only when something in it changed (`SyncState.Dirty`: an
+  entry set to a different value or removed, the `Location`, `LastCleanUp`); a run that changed nothing writes nothing locally
+  (on a large folder the state is several MB, and rewriting it every run was the run's dominant local write: flash wear).
+  `LastSync` alone does not make it dirty: nothing reads it, so it stays in memory and is written with the next real change.
+  The checkpoint during a run (an interrupted run keeps the bookkeeping of what it transferred) comes after 50 files and at most
+  every 30 seconds: every 50 files rewrote the whole growing file 2,000 times in the first sync of 100,000 files.
 
 **Backup** (`BackupJob`): one snapshot per run, with Source = the device id and the device's newest snapshot as
-parent. After each run, snapshots are forgotten per the folder's retention. A backup that finds the repository
+parent. After each run, snapshots are forgotten per the folder's retention.
+- **No snapshot when nothing changed (task 26):** `BackupOptions.SkipIfUnchanged` (set by `BackupJob`): when the walk ends with
+  the parent's root tree id and no unreadable file, `BackupRunner` saves no snapshot and hands back the parent (with this run's
+  stats; `BackupRunner.IsUnchanged`), and `BackupJob` runs no forget (`BackupJobResult.Unchanged`). The run is a success ("No
+  changes since snapshot …"), reported as usual, so the folder's last run, overdue detection and alerts are unaffected. Retention
+  counts from the newest snapshot, not from now (`within`, the hourly/daily buckets), so with no new snapshot it would forget
+  nothing new either; a retention policy that was changed is applied at the next snapshot. The snapshot list's newest entry is
+  the last time something changed, not the last run (the folder's device row says when it last ran). A run with unreadable
+  files still makes a snapshot (its errors are recorded in it), as before. A backup that finds the repository
 locked by a prune is not a failed run: the agent retries it after 30 seconds and reports nothing.
 
 **Prune and check** (forgotten snapshots free space; damage is found before a restore):

@@ -1,7 +1,12 @@
 # Release notes
 
-## v0.1.6 — 2026-11-18
+## v0.1.6 — 2026-11-20
 
+- perf(sync): **a run that finds nothing changed writes nothing on the device.** A two-way or mirror folder's sync state
+  (`sync-state.json`, several MB on a large folder) was written at the end of every run, even when nothing changed: it is now
+  written only when something in it changed. A backup that finds nothing changed since its last snapshot makes no new snapshot
+  (and forgets none); it reports "No changes since snapshot …" and counts as a successful run, so overdue detection is
+  unaffected. Measured on 100,000 small files: see `docs/orchestration/test-records/task-26/`.
 - feat(ios): **your ASync folders in the iPhone's Files app.** With a signed build (iOS 16 and later), *Files → Browse* has the
   location **ASync — <your server>** and every app's file picker reaches it: two-way folders to browse, open, save, rename, move
   and delete (an overwritten file keeps its old content as a version, a deleted one goes to the folder's trash), mirror folders

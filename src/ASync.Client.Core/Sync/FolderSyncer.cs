@@ -82,6 +82,8 @@ public sealed class FolderSyncer
     private readonly Glob _excludes;
     private SyncState _state = new();
     private int _unsaved;
+    private readonly System.Diagnostics.Stopwatch _sinceSave = System.Diagnostics.Stopwatch.StartNew();
+    private static readonly TimeSpan CheckpointEvery = TimeSpan.FromSeconds(30);
 
     public FolderSyncer(IStorageBackend remote, string localRoot, string stateDirectory, SyncOptions options)
         : this(remote, new FileSystemTree(localRoot), stateDirectory, options) { }
@@ -196,7 +198,9 @@ public sealed class FolderSyncer
                 result.Errors.Add($"{path}: {e.Message}");
             }
             if (counted) Progress!.FinishFile(BytesOf(action, l, r));
-            if (++_unsaved >= 50) SaveState();
+            // A checkpoint, so an interrupted run does not redo its transfers' bookkeeping: after 50 files, at most every 30 seconds
+            // (the whole file is rewritten each time: every 50 files made the first sync of a large folder write gigabytes).
+            if (++_unsaved >= 50 && _sinceSave.Elapsed >= CheckpointEvery) SaveState();
         }
         if (refusedByQuota > 0) result.Errors.Add($"{refusedByQuota} file(s) not uploaded: over the storage quota.");
 
@@ -263,7 +267,7 @@ public sealed class FolderSyncer
             case Action.None:
                 return;
             case Action.Forget:
-                _state.Files.Remove(path);
+                _state.Remove(path);
                 return;
             case Action.Upload:
                 await UploadAsync(path, l!, result, ct);
@@ -273,19 +277,19 @@ public sealed class FolderSyncer
                 return;
             case Action.DeleteRemote:
                 await _remote.DeleteAsync(path, ct);
-                _state.Files.Remove(path);
+                _state.Remove(path);
                 result.DeletedRemote++;
                 return;
             case Action.DeleteLocal:
                 MoveToLocalTrash(path);
-                _state.Files.Remove(path);
+                _state.Remove(path);
                 result.DeletedLocal++;
                 return;
             case Action.Compare:
                 if (await SameContentAsync(path, ct))
                 {
                     // Same file on both sides (e.g. the first sync of a folder that already existed in both places).
-                    _state.Files[path] = new BaseEntry(l!.Size, l.Modified, r!.Size, r.Modified);
+                    _state.Set(path, new BaseEntry(l!.Size, l.Modified, r!.Size, r.Modified));
                     return;
                 }
                 await ResolveConflictAsync(path, r!, result, ct);
@@ -310,7 +314,7 @@ public sealed class FolderSyncer
                 uploadKey: TransferKey(path, l.Size, l.Modified));
         var stat = await _remote.Backend.StatAsync(path, ct) ?? throw new IOException("The uploaded file is not on the storage.");
         // The local values from the scan: if the file changed during the upload, the next run sees it as changed.
-        _state.Files[path] = new BaseEntry(l.Size, l.Modified, stat.Size, stat.LastModified?.ToUnixTimeMilliseconds() ?? 0);
+        _state.Set(path, new BaseEntry(l.Size, l.Modified, stat.Size, stat.LastModified?.ToUnixTimeMilliseconds() ?? 0));
         result.Uploaded++;
         result.Bytes += l.Size;
     }
@@ -383,7 +387,7 @@ public sealed class FolderSyncer
             if (!done && SizeOf(temp) is long size && size >= r.Size) _tree.DeleteFile(temp);
         }
         var written = Stat(path)!;
-        _state.Files[path] = new BaseEntry(written.Size, written.Modified, r.Size, r.Modified);
+        _state.Set(path, new BaseEntry(written.Size, written.Modified, r.Size, r.Modified));
         result.Downloaded++;
         result.Bytes += r.Size;
     }
@@ -516,13 +520,18 @@ public sealed class FolderSyncer
             try { e = _tree.Stat(path); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
             if (e is { IsFile: true } && e.Size == b.LocalSize && e.Modified != b.LocalModified && Math.Abs(e.Modified - b.LocalModified) < 2000)
-                _state.Files[path] = b with { LocalModified = e.Modified };
+                _state.Set(path, b with { LocalModified = e.Modified });
         }
     }
 
+    /// <summary>Writes the state only when it changed (a no-change run writes nothing locally).</summary>
     private void SaveState()
     {
-        _state.Save(_statePath);
+        _state.SaveIfDirty(_statePath);
         _unsaved = 0;
+        _sinceSave.Restart();
     }
+
+    /// <summary>How many times the last run wrote <c>sync-state.json</c> (tests and measurements).</summary>
+    public int StateWrites => _state.Saves;
 }

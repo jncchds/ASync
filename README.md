@@ -111,7 +111,9 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   [quota and storage alerts](docs/screenshots/phone-15-alerts-quota-storage.png).
 - **Sync engine** (used by the CLI agent today, and by the apps to come):
   - **Backups:** deduplicated, compressed, always encrypted snapshots, with retention rules. Old snapshots
-    are dropped after each backup.
+    are dropped after each backup. A backup that finds nothing changed since the last snapshot makes no new one (the run
+    says "No changes since snapshot …" and counts as a successful backup), so the newest snapshot is the last time something
+    changed, and an unchanged folder neither fills the snapshot list nor wears the device's storage.
   - **Housekeeping, without anyone asking:** the space of dropped snapshots is freed (pruned) every 7 days,
     and every 30 days the backups are verified: that nothing is missing, and that a sample of the stored data
     (10%) still reads back correctly. Both schedules and the sample size are set per folder in the folder

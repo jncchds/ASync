@@ -381,14 +381,17 @@ public sealed class SyncAgent : IAsyncDisposable
                     : null;
                 var collection = folder.Kind is FolderKind.Contacts or FolderKind.Calendars ? CollectionTreeFor(folder) : null;
                 var repo = await RepositoryAccess.OpenAsync(_api, _store, folder, backend, ct);
-                var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName,
+                var backup = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName,
                     (ILocalTree?)photos ?? (ILocalTree?)collection ?? LocalTrees.Open(folder.LocalPath)).RunAsync(progress, ct);
+                var (snapshot, forgotten) = backup;
                 var s = snapshot.Stats;
                 // Files the library could not give now (iCloud-only originals): kept from earlier snapshots, read next run, no error.
                 var errors = photos is null ? s.Errors : [.. s.Errors.Where(e => !photos.IsPostponed(e))];
                 var counts = photos?.Counts();
                 var items = collection?.Counts();
-                var message = $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: " +
+                var message = (backup.Unchanged
+                                  ? $"No changes since snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: "
+                                  : $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: ") +
                               (counts is { } c
                                   ? $"{Plural(c.Photos, "photo")}, {Plural(c.Videos, "video")} ({Size(c.Bytes)}){(c.Access == MediaAccess.Partial ? " of those this phone lets ASync see" : "")}, "
                                   : "") +
