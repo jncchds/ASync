@@ -54,6 +54,27 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   device's last sync went. The list updates live as devices report.
   - Add and edit folders (Backup, Mirror or two-way), then attach devices with their local folder. Mirror
     folders also get a direction for each device. Devices can be paused.
+  - **Wait after changes** (two-way and mirror folders): how long a device waits after you change files before it
+    syncs them: *Immediately* (a few seconds, the default), 1, 5, 15 or 30 minutes. Every change restarts the wait, so a burst
+    of saves becomes one sync, but files that keep changing still sync at the latest after a cap (10 minutes, or four times
+    the wait: 2 hours for 30 minutes). Longer waits mean fewer runs and fewer stored versions of files you save constantly (a
+    work folder), but on two-way folders more chance of a conflict with another device that edits the same file meanwhile.
+    A file that changed within the wait is left for the next run even when something else starts one (the interval, or
+    another device's change), up to the same cap; *Sync now* on a device takes everything as it is. While changes wait, the
+    device's row on *Folders* and the folder in the apps say *Changes waiting* and when they will sync.
+  - **Only what changed is looked at:** on computers (and on Android phones with *All files access*), the agent watches each
+    folder and a run looks only at the files and directories that changed since the last run, instead of reading through the
+    whole folder; backups reuse what they stored for directories nothing changed in. The whole folder is still read in full on
+    the first run after the agent starts, after the watcher missed changes (too many at once), and on the occasional full rescan.
+    On Linux every directory needs one inotify watch: with very large folders raise `fs.inotify.max_user_watches` (the log
+    says so; until then the folder is read in full on each run, as before).
+  - **The storage is not listed every time either:** the server keeps a log of what changed in each two-way and mirror folder
+    (whatever its devices, the web UI, the Android Files app and the iPhone's Files app changed), and devices ask it what is new
+    instead of listing the whole storage. Files put on the storage directly, outside ASync (another WebDAV or S3 client), are
+    seen at the next full rescan.
+  - **Read the whole folder** (every folder of files; default *twice a day*, from every 6 hours to once a week): how often a
+    device reads through the whole folder anyway, to catch what watching cannot see. Phones do it only on Wi-Fi and the charger;
+    until then their runs look only at what changed.
   - **Browse…** next to the local folder picks it on the device itself instead of typing the path: see
     [Choosing a device's folder from the web](#choosing-a-devices-folder-from-the-web).
   - Folders can also be created from the apps, which then show *added from <device>*: see
@@ -111,7 +132,9 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   [quota and storage alerts](docs/screenshots/phone-15-alerts-quota-storage.png).
 - **Sync engine** (used by the CLI agent today, and by the apps to come):
   - **Backups:** deduplicated, compressed, always encrypted snapshots, with retention rules. Old snapshots
-    are dropped after each backup.
+    are dropped after each backup. A backup that finds nothing changed since the last snapshot makes no new one (the run
+    says "No changes since snapshot …" and counts as a successful backup), so the newest snapshot is the last time something
+    changed, and an unchanged folder neither fills the snapshot list nor wears the device's storage.
   - **Housekeeping, without anyone asking:** the space of dropped snapshots is freed (pruned) every 7 days,
     and every 30 days the backups are verified: that nothing is missing, and that a sample of the stored data
     (10%) still reads back correctly. Both schedules and the sample size are set per folder in the folder
@@ -165,7 +188,8 @@ You don't need a computer to start syncing a new folder from your phone. The And
 
 - **New folder…** above the folder cards: a name; *Two-way*, *Mirror* (and which side is the original) or *Backup*;
   end-to-end encryption for backups; which of your storage to put it on; the directory there (filled in from the name);
-  how often it runs; and where it lives on the device, chosen with the folder picker (on a phone with
+  how often it runs; how long it waits after local changes (two-way and mirror, see *Wait after changes* above); and where it
+  lives on the device, chosen with the folder picker (on a phone with
   [All files access](#folders-anywhere-on-the-phone) anywhere on the phone, otherwise with Android's picker). A new
   end-to-end backup asks for its passphrase right away and shows its recovery key once; a standard backup shows its
   recovery key once.

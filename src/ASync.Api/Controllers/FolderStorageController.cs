@@ -31,10 +31,12 @@ public class FolderStorageController : ControllerBase
     private readonly UploadService _uploads;
     private readonly UploadLimits _limits;
     private readonly UsageService _usage;
+    private readonly FolderChangeLog _changes;
 
     public FolderStorageController(IFolderRepository folders, FolderBackendCache backends, SnapshotService snapshots, UploadService uploads,
-        UploadLimits limits, UsageService usage)
+        UploadLimits limits, UsageService usage, FolderChangeLog changes)
     {
+        _changes = changes;
         _usage = usage;
         _folders = folders;
         _backends = backends;
@@ -83,7 +85,8 @@ public class FolderStorageController : ControllerBase
         if (await MemberAsync(folderId, ct) is not var (folder, deviceId, backend)) return NotFound();
         return await Guard(async () =>
         {
-            await _uploads.CompleteAsync(folder, deviceId, backend, uploadId, ct);
+            var path = await _uploads.CompleteAsync(folder, deviceId, backend, uploadId, ct);
+            await _changes.RecordAsync(folder, deviceId, path);
             return NoContent();
         });
     }
@@ -165,6 +168,7 @@ public class FolderStorageController : ControllerBase
             buffer.Position = 0;
             await backend.WriteAsync(path, buffer, mtime is long ms ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : null, ct);
             await _usage.RecordAcceptedAsync(folderId, size);
+            await _changes.RecordAsync(folder, deviceId, path);
             return NoContent();
         });
     }
@@ -172,10 +176,11 @@ public class FolderStorageController : ControllerBase
     [HttpDelete("file")]
     public async Task<IActionResult> Delete(int folderId, [FromQuery] string path, CancellationToken ct)
     {
-        if (await BackendAsync(folderId, ct) is not { } backend) return NotFound();
+        if (await MemberAsync(folderId, ct) is not var (folder, deviceId, backend)) return NotFound();
         return await Guard(async () =>
         {
             await backend.DeleteAsync(path, ct);
+            await _changes.RecordAsync(folder, deviceId, path);
             // Only a prune deletes index files and packs: the snapshot browser's cached index is now out of date.
             // (Packs go last, after the new index is complete, so a reload after this point is right.)
             var normalized = StoragePath.Normalize(path);
@@ -188,10 +193,11 @@ public class FolderStorageController : ControllerBase
     [HttpPost("move")]
     public async Task<IActionResult> Move(int folderId, [FromBody] StorageMoveRequest req, CancellationToken ct)
     {
-        if (await BackendAsync(folderId, ct) is not { } backend) return NotFound();
+        if (await MemberAsync(folderId, ct) is not var (folder, deviceId, backend)) return NotFound();
         return await Guard(async () =>
         {
             await backend.MoveAsync(req.From, req.To, ct);
+            await _changes.RecordAsync(folder, deviceId, req.From, req.To);
             return NoContent();
         });
     }

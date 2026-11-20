@@ -356,6 +356,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             { Alerts: [{ Kind: AlertKind.Failing or AlertKind.CheckFailed or AlertKind.PruneFailed }, ..] } => new Pill("Problem", PillKind.Danger),
             { Alerts: [{ Kind: AlertKind.Overdue }, ..] } => new Pill("Overdue", PillKind.Warning),
             { Waiting: not null } => new Pill("Waiting", PillKind.Muted),
+            { ChangesWaitingUntil: not null } => new Pill("Changes waiting", PillKind.Muted),
             { LastResult: not null } => new Pill("Up to date", PillKind.Success),
             _ => new Pill("Waiting", PillKind.Muted),
         };
@@ -391,6 +392,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
             { Locked: true } => "Waits to be unlocked",
             { Kind: FolderKind.Files, LocalPath.Length: 0 } => "Waits for a local folder",
             { Waiting: { } waiting } => waiting,
+            { ChangesWaitingUntil: { } changes } => $"Changes waiting: syncs {Format.In(changes, now)}",
             { NextRunAt: { } next } => $"Next run {Format.In(next, now)}",
             _ => $"Every {_folder.IntervalMinutes} min",
         };

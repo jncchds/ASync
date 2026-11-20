@@ -126,6 +126,8 @@ public static class IosAgent
                 Conditions = IosDeviceConditions.Instance,
                 RunAtStart = false,
                 RunOnInterval = false,
+                // A due full rescan waits for Wi-Fi and the charger (task 26; iOS has no watched folders today, see AGENTS.md).
+                FullRescanConditions = new ASync.Contracts.RunConditionsDto(UnmeteredOnly: true, ChargingOnly: true),
                 // The web UI may browse the app's Documents (task 17); picked folders are chosen on the phone.
                 Browse = new IosBrowseScope(Home, DeviceNoun),
                 // Photos folders back up PhotoKit (task 23); its albums are listed for the web UI under the same browsing setting.

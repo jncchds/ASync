@@ -28,6 +28,19 @@ public sealed record SyncOptions
     /// the same content). Zero = off (the default; the Android agent uses a few seconds).
     /// </summary>
     public TimeSpan SettleTime { get; init; }
+    /// <summary>
+    /// The longest a file may be held back by <see cref="SettleTime"/> (task 26, the folder's cap of the wait after changes): a file
+    /// first seen changing longer ago than this goes in the run anyway, so a file saved all day still syncs at least every cap.
+    /// Null: no cap (a file modified within the settle time always waits).
+    /// </summary>
+    public TimeSpan? SettleCap { get; init; }
+    /// <summary>
+    /// When each held-back path was first seen changing, kept by the caller across runs (the agent's worker; in memory: after a
+    /// restart the next run starts counting afresh). Paths are removed once they are synced or no longer changing.
+    /// </summary>
+    public IDictionary<string, DateTimeOffset>? FirstSeenChanging { get; init; }
+    /// <summary>The first local change event the run was waiting for (the agent's watcher), as the earliest "first seen" of a path.</summary>
+    public DateTimeOffset? ChangedSince { get; init; }
     /// <summary>The clock <see cref="SettleTime"/> is measured with.</summary>
     public TimeProvider Clock { get; init; } = TimeProvider.System;
     /// <summary>
@@ -36,6 +49,19 @@ public sealed record SyncOptions
     /// every file looking new or changed.
     /// </summary>
     public Func<string, bool>? SamePlace { get; init; }
+    /// <summary>
+    /// What changed locally since the last run (task 26, the agent's watcher): with a trustworthy set, only those paths are looked
+    /// at and the rest of the tree is taken as the sync state recorded it. Null or <see cref="LocalChanges.Full"/>: the whole tree is
+    /// walked, as before.
+    /// </summary>
+    public LocalChanges? LocalChanges { get; init; }
+    /// <summary>
+    /// What changed on the storage since the last run (task 26, the server's change log): with a usable cursor, only those paths are
+    /// looked at on the storage. Null: the storage is listed in full every run, as before.
+    /// </summary>
+    public IRemoteChangeFeed? RemoteFeed { get; init; }
+    /// <summary>List the storage in full this run, for this reason (the full-rescan schedule), whatever the change log says.</summary>
+    public string? RemoteFullReason { get; init; }
 }
 
 public sealed record SyncResult
@@ -51,6 +77,14 @@ public sealed record SyncResult
     public List<string> Errors { get; } = [];
     /// <summary>Paths left for the next run because their local file changed moments ago (<see cref="SyncOptions.SettleTime"/>).</summary>
     public int Unsettled { get; set; }
+    /// <summary>When the first of the <see cref="Unsettled"/> paths may go (settled, or held back for the cap): when to run again.</summary>
+    public DateTimeOffset? SettlesAt { get; set; }
+    /// <summary>How the local side was scanned: "full scan (reason)" or "N changed paths" (for the run's log line).</summary>
+    public string Scan { get; set; } = "full scan";
+    /// <summary>How the remote side was read: "full listing (reason)" or "N remote changes" (task 26).</summary>
+    public string RemoteScan { get; set; } = "full listing";
+    /// <summary>Paths the run could not finish (still changing, failed, not readable): the next incremental run looks at them again.</summary>
+    public HashSet<string> Retry { get; } = new(StringComparer.Ordinal);
     /// <summary>True when this run changed the storage (other devices should sync).</summary>
     public bool ChangedRemote => Uploaded > 0 || DeletedRemote > 0;
     public bool Ok => Errors.Count == 0;
@@ -82,6 +116,8 @@ public sealed class FolderSyncer
     private readonly Glob _excludes;
     private SyncState _state = new();
     private int _unsaved;
+    private readonly System.Diagnostics.Stopwatch _sinceSave = System.Diagnostics.Stopwatch.StartNew();
+    private static readonly TimeSpan CheckpointEvery = TimeSpan.FromSeconds(30);
 
     public FolderSyncer(IStorageBackend remote, string localRoot, string stateDirectory, SyncOptions options)
         : this(remote, new FileSystemTree(localRoot), stateDirectory, options) { }
@@ -115,42 +151,16 @@ public sealed class FolderSyncer
         _ => 0,
     };
 
+    /// <summary>What the run would do, without doing it or writing anything (tests: the incremental scan against a full one).</summary>
+    public async Task<IReadOnlyList<(string Path, string Action)>> PlanAsync(CancellationToken ct = default)
+    {
+        var (plan, _, _, _) = await PrepareAsync(save: false, ct);
+        return [.. plan.Select(p => (p.Path, p.Action.ToString()))];
+    }
+
     public async Task<SyncResult> RunAsync(CancellationToken ct = default)
     {
-        if (!_tree.Exists())
-            throw new SyncRefusedException(_tree.UnavailableReason ?? (_tree.FileSystemPath is null
-                ? $"The folder {_tree.Location} cannot be used (was it deleted, or its permission taken back?). Choose the folder again."
-                : $"The folder {_tree.Location} does not exist (is the disk mounted?). Create it to start syncing into it."));
-
-        _state = SyncState.Load(_statePath);
-        if (_state.Location != _tree.Location)
-        {
-            if (_state.Location is { } previous && _options.SamePlace?.Invoke(previous) == true) Rebase();
-            _state.Location = _tree.Location;
-            SaveState();
-        }
-        var result = new SyncResult();
-        var local = ScanLocal();
-        var remote = new Dictionary<string, RemoteFile>(StringComparer.Ordinal);
-        await foreach (var e in _remote.ListFilesAsync(ct))
-            if (!e.IsDirectory && !_excludes.Matches(e.Path))
-                remote[e.Path] = new RemoteFile(e.Size, e.LastModified?.ToUnixTimeMilliseconds() ?? 0);
-
-        var plan = new List<(string Path, Action Action)>();
-        foreach (var path in local.Keys.Union(remote.Keys).Union(_state.Files.Keys).Distinct().Order(StringComparer.Ordinal))
-        {
-            local.TryGetValue(path, out var l);
-            remote.TryGetValue(path, out var r);
-            _state.Files.TryGetValue(path, out var b);
-            if (b is not null && _excludes.Matches(path)) { plan.Add((path, Action.Forget)); continue; }
-            var action = Decide(l, r, b);
-            if (action is not (Action.None or Action.Forget) && l is not null && Unsettled(l))
-            {
-                result.Unsettled++;
-                continue; // as if the path were not there this run: its state stays as it was
-            }
-            plan.Add((path, action));
-        }
+        var (plan, local, remote, result) = await PrepareAsync(save: true, ct);
         CheckMassDeletion(plan);
         if (Progress is { } progress)
         {
@@ -166,7 +176,104 @@ public sealed class FolderSyncer
             }
             progress.SetTotals(count, bytes);
         }
+        return await ExecutePlanAsync(plan, local, remote, result, ct);
+    }
 
+    private async Task<(List<(string Path, Action Action)> Plan, Dictionary<string, LocalFile> Local, Dictionary<string, RemoteFile> Remote, SyncResult Result)>
+        PrepareAsync(bool save, CancellationToken ct)
+    {
+        if (!_tree.Exists())
+            throw new SyncRefusedException(_tree.UnavailableReason ?? (_tree.FileSystemPath is null
+                ? $"The folder {_tree.Location} cannot be used (was it deleted, or its permission taken back?). Choose the folder again."
+                : $"The folder {_tree.Location} does not exist (is the disk mounted?). Create it to start syncing into it."));
+
+        var hadState = File.Exists(_statePath);
+        _state = SyncState.Load(_statePath);
+        var result = new SyncResult();
+        var changes = _options.LocalChanges;
+        var full = changes is null ? "no change tracking" : changes.FullReason;
+        if (full is null && !hadState) full = "no sync state yet";
+        if (_state.Location != _tree.Location)
+        {
+            if (_state.Location is { } previous && _options.SamePlace?.Invoke(previous) == true) Rebase();
+            _state.Location = _tree.Location;
+            if (save) SaveState();
+            full ??= "the folder's location changed";
+        }
+        if (full is null && changes!.Subtrees!.Contains("")) full = "the folder itself was replaced";
+        HashSet<string> unknown = new(StringComparer.Ordinal);
+        Dictionary<string, LocalFile> local;
+        if (full is null)
+        {
+            local = ScanChanged(changes!, result, unknown);
+            result.Scan = $"{changes!.Count} changed path{(changes.Count == 1 ? "" : "s")}";
+        }
+        else
+        {
+            local = ScanLocal();
+            result.Scan = $"full scan ({full})";
+        }
+        // The remote side (task 26): the server's change log since the cursor, or a full listing.
+        var excludesKey = string.Join('\n', _options.Excludes);
+        var remoteFull = _options.RemoteFullReason;
+        RemoteChanges? feed = null;
+        if (_options.RemoteFeed is { } source)
+        {
+            var usable = remoteFull is null && hadState && _state.RemoteCursor is not null && _state.RemoteExcludes == excludesKey;
+            feed = await source.ReadAsync(usable ? _state.RemoteCursor : null, ct);
+            remoteFull ??= !hadState ? "no sync state yet"
+                : _state.RemoteCursor is not null && _state.RemoteExcludes != excludesKey ? "the excludes changed"
+                : feed.FullReason;
+        }
+        else remoteFull ??= "no change log";
+        Dictionary<string, RemoteFile> remote;
+        if (remoteFull is null)
+        {
+            var changed = new HashSet<string>(feed!.Paths!, StringComparer.Ordinal);
+            changed.UnionWith(_state.RemoteRetry);
+            remote = await ScanRemoteChangedAsync(changed, ct);
+            result.RemoteScan = $"{changed.Count} remote change{(changed.Count == 1 ? "" : "s")}";
+        }
+        else
+        {
+            remote = new Dictionary<string, RemoteFile>(StringComparer.Ordinal);
+            await foreach (var e in _remote.ListFilesAsync(ct))
+                if (!e.IsDirectory && !_excludes.Matches(e.Path))
+                    remote[e.Path] = new RemoteFile(e.Size, e.LastModified?.ToUnixTimeMilliseconds() ?? 0);
+            result.RemoteScan = $"full listing ({remoteFull})";
+        }
+        _remoteCursor = feed?.Cursor;
+        _remoteExcludes = excludesKey;
+
+        var plan = new List<(string Path, Action Action)>();
+        foreach (var path in local.Keys.Union(remote.Keys).Union(_state.Files.Keys).Distinct().Order(StringComparer.Ordinal))
+        {
+            if (unknown.Count > 0 && UnderAny(path, unknown))
+            {
+                result.Retry.Add(path); // could not be stat'ed: neither deleted nor changed this run (see ScanChanged)
+                continue;
+            }
+            local.TryGetValue(path, out var l);
+            remote.TryGetValue(path, out var r);
+            _state.Files.TryGetValue(path, out var b);
+            if (b is not null && _excludes.Matches(path)) { plan.Add((path, Action.Forget)); continue; }
+            var action = Decide(l, r, b);
+            if (action is not (Action.None or Action.Forget) && l is not null && Unsettled(path, l) is { } settlesAt)
+            {
+                result.Unsettled++;
+                result.Retry.Add(path);
+                if (result.SettlesAt is null || settlesAt < result.SettlesAt) result.SettlesAt = settlesAt;
+                continue; // as if the path were not there this run: its state stays as it was
+            }
+            _options.FirstSeenChanging?.Remove(path);
+            plan.Add((path, action));
+        }
+        return (plan, local, remote, result);
+    }
+
+    private async Task<SyncResult> ExecutePlanAsync(List<(string Path, Action Action)> plan, Dictionary<string, LocalFile> local,
+        Dictionary<string, RemoteFile> remote, SyncResult result, CancellationToken ct)
+    {
         // Over the quota, the first refused upload says so and the rest are not tried this run (each would be refused);
         // downloads and deletions go on.
         var refusedByQuota = 0;
@@ -178,6 +285,7 @@ public sealed class FolderSyncer
             if (refusedByQuota > 0 && action is Action.Upload or Action.Conflict)
             {
                 refusedByQuota++;
+                result.Retry.Add(path);
                 continue;
             }
             var counted = Progress is not null && action is not (Action.None or Action.Forget);
@@ -189,29 +297,101 @@ public sealed class FolderSyncer
             catch (StorageQuotaExceededException e)
             {
                 refusedByQuota++;
+                result.Retry.Add(path);
                 result.Errors.Insert(0, e.Message);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or HttpRequestException)
             {
+                result.Retry.Add(path);
                 result.Errors.Add($"{path}: {e.Message}");
             }
             if (counted) Progress!.FinishFile(BytesOf(action, l, r));
-            if (++_unsaved >= 50) SaveState();
+            // A checkpoint, so an interrupted run does not redo its transfers' bookkeeping: after 50 files, at most every 30 seconds
+            // (the whole file is rewritten each time: every 50 files made the first sync of a large folder write gigabytes).
+            if (++_unsaved >= 50 && _sinceSave.Elapsed >= CheckpointEvery) SaveState();
         }
         if (refusedByQuota > 0) result.Errors.Add($"{refusedByQuota} file(s) not uploaded: over the storage quota.");
 
         _state.LastSync = DateTimeOffset.UtcNow;
+        var cursorMoved = false;
+        if (_options.RemoteFeed is not null)
+        {
+            // Where the log was before this run looked: what changed during the run is read again next time. What the run could
+            // not finish is looked at on the storage again next run, whatever the log says then (task 26).
+            cursorMoved = _state.RemoteCursor != _remoteCursor || _state.RemoteExcludes != _remoteExcludes;
+            _state.RemoteCursor = _remoteCursor;
+            _state.RemoteExcludes = _remoteExcludes;
+            _state.RemoteRetry = [.. result.Retry.Order(StringComparer.Ordinal)];
+        }
         await CleanUpIfDueAsync(ct);
+        var dirty = _state.Dirty;
         SaveState();
+        if (cursorMoved && !dirty) _state.SaveCursor(_statePath); // a few bytes, not the whole state
         return result;
     }
 
-    /// <summary>Modified within the settle time (a time in the future, a wrong clock, does not count as unsettled).</summary>
-    private bool Unsettled(LocalFile l)
+    private long? _remoteCursor;
+    private string? _remoteExcludes;
+
+    /// <summary>
+    /// The remote side from the change log (task 26): every path the sync state knows, as it was after the last sync, with the
+    /// changed paths looked at on the storage: a file stat'ed, a directory (moved as a whole) listed, a missing one gone with what
+    /// was under it.
+    /// </summary>
+    private async Task<Dictionary<string, RemoteFile>> ScanRemoteChangedAsync(HashSet<string> changed, CancellationToken ct)
     {
-        if (_options.SettleTime <= TimeSpan.Zero) return false;
-        var age = _options.Clock.GetUtcNow().ToUnixTimeMilliseconds() - l.Modified;
-        return age >= 0 && age < _options.SettleTime.TotalMilliseconds;
+        var remote = new Dictionary<string, RemoteFile>(_state.Files.Count, StringComparer.Ordinal);
+        foreach (var (path, b) in _state.Files) remote[path] = new RemoteFile(b.RemoteSize, b.RemoteModified);
+        var known = _state.Files.Keys.Order(StringComparer.Ordinal).ToArray();
+        IEnumerable<string> KnownUnder(string dir)
+        {
+            var prefix = dir + "/";
+            var i = Array.BinarySearch(known, prefix, StringComparer.Ordinal);
+            if (i < 0) i = ~i;
+            for (; i < known.Length && known[i].StartsWith(prefix, StringComparison.Ordinal); i++) yield return known[i];
+        }
+        foreach (var path in changed.Order(StringComparer.Ordinal))
+        {
+            if (path.Length == 0 || PlainStore.IsMeta(path) || _excludes.Matches(path)) continue;
+            var e = await _remote.Backend.StatAsync(path, ct);
+            if (e is null || e.IsDirectory)
+            {
+                remote.Remove(path);
+                foreach (var k in KnownUnder(path)) remote.Remove(k);
+            }
+            if (e is null) continue;
+            if (!e.IsDirectory)
+            {
+                remote[path] = new RemoteFile(e.Size, e.LastModified?.ToUnixTimeMilliseconds() ?? 0);
+                continue;
+            }
+            await foreach (var f in _remote.Backend.ListAsync(path, recursive: true, ct))
+                if (!f.IsDirectory && !PlainStore.IsMeta(f.Path) && !_excludes.Matches(f.Path))
+                    remote[f.Path] = new RemoteFile(f.Size, f.LastModified?.ToUnixTimeMilliseconds() ?? 0);
+        }
+        return remote;
+    }
+
+    /// <summary>
+    /// Modified within the settle time (a time in the future, a wrong clock, does not count as unsettled), and not held back for
+    /// longer than the cap yet: then when it may go; null when it goes in this run.
+    /// </summary>
+    private DateTimeOffset? Unsettled(string path, LocalFile l)
+    {
+        if (_options.SettleTime <= TimeSpan.Zero) return null;
+        var now = _options.Clock.GetUtcNow();
+        var age = now.ToUnixTimeMilliseconds() - l.Modified;
+        if (age < 0 || age >= _options.SettleTime.TotalMilliseconds) return null;
+        var settles = DateTimeOffset.FromUnixTimeMilliseconds(l.Modified) + _options.SettleTime;
+        if (_options.SettleCap is not { } cap) return settles;
+        var seen = _options.FirstSeenChanging;
+        if (seen is null || !seen.TryGetValue(path, out var first))
+        {
+            first = _options.ChangedSince is { } since && since < now ? since : now;
+            seen?.TryAdd(path, first);
+        }
+        if (now - first >= cap) return null; // held back long enough: it goes now, even while it still changes
+        return settles < first + cap ? settles : first + cap;
     }
 
     private Action Decide(LocalFile? l, RemoteFile? r, BaseEntry? b)
@@ -263,7 +443,7 @@ public sealed class FolderSyncer
             case Action.None:
                 return;
             case Action.Forget:
-                _state.Files.Remove(path);
+                _state.Remove(path);
                 return;
             case Action.Upload:
                 await UploadAsync(path, l!, result, ct);
@@ -273,19 +453,19 @@ public sealed class FolderSyncer
                 return;
             case Action.DeleteRemote:
                 await _remote.DeleteAsync(path, ct);
-                _state.Files.Remove(path);
+                _state.Remove(path);
                 result.DeletedRemote++;
                 return;
             case Action.DeleteLocal:
                 MoveToLocalTrash(path);
-                _state.Files.Remove(path);
+                _state.Remove(path);
                 result.DeletedLocal++;
                 return;
             case Action.Compare:
                 if (await SameContentAsync(path, ct))
                 {
                     // Same file on both sides (e.g. the first sync of a folder that already existed in both places).
-                    _state.Files[path] = new BaseEntry(l!.Size, l.Modified, r!.Size, r.Modified);
+                    _state.Set(path, new BaseEntry(l!.Size, l.Modified, r!.Size, r.Modified));
                     return;
                 }
                 await ResolveConflictAsync(path, r!, result, ct);
@@ -310,7 +490,7 @@ public sealed class FolderSyncer
                 uploadKey: TransferKey(path, l.Size, l.Modified));
         var stat = await _remote.Backend.StatAsync(path, ct) ?? throw new IOException("The uploaded file is not on the storage.");
         // The local values from the scan: if the file changed during the upload, the next run sees it as changed.
-        _state.Files[path] = new BaseEntry(l.Size, l.Modified, stat.Size, stat.LastModified?.ToUnixTimeMilliseconds() ?? 0);
+        _state.Set(path, new BaseEntry(l.Size, l.Modified, stat.Size, stat.LastModified?.ToUnixTimeMilliseconds() ?? 0));
         result.Uploaded++;
         result.Bytes += l.Size;
     }
@@ -383,7 +563,7 @@ public sealed class FolderSyncer
             if (!done && SizeOf(temp) is long size && size >= r.Size) _tree.DeleteFile(temp);
         }
         var written = Stat(path)!;
-        _state.Files[path] = new BaseEntry(written.Size, written.Modified, r.Size, r.Modified);
+        _state.Set(path, new BaseEntry(written.Size, written.Modified, r.Size, r.Modified));
         result.Downloaded++;
         result.Bytes += r.Size;
     }
@@ -494,6 +674,202 @@ public sealed class FolderSyncer
         return files;
     }
 
+    /// <summary>A directory's entries; one we cannot read refuses the run (it must not look empty, see <see cref="ScanLocal"/>).</summary>
+    private IReadOnlyList<LocalEntry> ListOrRefuse(string dir)
+    {
+        try
+        {
+            return _tree.List(dir);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            if (_tree.UnavailableReason is { } reason) throw new SyncRefusedException(reason);
+            var where = dir.Length == 0 ? _tree.Location : _tree is FileSystemTree fs ? fs.Full(dir) : $"{dir} in {_tree.Location}";
+            throw new SyncRefusedException($"Cannot read {where} (permission denied). Nothing was changed: fix its permissions, or exclude it.");
+        }
+    }
+
+    private bool Skipped(string relative, string name) =>
+        relative == LocalMeta || name.EndsWith(".async-tmp", StringComparison.Ordinal) || _excludes.Matches(relative);
+
+    /// <summary>Every file under <paramref name="start"/> (a directory), as <see cref="ScanLocal"/> walks the whole tree.</summary>
+    private void Walk(string start, Dictionary<string, LocalFile?> into)
+    {
+        var pending = new Stack<string>([start]);
+        while (pending.TryPop(out var dir))
+            foreach (var entry in ListOrRefuse(dir))
+            {
+                var relative = dir.Length == 0 ? entry.Name : $"{dir}/{entry.Name}";
+                if (Skipped(relative, entry.Name)) continue;
+                if (entry.Kind == LocalEntryKind.Directory) pending.Push(relative);
+                else if (entry.Kind == LocalEntryKind.File) into[relative] = new LocalFile(entry.Size, entry.Modified);
+            }
+    }
+
+    /// <summary>
+    /// The incremental scan (task 26): only the paths the watcher recorded are looked at; every other path the sync state knows is
+    /// taken as it was after the last sync (unchanged, since nothing was recorded for it). For each recorded path:
+    /// <list type="bullet">
+    /// <item>a file: stat'ed;</item>
+    /// <item>a directory: listed (its direct files stat'ed, its subdirectories nobody knows walked whole); one that appeared (a
+    ///   <see cref="LocalChanges.Subtrees"/> path: created, or renamed into place) is walked whole, since what was in it arrived
+    ///   without events of its own;</item>
+    /// <item>gone: it and every known path under it are gone, but only once a listing of its parent confirms it (see
+    ///   <see cref="ConfirmedAbsent"/>): a path that cannot be looked at goes into <paramref name="unknown"/> and is neither deleted
+    ///   nor changed in this run (an error for it, and it is looked at again next run).</item>
+    /// </list>
+    /// The same refusal as a full scan applies to directories that cannot be listed.
+    /// </summary>
+    private Dictionary<string, LocalFile> ScanChanged(LocalChanges changes, SyncResult result, HashSet<string> unknown)
+    {
+        var known = _state.Files.Keys.Order(StringComparer.Ordinal).ToArray();
+        IEnumerable<string> KnownUnder(string dir)
+        {
+            var prefix = dir + "/";
+            var i = Array.BinarySearch(known, prefix, StringComparer.Ordinal);
+            if (i < 0) i = ~i;
+            for (; i < known.Length && known[i].StartsWith(prefix, StringComparison.Ordinal); i++) yield return known[i];
+        }
+
+        var observed = new Dictionary<string, LocalFile?>(StringComparer.Ordinal);
+        var listings = new Dictionary<string, HashSet<string>?>(StringComparer.Ordinal);
+        foreach (var path in changes.All.Distinct().Order(StringComparer.Ordinal))
+        {
+            if (Excluded(path)) continue; // the watcher records only the directory above an excluded path; a caller's set may not
+            if (path.Length == 0)
+            {
+                ListDirectory("", walkUnknown: true);
+                continue;
+            }
+            LocalEntry? e;
+            try { e = _tree.Stat(path); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Unknown(path, ex.Message);
+                continue;
+            }
+            switch (e)
+            {
+                case null:
+                    switch (ConfirmedAbsent(path, listings))
+                    {
+                        case true:
+                            observed[path] = null;
+                            foreach (var k in KnownUnder(path)) observed[k] = null;
+                            break;
+                        case false:
+                            Unknown(path, "it could not be looked at");
+                            break;
+                        default: // there after all (created between the two looks): the next run sees its event
+                            result.Retry.Add(path);
+                            Unknown(path, null);
+                            break;
+                    }
+                    break;
+                case { IsFile: true }:
+                    observed[path] = new LocalFile(e.Size, e.Modified);
+                    foreach (var k in KnownUnder(path)) observed[k] = null; // was a directory
+                    break;
+                case { IsDirectory: true }:
+                    if (path == "" || changes.Subtrees!.Contains(path) || !KnownUnder(path).Any())
+                    {
+                        foreach (var k in KnownUnder(path)) observed[k] = null; // whatever is not found again is gone
+                        Walk(path, observed);
+                    }
+                    else ListDirectory(path, walkUnknown: true);
+                    if (_state.Files.ContainsKey(path)) observed[path] = null; // was a file
+                    break;
+                default: // a symlink now: not synced, like in a full scan
+                    observed[path] = null;
+                    foreach (var k in KnownUnder(path)) observed[k] = null;
+                    break;
+            }
+        }
+
+        // The state's paths as they were, with what was looked at on top.
+        var local = new Dictionary<string, LocalFile>(_state.Files.Count, StringComparer.Ordinal);
+        foreach (var (path, b) in _state.Files)
+            if (!observed.ContainsKey(path) && !(unknown.Count > 0 && UnderAny(path, unknown)))
+                local[path] = new LocalFile(b.LocalSize, b.LocalModified);
+        foreach (var (path, l) in observed)
+            if (l is not null) local[path] = l;
+            else local.Remove(path);
+        return local;
+
+        void Unknown(string path, string? why)
+        {
+            unknown.Add(path);
+            result.Retry.Add(path);
+            if (why is not null) result.Errors.Add($"{path}: {why}; it is looked at again next time (nothing was deleted)");
+        }
+
+        // A directory that changed (a file came or went, its own times): its direct entries. A subdirectory nobody knows is new
+        // (created before the watcher saw it, or its events were filtered): walked whole. Known direct files not listed are gone.
+        void ListDirectory(string dir, bool walkUnknown)
+        {
+            var listed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in ListOrRefuse(dir))
+            {
+                var relative = dir.Length == 0 ? entry.Name : $"{dir}/{entry.Name}";
+                if (Skipped(relative, entry.Name)) continue;
+                listed.Add(relative);
+                if (entry.Kind == LocalEntryKind.File) observed[relative] = new LocalFile(entry.Size, entry.Modified);
+                else if (entry.Kind == LocalEntryKind.Directory && walkUnknown && !KnownUnder(relative).Any()) Walk(relative, observed);
+            }
+            var prefixLength = dir.Length == 0 ? 0 : dir.Length + 1;
+            foreach (var k in dir.Length == 0 ? known : KnownUnder(dir))
+                if (k.IndexOf('/', prefixLength) < 0 && !listed.Contains(k) && !observed.ContainsKey(k))
+                    observed[k] = null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a path that stat'ed as missing is really gone: its parent lists without it (true), cannot be looked at (false), or
+    /// lists it after all (null). A stat cannot tell "not there" from "not allowed to look" (.NET's <c>Exists</c> is false for
+    /// both); a listing can. A missing parent is checked the same way, up to the folder itself.
+    /// </summary>
+    private bool? ConfirmedAbsent(string path, Dictionary<string, HashSet<string>?> listings)
+    {
+        var parent = StoragePath.Parent(path);
+        var name = path[(parent.Length == 0 ? 0 : parent.Length + 1)..];
+        if (!listings.TryGetValue(parent, out var names))
+        {
+            try { names = [.. _tree.List(parent).Select(e => e.Name)]; }
+            catch (UnauthorizedAccessException) { names = null; }
+            catch (IOException) when (parent.Length > 0)
+            {
+                // The parent is not there either (or not readable): settle that first.
+                listings[parent] = null;
+                return ConfirmedAbsent(parent, listings);
+            }
+            catch (IOException) { names = null; }
+            listings[parent] = names;
+        }
+        if (names is null)
+            return parent.Length > 0 && ConfirmedAbsent(parent, listings) == true; // a gone parent takes its children with it
+        return names.Contains(name) ? null : true;
+    }
+
+    /// <summary>Whether the path, or a directory it is in, is excluded or ours (as a full scan skips them).</summary>
+    private bool Excluded(string path)
+    {
+        if (path.Length == 0) return false;
+        var parts = path.Split('/');
+        for (var i = 1; i <= parts.Length; i++)
+            if (Skipped(string.Join('/', parts, 0, i), parts[i - 1])) return true;
+        return false;
+    }
+
+    /// <summary>Whether the path or one of its parents is in the set.</summary>
+    private static bool UnderAny(string path, HashSet<string> set)
+    {
+        for (var p = path; ; p = StoragePath.Parent(p))
+        {
+            if (set.Contains(p)) return true;
+            if (p.Length == 0) return false;
+        }
+    }
+
     private LocalFile? Stat(string path) =>
         _tree.Stat(StoragePath.Normalize(path)) is { IsFile: true } e ? new LocalFile(e.Size, e.Modified) : null;
 
@@ -516,13 +892,18 @@ public sealed class FolderSyncer
             try { e = _tree.Stat(path); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
             if (e is { IsFile: true } && e.Size == b.LocalSize && e.Modified != b.LocalModified && Math.Abs(e.Modified - b.LocalModified) < 2000)
-                _state.Files[path] = b with { LocalModified = e.Modified };
+                _state.Set(path, b with { LocalModified = e.Modified });
         }
     }
 
+    /// <summary>Writes the state only when it changed (a no-change run writes nothing locally).</summary>
     private void SaveState()
     {
-        _state.Save(_statePath);
+        _state.SaveIfDirty(_statePath);
         _unsaved = 0;
+        _sinceSave.Restart();
     }
+
+    /// <summary>How many times the last run wrote <c>sync-state.json</c> (tests and measurements).</summary>
+    public int StateWrites => _state.Saves;
 }

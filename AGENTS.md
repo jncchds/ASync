@@ -225,6 +225,19 @@ Implemented (task 20, contacts and calendars; migration `ContactsCalendarsCollec
 - **Device**: CollectionListsJson (jsonb, the last contact-account and calendar lists it reported, keyed by kind: `{collections, access,
   items, at}`; names and counts only).
 
+Implemented (task 26, the wait after local changes; migration `FolderChangeDelay`; see "Change tracking and full rescans"):
+
+- **Folder.ChangeDelaySeconds** (the quiet period, default 5 = the old fixed debounce, 1 s–1 day) and
+  **ChangeMaxDelaySeconds** (the cap after the first unsynced change, default 600, between the quiet period and 1 day;
+  `ChangeDelayDefaults`). Database defaults, so folders from before the migration behave as before plus the cap. In
+  `FolderDto`, `SaveFolderRequest` and `DeviceFolderDto`. The devices' "changes waiting until" is not stored: it is kept with
+  their hub connection (`DeviceConnections`) and added to `FolderDeviceDto.ChangesWaitingUntil` by `GET /api/folders`.
+- **Folder.FullRescanHours** (migration `FolderFullRescan`, default 12, 1–720): how often devices that follow recorded changes
+  scan the folder in full anyway (see "Change tracking and full rescans"). In the same three DTOs.
+- **FolderChange** (migration `FolderChangeLog`; `src/ASync.Core/Models/FolderChange.cs`): Id (bigint identity: the sequence),
+  FolderId (cascade with the folder), Path (up to 1000), DeviceId (null = the server), At; indexes (FolderId, Id) and At. Plus
+  **Folder.ChangesTrimmedThrough** (bigint, the highest sequence trimmed from the folder's log).
+
 ## Auth
 
 - **People** (web UI): copied from abook. A 15-minute JWT access token is kept in page memory. An httpOnly
@@ -568,13 +581,17 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
   through `ISyncNotifier`. Devices join `device:<id>` and people join `user:<id>`. The events are
   `config.changed`, `folder.changed` (folderId, originDeviceId), `folder.status`, `device.revoked` (to the
   device being removed), `alerts.changed` (to people, when incidents open, change or close) and `device.status`
-  (deviceId, to its owner: it connected, disconnected or reported a new browsing state). Since task 17 the hub also
+  (deviceId, to its owner: it connected, disconnected or reported a new browsing state). Task 26 adds the device-only hub
+  method `ReportChangesWaiting(folderId, until?)` (local changes wait for the quiet period until then, or none wait any
+  more): kept in memory with the device's connections, forgotten when it goes offline, sent to the owner as `folder.status`. Since task 17 the hub also
   carries the two device-only calls of "Web UI: browsing a device's folders": the device's `ReportBrowse` and the
   server's `browse` client result.
 
 **Mirror and TwoWay** (`FolderSyncer`):
 - It compares, file by file, the local file, the remote listing, and both as they were after the last sync
-  (`SyncState`, `sync-state.json` in the device's state directory). The remote size and LastModified are only
+  (`SyncState`, `sync-state.json` in the device's state directory). The local side is a walk of the whole tree, or (task 26)
+  only the paths the agent's watcher recorded since the last run: see "Change tracking and full rescans".
+  The remote size and LastModified are only
   change tokens. That is why the S3 `Stat` and listing report the same LastModified.
 - **TwoWay:**
   - A change on one side is copied to the other.
@@ -592,9 +609,25 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
   - Local deletions go to `<folder>/.async/trash`; remote ones to the plain layout's trash and versions.
   - Clean-up runs once a day.
 - Only files are synced. Empty directories and symlinks are not.
+- **Writes of the state (task 26):** `sync-state.json` is written only when something in it changed (`SyncState.Dirty`: an
+  entry set to a different value or removed, the `Location`, `LastCleanUp`); a run that changed nothing writes nothing locally
+  (on a large folder the state is several MB, and rewriting it every run was the run's dominant local write: flash wear).
+  `LastSync` alone does not make it dirty: nothing reads it, so it stays in memory and is written with the next real change.
+  The checkpoint during a run (an interrupted run keeps the bookkeeping of what it transferred) comes after 50 files and at most
+  every 30 seconds: every 50 files rewrote the whole growing file 2,000 times in the first sync of 100,000 files.
 
 **Backup** (`BackupJob`): one snapshot per run, with Source = the device id and the device's newest snapshot as
-parent. After each run, snapshots are forgotten per the folder's retention. A backup that finds the repository
+parent. After each run, snapshots are forgotten per the folder's retention.
+- **Only changed directories are walked (task 26):** with the agent's recorded changes, directories without a change keep the
+  parent's tree unread (`BackupOptions.ChangedPaths`; see "Change tracking and full rescans").
+- **No snapshot when nothing changed (task 26):** `BackupOptions.SkipIfUnchanged` (set by `BackupJob`): when the walk ends with
+  the parent's root tree id and no unreadable file, `BackupRunner` saves no snapshot and hands back the parent (with this run's
+  stats; `BackupRunner.IsUnchanged`), and `BackupJob` runs no forget (`BackupJobResult.Unchanged`). The run is a success ("No
+  changes since snapshot …"), reported as usual, so the folder's last run, overdue detection and alerts are unaffected. Retention
+  counts from the newest snapshot, not from now (`within`, the hourly/daily buckets), so with no new snapshot it would forget
+  nothing new either; a retention policy that was changed is applied at the next snapshot. The snapshot list's newest entry is
+  the last time something changed, not the last run (the folder's device row says when it last ran). A run with unreadable
+  files still makes a snapshot (its errors are recorded in it), as before. A backup that finds the repository
 locked by a prune is not a failed run: the agent retries it after 30 seconds and reports nothing.
 
 **Prune and check** (forgotten snapshots free space; damage is found before a restore):
@@ -628,13 +661,16 @@ locked by a prune is not a failed run: the agent retries it after 30 seconds and
 control channel"):
 - One worker per folder, triggered by:
   - its interval;
-  - local file changes (FileSystemWatcher, 5-second debounce; TwoWay and Mirror Upload);
+  - local file changes (FileSystemWatcher; TwoWay and Mirror Upload), after the folder's **wait after changes** (task 26: a
+    quiet period restarted by every event, at most the cap after the first unsynced event; `ChangeWait`, timers on the agent's
+    `Clock`; see "Change tracking and full rescans");
   - `folder.changed` (TwoWay and Mirror Download);
   - `config.changed`, which reloads the folder list.
 - A folder busy on another device (a lease, or a repository locked by a prune) is retried after 30 seconds.
 - After a run of an end-to-end Backup folder it does the prune or check the server hands it (see "Prune and
   check").
-- Results go to `POST .../report`. Runs that changed the storage call `POST .../changed`.
+- Results go to `POST .../report`. Runs that changed the storage call `POST .../changed`. Mirror and TwoWay runs read what
+  changed on the storage from `GET .../changes` (task 26) instead of listing it, see "Change tracking and full rescans".
 - **State for status displays:** `Connection` (Connecting, Connected, Reconnecting, Offline, Revoked) and
   `Folders` (each worker's activity, progress, last result and time, next run), with `StatusChanged` and
   `FolderStatusChanged` events. `RequestRunAsync(folder)` asks a worker for a run that starts after the request and
@@ -675,6 +711,137 @@ private key in `identity.json` and the folder keys in `keys/` are written as
   with a message naming where it can be read. `ASYNC_SECRET_STORE=file` chooses the file on every OS (a Mac without
   a login Keychain, e.g. a LaunchDaemon). The Keychain and DPAPI paths are only compiled on Linux; CI runs the DPAPI
   round trip on Windows.
+
+### Change tracking and full rescans (task 26)
+
+A run on a large folder costs a walk of the local tree, a listing of the storage and the state's bookkeeping. This section is
+what decides when runs happen and how much of that they do.
+
+**What triggers what.** Only local file events wait; everything else runs at once, as before:
+
+| Trigger | TwoWay | Mirror Upload | Mirror Download | Backup |
+|---|---|---|---|---|
+| Local file event (watcher) | after the wait | after the wait | — | — |
+| Interval (`RunOnInterval`), WorkManager / BGTask | at once | at once | at once | at once |
+| `folder.changed`, reconnect | at once | — | at once | — |
+| *Sync now*, `async-cli sync`, requests | at once | at once | at once | at once |
+| Settings change (a new worker) | at once | at once | at once | at once |
+
+**The wait after local changes** (`Folder.ChangeDelaySeconds` = quiet period, `ChangeMaxDelaySeconds` = cap; `ChangeWait` in
+`ASync.Client.Core/Sync`): each watcher event restarts the quiet period; the run is due at `min(last event + quiet, first event +
+cap)`, so a burst of saves is one run, and a folder whose files are saved without pause still runs every cap. A run, whatever
+started it, takes what waited (`TakeChanges`: the timer is cleared). The defaults (5 s, 10 min) are the old fixed 5-second debounce
+plus a cap; the old debounce had none, so a file written every few seconds (a log) never let the watcher's run start and only the
+interval synced it. The forms offer presets (Immediately = 5 s, 1, 5, 15, 30 min) with the cap derived from them
+(`ChangeDelayDefaults.CapFor`: four times the quiet period, at least 10 minutes, at most a day): one choice for people, two
+numbers for the API. The quiet period is at most a day.
+
+**Files still changing** (the per-file settle time with the same cap): an automatic run (any trigger but a person's) of a
+TwoWay or Mirror folder holds back files modified within `max(SyncOptions.SettleTime, quiet period)` (Android keeps its 10 s
+minimum), so a run the interval or another device started does not upload a file in the middle of a burst. Each held-back path's
+"first seen changing" is kept by the worker across runs (`SettleRules.FirstSeen`, in memory; after a restart the next run counts
+afresh), and the first watcher event the run waited for counts as the earliest sighting (`ChangedSince`): a path held back for
+the cap goes anyway, still changing, and counts afresh from then. The run's `SyncResult.SettlesAt` (the earliest a held-back path
+may go: settled, or capped) sets when the worker runs again. A person's run (*Sync now*) holds back only for the platform's
+`SettleTime` (Android's 10 s, nothing elsewhere), as before: it takes every file as it is now. Backups are never held back.
+
+**Incremental local scans** (`LocalWatcher` + `LocalChangeSet` in `ASync.Client.Core/Sync`, `FolderSyncer.ScanChanged`):
+- **What is recorded:** every folder on a watchable tree (a directory on disk; `FolderKind.Files`, any mode, Backup and Mirror
+  Download included) has a watcher that records relative paths: written, deleted and a rename's old name as *paths* (look at
+  them), created and a rename's new name as *subtrees* (a directory that appeared is walked whole: what was in it arrived without
+  events of its own). `.async/` is ignored; an excluded or `.async-tmp` path records the directory holding it instead (its
+  content is not synced, but its coming and going changed that directory's time, which a backup records). Only TwoWay and Mirror
+  Upload folders also *run* on events.
+- **A run** takes the set (`Take`) and starts a new one, so events during the run belong to the next. With a trustworthy set,
+  `ScanChanged` stats only those paths: a file is stat'ed; a directory is listed (files in it stat'ed, subdirectories nobody knows
+  walked whole); a path that is gone takes every known path under it with it. Every other path the sync state knows is taken as
+  the state recorded it (unchanged, since nothing was recorded). The result feeds the same `Decide`; the remote side is still a
+  full listing (until "Remote changes" below). `ScanLocal` stays for full scans.
+- **Full scans happen** (the reason is in the run's log line: `"Docs": 3 up, 0 down, 0 deleted. [full scan (the change watcher
+  overflowed)]`, or `[12 changed paths]`) when: there is no watcher (Android's document trees and shared storage, iOS, photo
+  libraries, address books and calendars); it is the first run since the agent (or the folder's worker, after a settings change)
+  started; the watcher overflowed (`InternalBufferOverflowException`) or failed; the sync state is missing or was made at another
+  location (`SyncState.Location`); more than `LocalChangeSet.Limit` (20,000) paths changed between two runs (stat'ing that many one
+  by one costs about a walk, and it is usually a tree being copied in); the root itself was replaced; the full-rescan schedule
+  (below) is due.
+- **Handing on:** a run that went through hands what it could not finish back to the set (`SyncResult.Retry`: files still
+  settling, failed transfers, paths it could not look at, uploads refused by the quota); a run that did not get through (skipped,
+  stopped, refused, failed) gives back everything it took (`Restore`).
+- **Safety, unchanged:** the missing-folder refusal and the mass-deletion check work on the merged result as before; a directory
+  that cannot be listed refuses the run as in a full scan. **A path that cannot be looked at is never taken as deleted:** .NET's
+  stat says "not there" also when it is not allowed to look, so a missing path counts as gone only when a listing of its parent
+  confirms it (`ConfirmedAbsent`, up to the folder itself); otherwise it is an error for that path, nothing is done to it (or under
+  it, on either side), and it is looked at again next run.
+- **Linux:** inotify needs one watch per directory (`fs.inotify.max_user_watches`, often 8,192 or 65,536 per user). A watcher that
+  cannot be created, or fails later (out of watches), marks the set broken: the folder is scanned in full on every run (with its
+  interval, as before task 26), and the log says so once ("… raise fs.inotify.max_user_watches").
+- **Backup** (`BackupOptions.ChangedPaths`, set by `BackupJob.Changes`): a directory with no recorded path in or under it keeps
+  the parent snapshot's tree id for it without being listed; the per-directory tree blobs make that the tree a full walk would
+  build (the root is always listed). This changes `BackupRunner`'s inputs only, not the repository format. The changes count from
+  the snapshot the worker's previous run ended with (`LocalChanges.BaseSnapshot`): they are used only when that is still the
+  device's newest snapshot (one forgotten or made elsewhere meanwhile means a full walk), and a run with unreadable files makes the
+  next one full (they are not in the set any more). Stats of a reused directory are not counted ("N unchanged" counts only what was
+  looked at).
+
+**Remote changes from the server's change log** (`FolderChangeLog`, `FolderChange`, `GET /api/sync/folders/{id}/changes`;
+client `GatewayChangeFeed`, `FolderSyncer.ScanRemoteChangedAsync`):
+- **What is logged:** the storage gateway appends every path it writes, deletes or moves for a Mirror or TwoWay folder: a device's
+  `PUT file`, `DELETE file`, `move` (both names), a completed part upload (its path), and the web UI's restores (device id null).
+  Everything devices write goes through the gateway, so their syncs, the Android documents provider and the iOS File Provider are
+  all in it without the devices reporting anything; `POST .../changed` stays the "wake the others" signal it was. The folder's
+  `.async/` is not logged (a move from `.async/incoming` into place logs the place; versions and trash moves log the file).
+  Backup folders have no log. Each entry has a sequence (`FolderChange.Id`, growing over all folders, hence within each), the
+  path, the device and the time.
+- **Reading it:** `GET .../changes?since=N&limit=M` (devices only, members only; at most 1,000 per page) answers
+  `FolderChangesDto {next, cursor, complete, trimmed, changes}`; without `since`, only where the log is. Sequences are handed out at
+  insert and committed a moment later, so concurrent writes can become visible out of order: the `cursor` a device keeps stays
+  behind entries younger than 10 s (`FolderChangeLog.Settle`), which it reads again next time, so one that committed late is never
+  skipped. A cursor older than the trimmed part, or newer than the log (a restored database), answers `trimmed`.
+- **Kept:** 30 days and at most 100,000 entries per folder, trimmed hourly by `CleanupService` in one SQL statement that also sets
+  `Folder.ChangesTrimmedThrough` (the highest sequence removed).
+- **The device** keeps its cursor in `SyncState.RemoteCursor` (with the excludes it was taken under, `RemoteExcludes`). A run with a
+  usable cursor takes every path the state knows as the storage had it after the last sync and stats only the logged paths (a
+  directory that was moved as a whole is listed; a missing path takes what was under it), plus `SyncState.RemoteRetry`: what the
+  previous run could not finish (still settling, failed), whose remote side is looked at again whatever the log says (else a
+  remote change to a file that was busy here would be lost). It lists in full when: no cursor (a new device, a new state), the log
+  was trimmed past it, the excludes changed, more than 5,000 paths changed (`GatewayChangeFeed.Limit`), the full-rescan schedule
+  is due, or the server has no log or cannot answer. The cursor kept is where the log was **before** the run looked, so the run's
+  own uploads are read once more next time (a stat each). When only the cursor moved, it is written to `sync-state.json.cursor` (a
+  few bytes) rather than the whole state; the next full save folds it in. The run's log line says how: `[3 changed paths; 0 remote
+  changes]`, `[full scan (…); full listing (…)]`.
+- **Not seen without a full listing:** writes made straight to the storage, outside ASync (another WebDAV client, `aws s3 cp`,
+  editing the server's directory): the full-rescan schedule (twice a day by default) and every run without a cursor pick them up.
+
+**The full-rescan schedule** (`Folder.FullRescanHours`, default 12, 1 h–30 days; `FullRescanSchedule`): a folder that follows
+recorded changes is still walked in full (and, with the change feed, its storage listed in full) every `FullRescanHours` after the
+last full scan that went through, with a spread of ±20 % so devices and folders that started together do not all walk at once.
+Why 12 h: the cases change tracking cannot see are rare and bounded (a change while the watcher was broken without noticing, a
+write straight to the storage outside ASync), changes while the agent was stopped are caught by the first run after a start
+anyway, and a full walk of 100,000 files costs seconds on a computer: twice a day is no wear, and a missed change shows within
+half a day. The schedule lives in the worker (in memory): the first full scan after a start sets it.
+- **Phones:** `SyncAgent.FullRescanConditions` (Android and iOS: Wi-Fi and the charger, `UnmeteredOnly` + `ChargingOnly`, on top
+  of the folder's own run conditions): a due full rescan waits until they hold, and runs stay incremental until then (logged once
+  per due rescan). There is no separate background job for it: on Android, WorkManager's periodic job for the folder runs with the
+  folder's own constraints, and the first of its runs that finds Wi-Fi and the charger after the rescan is due does the full scan
+  (typically at night); on iOS, the `BGProcessingTask` (minutes, usually at night on the charger) is where it happens, while the
+  short `BGAppRefreshTask` runs stay incremental. What a platform cannot see never blocks ("Run conditions").
+- **Where nothing is watched** (Android's document trees and shared storage without All files access, iOS's folders, photo
+  libraries, contacts and calendars), every run is a full local scan, as before; the remote change feed (below) still saves the
+  storage listing.
+
+**Next steps (not in task 26):**
+- **Resumable platform journals**, so the first run after a start need not be full: the Windows USN change journal (a journal id
+  and the last USN per volume, kept in the state: changes while the agent was stopped are read from the journal), macOS FSEvents
+  event ids (`kFSEventStreamCreateFlagFileEvents` with `sinceWhen` = the last event id), Android MediaStore's generation
+  (`MediaStore.getGeneration`, for shared storage without a watcher). Linux has no persistent journal (fanotify does not replay).
+- **The sync state as a journal:** `sync-state.json` is still rewritten whole when anything changed (11 MB for 100,000 files):
+  an append-only journal of changed entries, compacted now and then, or SQLite, would make a run that changed 10 files write
+  kilobytes.
+
+**Status.** While changes wait, `FolderState.ChangesWaitingUntil` (control channel `FolderInfo.ChangesWaitingUntil`) says when
+they run: the apps show the pill *Changes waiting* and "Changes waiting: syncs in 25 min". Folders with a quiet period of 30 s or
+more also tell the server (`ReportChangesWaiting` over the hub, when the wait starts, moves by more than 30 s, or ends), so the
+web UI's device row shows it; the default 5-second wait is never reported (it would only flicker).
 
 ### Large files (resumable transfers)
 
@@ -1902,8 +2069,9 @@ download folders, since events were missed while the process was frozen), and th
   `async-reminders`). Every successful run replaces it (`AgentRuntime.FolderRan`); a new folder gets one from now. It
   needs neither the server nor push ("Working without push").
 
-**Settle time** (`SyncOptions.SettleTime`, Android 10 s; 0 elsewhere, unchanged): a path whose local file was modified
-less than that long ago is left out of the run entirely (no upload, download, delete or conflict; its sync state stays) and
+**Settle time** (`SyncOptions.SettleTime`, Android 10 s; 0 elsewhere; since task 26 an automatic run of a TwoWay or Mirror
+folder uses the folder's quiet period when that is longer, with the folder's cap, see "Change tracking and full rescans"): a
+path whose local file was modified less than that long ago is left out of the run entirely (no upload, download, delete or conflict; its sync state stays) and
 counted as `SyncResult.Unsettled`; the agent triggers the folder again after the settle time, and a worker runs it once
 more. That closes M4-1's open item: Android touches a new file's modification time again a few seconds after it was closed,
 which uploaded it twice (tested: `RunConditionsTests.AFileModifiedMomentsAgo_WaitsForTheNextRun_AndIsUploadedOnce`).

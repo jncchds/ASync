@@ -17,6 +17,12 @@ public sealed record StorageChoice(int Id, string Name, StorageBackendType Type,
 /// <summary>A sync interval the form offers.</summary>
 public sealed record IntervalChoice(int Minutes, string Label);
 
+/// <summary>A wait after local changes the form offers (task 26): the quiet period; its cap is <see cref="ChangeDelayDefaults.CapFor"/>.</summary>
+public sealed record ChangeDelayChoice(int Seconds, string Label)
+{
+    public int CapSeconds => ChangeDelayDefaults.CapFor(Seconds);
+}
+
 /// <summary>One of the owner's folders this device could join.</summary>
 public sealed record JoinableFolder(DeviceJoinableFolderDto Folder)
 {
@@ -55,7 +61,28 @@ public sealed partial class AddFolderViewModel : ObservableObject
         _shell = shell;
         IsJoining = join;
         SelectedInterval = Intervals[2];
+        SelectedChangeDelay = ChangeDelays[0];
     }
+
+    /// <summary>The presets of the wait after local changes ("Immediately" is the default 5 seconds).</summary>
+    public static IReadOnlyList<ChangeDelayChoice> ChangeDelays { get; } =
+    [
+        new(ChangeDelayDefaults.QuietSeconds, "Immediately"), new(60, "1 minute after changes"), new(300, "5 minutes after changes"),
+        new(900, "15 minutes after changes"), new(1800, "30 minutes after changes"),
+    ];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ChangeDelayHint))]
+    public partial ChangeDelayChoice SelectedChangeDelay { get; set; }
+
+    /// <summary>Only TwoWay and Mirror folders wait for changes (backups run on their interval).</summary>
+    public bool ShowChangeDelay => !IsJoining && Mode != SyncMode.Backup && !IsPhotosKind && CollectionKind is null;
+
+    public string ChangeDelayHint => SelectedChangeDelay.Seconds <= ChangeDelayDefaults.QuietSeconds
+        ? "Changed files sync within seconds."
+        : $"Syncs once no file changed for {SelectedChangeDelay.Label.Replace(" after changes", "", StringComparison.Ordinal)}, " +
+          $"at the latest {SelectedChangeDelay.CapSeconds / 60} minutes after the first change. Fewer runs and fewer stored versions" +
+          (Mode == SyncMode.TwoWay ? ", but more chance of a conflict with another device." : ".");
 
     public static IReadOnlyList<IntervalChoice> Intervals { get; } =
     [
@@ -225,7 +252,8 @@ public sealed partial class AddFolderViewModel : ObservableObject
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsBackup), nameof(IsMirror), nameof(IsTwoWay), nameof(ShowDirection), nameof(CanEncrypt), nameof(ModeHint))]
+    [NotifyPropertyChangedFor(nameof(IsBackup), nameof(IsMirror), nameof(IsTwoWay), nameof(ShowDirection), nameof(CanEncrypt), nameof(ModeHint),
+        nameof(ShowChangeDelay), nameof(ChangeDelayHint))]
     public partial SyncMode Mode { get; set; } = SyncMode.TwoWay;
 
     partial void OnModeChanged(SyncMode value)
@@ -240,7 +268,7 @@ public sealed partial class AddFolderViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsBackup), nameof(IsMirror), nameof(IsTwoWay), nameof(IsPhotosMode), nameof(ModeHint), nameof(ForPhotos), nameof(ForFiles), nameof(LocalTitle),
         nameof(ForCollections),
-        nameof(ShowDirection))]
+        nameof(ShowDirection), nameof(ShowChangeDelay))]
     [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
     public partial bool IsPhotosKind { get; set; }
 
@@ -266,7 +294,7 @@ public sealed partial class AddFolderViewModel : ObservableObject
     /// <summary>A new Contacts or Calendars folder (null: neither).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsBackup), nameof(IsMirror), nameof(IsTwoWay), nameof(IsPhotosMode), nameof(IsContactsMode), nameof(IsCalendarsMode), nameof(ModeHint),
-        nameof(ForPhotos), nameof(ForFiles), nameof(ForCollections), nameof(LocalTitle), nameof(ShowDirection), nameof(CollectionsText), nameof(ChooseCollectionsText))]
+        nameof(ForPhotos), nameof(ForFiles), nameof(ForCollections), nameof(LocalTitle), nameof(ShowDirection), nameof(CollectionsText), nameof(ChooseCollectionsText), nameof(ShowChangeDelay))]
     [NotifyCanExecuteChangedFor(nameof(SubmitCommand))]
     public partial FolderKind? CollectionKind { get; set; }
 
@@ -466,7 +494,9 @@ public sealed partial class AddFolderViewModel : ObservableObject
         var noPath = photos || pim is not null;
         var request = new DeviceCreateFolderRequest(
             new SaveFolderRequest(name, noPath ? SyncMode.Backup : Mode, encryption, photos ? FolderKind.Photos : pim ?? FolderKind.Files, SelectedStorage!.Id,
-                RootPath.Trim(), SelectedInterval.Minutes),
+                RootPath.Trim(), SelectedInterval.Minutes,
+                ChangeDelaySeconds: ShowChangeDelay ? SelectedChangeDelay.Seconds : ChangeDelayDefaults.QuietSeconds,
+                ChangeMaxDelaySeconds: ShowChangeDelay ? SelectedChangeDelay.CapSeconds : ChangeDelayDefaults.MaxSeconds),
             noPath ? "" : LocalPath.Trim(), !noPath && Mode == SyncMode.Mirror ? Direction : null, photos ? Media : null, pim is not null ? Collections : null);
         var added = await session.CreateFolderAsync(request, CancellationToken.None);
         if (added.RecoveryKey is { } key)

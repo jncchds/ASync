@@ -39,6 +39,23 @@ public class Folder
     public int CheckIntervalDays { get; set; } = MaintenanceDefaults.CheckIntervalDays;
     /// <summary>The share of packs (0–100) a scheduled check downloads and verifies.</summary>
     public int CheckReadDataPercent { get; set; } = MaintenanceDefaults.CheckReadDataPercent;
+    /// <summary>
+    /// Wait after local changes (task 26, TwoWay and Mirror Upload): a run starts once no file changed for this many seconds
+    /// (each change restarts the wait)…
+    /// </summary>
+    public int ChangeDelaySeconds { get; set; } = ChangeDelayDefaults.QuietSeconds;
+    /// <summary>…but no later than this many seconds after the first change that is not synced yet (≥ the quiet period).</summary>
+    public int ChangeMaxDelaySeconds { get; set; } = ChangeDelayDefaults.MaxSeconds;
+    /// <summary>
+    /// Hours between full rescans (task 26): devices that follow recorded changes still walk the whole folder (and, with the change
+    /// feed, list the whole storage) this often, with a random spread, to catch what change tracking cannot see.
+    /// </summary>
+    public int FullRescanHours { get; set; } = ChangeDelayDefaults.FullRescanHours;
+    /// <summary>
+    /// The highest change-log sequence trimmed from this folder's log (<see cref="FolderChange"/>; 0 = nothing trimmed): a device
+    /// asking for changes since an older one must list the storage in full.
+    /// </summary>
+    public long ChangesTrimmedThrough { get; set; }
     /// <summary>The last prune: by the server (Transport) or reported by a device.</summary>
     public DateTime? LastPruneAt { get; set; }
     public bool? LastPruneOk { get; set; }

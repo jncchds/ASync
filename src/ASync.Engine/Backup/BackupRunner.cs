@@ -17,6 +17,19 @@ public sealed record BackupOptions
     /// without being read again, which makes repeated backups fast.
     /// </summary>
     public Snapshot? Parent { get; init; }
+    /// <summary>
+    /// When the walk ends with the parent's root tree (nothing changed, nothing unreadable), save no snapshot and return the
+    /// <see cref="Parent"/> itself (with this run's <see cref="Snapshot.Stats"/>, not saved): a run that found no change adds
+    /// nothing to the repository (no snapshot file, no new retention bucket). The caller tells by <c>result.Id == Parent.Id</c> (<see cref="BackupRunner.IsUnchanged"/>).
+    /// </summary>
+    public bool SkipIfUnchanged { get; init; }
+    /// <summary>
+    /// The paths (relative, <c>/</c>-separated) that changed since <see cref="Parent"/> was made, from a change watcher (task 26).
+    /// A directory none of them is in or under keeps the parent's tree for it without being listed: the per-directory tree blobs
+    /// make that the same tree a full walk would build. Null: every directory is walked. Only for a parent that is the source's
+    /// newest snapshot and a change set that has been complete since it was made; nothing of the repository format changes.
+    /// </summary>
+    public IReadOnlySet<string>? ChangedPaths { get; init; }
 }
 
 public sealed record BackupProgress(string CurrentPath, int Files, long BytesProcessed, long BytesAdded);
@@ -49,6 +62,23 @@ public sealed class BackupRunner(Repository.Repository repository)
         await repository.LoadIndexAsync(ct); // dedup against everything stored so far, by anyone
         var excludes = new Glob(options.Excludes);
         var stats = new SnapshotStats();
+        // Directories with a recorded change in or under them (every ancestor of a changed path, and the path itself).
+        HashSet<string>? touched = null;
+        if (options.ChangedPaths is { } changed && options.Parent is not null)
+        {
+            touched = new HashSet<string>(StringComparer.Ordinal) { "" };
+            foreach (var p in changed)
+                for (var q = p; q.Length > 0; q = q.LastIndexOf('/') is var i and >= 0 ? q[..i] : "")
+                    if (!touched.Add(q)) break;
+        }
+        bool Unchanged(string relative)
+        {
+            if (touched is null || touched.Contains(relative)) return false;
+            // Under a changed path (a directory that was replaced or renamed into place): walked.
+            for (var q = relative; q.Length > 0; q = q.LastIndexOf('/') is var i and >= 0 ? q[..i] : "")
+                if (options.ChangedPaths!.Contains(q)) return false;
+            return true;
+        }
         var lastRefresh = DateTimeOffset.UtcNow;
 
         async Task RefreshLockIfDueAsync()
@@ -65,6 +95,7 @@ public sealed class BackupRunner(Repository.Repository repository)
 
         async Task<BlobId> BackupDirectoryAsync(string relative, BlobId? parentTreeId)
         {
+            if (parentTreeId is BlobId same && Unchanged(relative) && repository.HasBlob(same)) return same; // nothing changed in it
             Dictionary<string, TreeNode> previous = [];
             if (parentTreeId is BlobId pid)
             {
@@ -147,6 +178,8 @@ public sealed class BackupRunner(Repository.Repository repository)
 
         var treeId = await BackupDirectoryAsync("", options.Parent?.Tree);
         await repository.FlushAsync(ct); // data before the snapshot that refers to it
+        if (options.SkipIfUnchanged && options.Parent is { } parent && parent.Tree == treeId && stats.Errors.Count == 0)
+            return parent with { Stats = stats }; // the same content as the parent: no new snapshot (this run's counts, not saved)
 
         var snapshot = new Snapshot
         {
@@ -163,6 +196,9 @@ public sealed class BackupRunner(Repository.Repository repository)
         await repository.SaveSnapshotAsync(snapshot, ct);
         return snapshot;
     }
+
+    /// <summary>Whether <paramref name="result"/> is the parent handed back by <see cref="BackupOptions.SkipIfUnchanged"/>.</summary>
+    public static bool IsUnchanged(Snapshot result, BackupOptions options) => options.Parent is { } p && result.Id == p.Id;
 
     internal static long Ms(DateTime utc) => FileSystemTree.Ms(utc);
 }

@@ -202,3 +202,44 @@ internal sealed class FakeUsageRepository(FakeFolderRepository folders) : IUsage
         return Task.CompletedTask;
     }
 }
+
+/// <summary>Plain folders' change logs in memory (task 26), with the same trimming rules as the database's.</summary>
+internal sealed class FakeFolderChangeRepository(FakeFolderRepository? folders = null) : IFolderChangeRepository
+{
+    private readonly Lock _gate = new();
+    private long _next;
+    public List<FolderChange> Entries { get; } = [];
+
+    public Task AppendAsync(int folderId, IReadOnlyCollection<string> paths, Guid? deviceId, DateTime at)
+    {
+        lock (_gate)
+            foreach (var p in paths)
+                Entries.Add(new FolderChange { Id = ++_next, FolderId = folderId, Path = p, DeviceId = deviceId, At = at });
+        return Task.CompletedTask;
+    }
+
+    public Task<List<FolderChange>> SinceAsync(int folderId, long since, int limit)
+    {
+        lock (_gate) return Task.FromResult(Entries.Where(c => c.FolderId == folderId && c.Id > since).OrderBy(c => c.Id).Take(limit).ToList());
+    }
+
+    public Task<long> LatestAsync(int folderId, DateTime? before = null)
+    {
+        lock (_gate)
+            return Task.FromResult(Entries.Where(c => c.FolderId == folderId && (before == null || c.At < before)).Select(c => c.Id).DefaultIfEmpty(0).Max());
+    }
+
+    public async Task<int> TrimAsync(DateTime olderThan, int keepPerFolder)
+    {
+        List<FolderChange> doomed;
+        lock (_gate)
+        {
+            doomed = [.. Entries.GroupBy(c => c.FolderId).SelectMany(g => g.OrderByDescending(c => c.Id).Where((c, i) => c.At < olderThan || i >= keepPerFolder))];
+            Entries.RemoveAll(doomed.Contains);
+        }
+        foreach (var g in doomed.GroupBy(c => c.FolderId))
+            if (folders is not null && await folders.GetAsync(g.Key) is { } folder)
+                folder.ChangesTrimmedThrough = Math.Max(folder.ChangesTrimmedThrough, g.Max(c => c.Id));
+        return doomed.Select(c => c.FolderId).Distinct().Count();
+    }
+}

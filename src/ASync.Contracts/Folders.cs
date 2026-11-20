@@ -27,7 +27,39 @@ public record FolderDto(
     int PruneIntervalDays = MaintenanceDefaults.PruneIntervalDays, int CheckIntervalDays = MaintenanceDefaults.CheckIntervalDays,
     int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent,
     MaintenanceStatusDto? LastPrune = null, MaintenanceStatusDto? LastCheck = null,
-    DateTime? RecoveryKeyCreatedAt = null, string? RecoveryKey = null, FolderUsageDto? Usage = null, string? AddedFromDevice = null);
+    DateTime? RecoveryKeyCreatedAt = null, string? RecoveryKey = null, FolderUsageDto? Usage = null, string? AddedFromDevice = null,
+    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds,
+    int FullRescanHours = ChangeDelayDefaults.FullRescanHours);
+
+/// <summary>
+/// The wait after local changes (task 26; TwoWay and Mirror Upload folders): a run starts once no file changed for the quiet
+/// period, but no later than the cap after the first change not synced yet. The defaults are the behaviour before the setting
+/// (a 5-second debounce) plus a cap, so a folder whose files change without pause still syncs every 10 minutes.
+/// </summary>
+public static class ChangeDelayDefaults
+{
+    public const int QuietSeconds = 5;
+    public const int MaxSeconds = 600;
+    /// <summary>The longest quiet period and cap a folder may have (one day).</summary>
+    public const int Limit = 86400;
+
+    /// <summary>The cap the forms choose for a quiet period: four times it, at least the default 10 minutes, at most a day.</summary>
+    public static int CapFor(int quietSeconds) => Math.Min(Limit, Math.Max(MaxSeconds, quietSeconds * 4));
+
+    /// <summary>The forms' presets (seconds of quiet): "Immediately" is the default 5 seconds.</summary>
+    public static readonly int[] Presets = [QuietSeconds, 60, 300, 900, 1800];
+
+    /// <summary>
+    /// Hours between full rescans of a folder that follows recorded changes (task 26): twice a day. A full walk of 100,000 files
+    /// costs seconds to a few minutes, so twice a day is no wear and little battery (phones do it only on the charger and Wi-Fi),
+    /// and whatever change tracking missed (a write straight to the storage, a change while the watcher was broken) is seen
+    /// within half a day.
+    /// </summary>
+    public const int FullRescanHours = 12;
+
+    /// <summary>The longest gap between full rescans a folder may have (30 days).</summary>
+    public const int FullRescanLimitHours = 720;
+}
 
 /// <summary>Defaults of a Backup folder's housekeeping schedule (days between runs; 0 = off).</summary>
 public static class MaintenanceDefaults
@@ -45,7 +77,7 @@ public record FolderDeviceDto(
     Guid DeviceId, string DeviceName, DevicePlatform Platform, string LocalPath, MirrorDirection? Direction, bool Paused,
     DateTime? LastSyncAt, bool? LastSyncOk, string? LastSyncMessage, RunConditionsDto? Conditions = null,
     MediaSelectionDto? Media = null, MediaCountsDto? MediaCounts = null,
-    CollectionSelectionDto? Collections = null, CollectionCountsDto? CollectionCounts = null);
+    CollectionSelectionDto? Collections = null, CollectionCountsDto? CollectionCounts = null, DateTimeOffset? ChangesWaitingUntil = null);
 
 /// <summary>
 /// When a device may run a folder by itself (its interval, file changes, wake-ups): only on unmetered networks, only
@@ -70,7 +102,9 @@ public record SaveFolderRequest(
     int IntervalMinutes = 60, string[]? Excludes = null, RetentionDto? Retention = null, int VersionsKeepDays = 30, int TrashKeepDays = 30,
     long? ExpectedRevision = null,
     int PruneIntervalDays = MaintenanceDefaults.PruneIntervalDays, int CheckIntervalDays = MaintenanceDefaults.CheckIntervalDays,
-    int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent, string? RecoveryKey = null);
+    int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent, string? RecoveryKey = null,
+    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds,
+    int FullRescanHours = ChangeDelayDefaults.FullRescanHours);
 
 /// <summary>
 /// Make a new recovery key for a Transport Backup folder (it replaces the previous one). People with a password
@@ -97,7 +131,9 @@ public record DeviceFolderDto(
     int FolderId, string Name, SyncMode Mode, FolderEncryption Encryption, FolderKind Kind,
     int IntervalMinutes, string[] Excludes, RetentionDto Retention, int VersionsKeepDays, int TrashKeepDays,
     long Revision, bool RepositoryReady, string LocalPath, MirrorDirection? Direction, bool Paused, RunConditionsDto? Conditions = null,
-    MediaSelectionDto? Media = null, CollectionSelectionDto? Collections = null);
+    MediaSelectionDto? Media = null, CollectionSelectionDto? Collections = null,
+    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds,
+    int FullRescanHours = ChangeDelayDefaults.FullRescanHours);
 
 /// <summary>A device changing its own settings for a folder (from the device's UI or CLI). Null = unchanged.</summary>
 /// <summary>
@@ -162,6 +198,19 @@ public record DeviceFolderCreatedDto(DeviceFolderDto Folder, string? RecoveryKey
 /// <summary>A device joining one of its owner's folders (<c>POST /api/sync/folders/{id}/join</c>).</summary>
 public record DeviceJoinFolderRequest(string LocalPath, MirrorDirection? Direction = null, long? ExpectedRevision = null, MediaSelectionDto? Media = null,
     CollectionSelectionDto? Collections = null);
+
+// ── Change feed of plain folders (task 26; GET /api/sync/folders/{id}/changes?since=N) ──
+
+/// <summary>One path the storage gateway changed. <paramref name="DeviceId"/>: whose request it was (null: the server, e.g. a web restore).</summary>
+public record FolderChangeDto(long Seq, string Path, Guid? DeviceId);
+
+/// <summary>
+/// A page of a plain folder's change log. <paramref name="Next"/>: where the next page starts (ask again with it while
+/// <paramref name="Complete"/> is false). <paramref name="Cursor"/>: what the device keeps once it has handled every page (it may
+/// be a little behind <paramref name="Next"/>: recent entries are read again next time). <paramref name="Trimmed"/>: the log no
+/// longer reaches back to the cursor asked for: list the storage in full.
+/// </summary>
+public record FolderChangesDto(long Next, long Cursor, bool Complete, bool Trimmed, List<FolderChangeDto> Changes);
 
 // ── Storage gateway ───────────────────────────────────────────────────────────
 

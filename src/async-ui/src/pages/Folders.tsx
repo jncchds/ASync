@@ -15,7 +15,7 @@ import DeleteFolderPanel from '../components/DeleteFolderPanel'
 import PurgeList from '../components/PurgeList'
 import { useSyncEvents, type SyncEvent } from '../hooks/useSyncEvents'
 import { useAuth } from '../hooks/useAuth'
-import { countText, kindLabel, modeLabel } from '../utils/folders'
+import { countText, formatWait, kindLabel, modeLabel } from '../utils/folders'
 import { ALERT_KIND_LABELS, openByDevice } from '../utils/alerts'
 import { formatBytes, formatDate, formatMinutes, relativeTime } from '../utils/format'
 
@@ -208,6 +208,11 @@ export default function Folders() {
                       <span>{f.storageBackendName}</span>
                       <code>{f.rootPath}</code>
                       <span>every {formatMinutes(f.intervalMinutes)}</span>
+                      {f.mode !== 'Backup' && (f.changeDelaySeconds ?? 5) > 5 && (
+                        <span title={`Syncs once no file changed for ${formatWait(f.changeDelaySeconds)}, at the latest ${formatWait(f.changeMaxDelaySeconds)} after the first change`}>
+                          waits {formatWait(f.changeDelaySeconds)} after changes
+                        </span>
+                      )}
                       <FolderSize usage={f.usage} backup={f.mode === 'Backup'} />
                       <span>folder #{f.id}</span>
                       {f.addedFromDevice && <span title={`Created from the app on ${f.addedFromDevice}, ${new Date(f.createdAt).toLocaleString()}`}>added from {f.addedFromDevice}</span>}
@@ -320,6 +325,11 @@ export default function Folders() {
                                       <span className="dot">●</span>{relativeTime(d.lastSyncAt)}
                                     </span>
                                     {d.lastSyncMessage && <span className="status-msg">{d.lastSyncMessage}</span>}
+                                  </span>
+                                )}
+                                {d.changesWaitingUntil && (
+                                  <span className="status-msg" title={formatDate(d.changesWaitingUntil)}>
+                                    <span className="pill">Changes waiting</span> syncs {relativeTime(d.changesWaitingUntil)}
                                   </span>
                                 )}
                               </td>

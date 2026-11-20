@@ -259,7 +259,7 @@ public sealed record PlainDownloadTicket(int UserId, int FolderId, PlainSource S
 /// and afterwards tell the folder's devices with <c>folder.changed</c> so they pull the result.
 /// </summary>
 public sealed class PlainFileService(FolderBackendCache backends, FolderLeaseService leases, ISyncNotifier notifier,
-    IDataProtectionProvider dataProtection, TimeProvider clock, Push.PushQueue? push = null)
+    IDataProtectionProvider dataProtection, TimeProvider clock, Push.PushQueue? push = null, IServiceScopeFactory? scopes = null)
 {
     public static BrowseRefusal? CannotBrowse(Folder folder) =>
         folder.Mode == SyncMode.Backup
@@ -298,6 +298,12 @@ public sealed class PlainFileService(FolderBackendCache backends, FolderLeaseSer
         finally
         {
             leases.Release(folder.Id, lease.LeaseId);
+        }
+        // Before the devices hear of it: what they read from the change log must already have it (task 26).
+        if (scopes is not null)
+        {
+            await using var scope = scopes.CreateAsyncScope(); // a singleton: the log (and its database context) is per scope
+            await scope.ServiceProvider.GetRequiredService<FolderChangeLog>().RecordAsync(folder, null, restored);
         }
         await notifier.ToDevicesAsync(folder.Devices.Select(d => d.DeviceId), SyncEvents.FolderChanged, folder.Id, Guid.Empty);
         push?.FolderChanged(folder, Guid.Empty);

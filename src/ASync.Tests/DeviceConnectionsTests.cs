@@ -39,4 +39,26 @@ public class DeviceConnectionsTests
         Assert.False(phone.Aborted || gone.Aborted);
         Assert.Equal(0, connections.Abort(revoked)); // already closed
     }
+
+    [Fact]
+    public void ChangesWaiting_AreKeptPerDeviceAndFolder_AndForgottenWhenTheDeviceGoesOffline()
+    {
+        var connections = new DeviceConnections(NullLogger<DeviceConnections>.Instance);
+        var laptop = Guid.NewGuid();
+        var until = new DateTimeOffset(2026, 11, 20, 13, 0, 0, TimeSpan.Zero);
+        connections.Add(laptop, new FakeContext("a"));
+        connections.Add(laptop, new FakeContext("b"));
+        connections.SetChangesWaiting(laptop, 7, until);
+        connections.SetChangesWaiting(laptop, 8, until);
+        Assert.Equal(until, connections.ChangesWaiting(laptop, 7));
+        Assert.Null(connections.ChangesWaiting(Guid.NewGuid(), 7));
+        connections.SetChangesWaiting(laptop, 8, null);
+        Assert.Null(connections.ChangesWaiting(laptop, 8));
+
+        connections.Remove("a");
+        Assert.Empty(connections.ClearChangesWaitingIfOffline(laptop)); // still connected through "b"
+        connections.Remove("b");
+        Assert.Equal([7], connections.ClearChangesWaitingIfOffline(laptop));
+        Assert.Null(connections.ChangesWaiting(laptop, 7));
+    }
 }

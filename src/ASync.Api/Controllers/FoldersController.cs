@@ -32,17 +32,21 @@ public class FoldersController : ControllerBase
 
     /// <summary>The person's folders, each with its storage usage as last counted (see <see cref="UsageService"/>).</summary>
     [HttpGet]
-    public async Task<ActionResult<List<FolderDto>>> GetAll([FromServices] IUsageRepository usage)
+    public async Task<ActionResult<List<FolderDto>>> GetAll([FromServices] IUsageRepository usage, [FromServices] Hubs.DeviceConnections? live = null)
     {
         var counted = (await usage.GetForUserAsync(User.UserId())).ToDictionary(u => u.FolderId);
         return (await _folders.GetForUserAsync(User.UserId()))
-            .Select(f => FolderService.ToDto(f) with { Usage = counted.TryGetValue(f.Id, out var u) ? UsageService.ToDto(u) : null })
+            .Select(f => WithLive(FolderService.ToDto(f), live) with { Usage = counted.TryGetValue(f.Id, out var u) ? UsageService.ToDto(u) : null })
             .ToList();
     }
 
+    /// <summary>The devices' live state the server only keeps in memory: local changes waiting for the quiet period (task 26).</summary>
+    private static FolderDto WithLive(FolderDto dto, Hubs.DeviceConnections? live) => live is null ? dto :
+        dto with { Devices = [.. dto.Devices.Select(d => d with { ChangesWaitingUntil = live.ChangesWaiting(d.DeviceId, dto.Id) })] };
+
     [HttpGet("{id:int}")]
-    public async Task<ActionResult<FolderDto>> Get(int id) =>
-        await _folders.GetAsync(id) is { } f && f.UserId == User.UserId() ? FolderService.ToDto(f) : NotFound();
+    public async Task<ActionResult<FolderDto>> Get(int id, [FromServices] Hubs.DeviceConnections? live = null) =>
+        await _folders.GetAsync(id) is { } f && f.UserId == User.UserId() ? WithLive(FolderService.ToDto(f), live) : NotFound();
 
     [HttpPost]
     public async Task<ActionResult<FolderDto>> Create([FromBody] SaveFolderRequest req, CancellationToken ct)

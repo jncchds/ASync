@@ -19,7 +19,36 @@ namespace ASync.Client.Core;
 /// they changed moments ago (<see cref="Sync.SyncOptions.SettleTime"/>).
 /// </summary>
 public sealed record FolderRunResult(int FolderId, string Name, bool Ok, string Message, bool Skipped = false, int Conflicts = 0,
-    bool Deferred = false, int Unsettled = 0, MediaCountsDto? Media = null, CollectionCountsDto? Collections = null);
+    bool Deferred = false, int Unsettled = 0, MediaCountsDto? Media = null, CollectionCountsDto? Collections = null,
+    DateTimeOffset? SettlesAt = null)
+{
+    /// <summary>
+    /// How the local side was scanned ("full scan (why)", "N changed paths"; task 26), for the log line. Null: no scan (skipped,
+    /// failed before it, a photo library).
+    /// </summary>
+    public string? Scan { get; init; }
+
+    /// <summary>
+    /// The run went through with the local changes it was given (task 26): the paths it could not finish, which count as changed
+    /// for the next run. Null: it did not get through (skipped, stopped, failed): everything it was given counts again.
+    /// </summary>
+    public IReadOnlyCollection<string>? Retry { get; init; }
+
+    /// <summary>The next run must scan in full (a backup with unreadable files: they are not in its change set any more).</summary>
+    public string? NextFull { get; init; }
+
+    /// <summary>A backup run: the snapshot it ended with (new, or the unchanged newest one).</summary>
+    public string? Snapshot { get; init; }
+
+    /// <summary>How the storage was read ("full listing (why)", "N remote changes"; task 26), for the log line.</summary>
+    public string? RemoteScan { get; init; }
+}
+
+/// <summary>
+/// How a worker's run holds back files that are still changing (task 26): the settle time and its cap, and the per-path
+/// "first seen changing" times it keeps across runs (see <see cref="Sync.SyncOptions.SettleCap"/>).
+/// </summary>
+public sealed record SettleRules(TimeSpan SettleTime, TimeSpan? Cap, IDictionary<string, DateTimeOffset>? FirstSeen, DateTimeOffset? ChangedSince);
 
 /// <summary>The agent's link to the server, for status displays.</summary>
 public enum AgentConnection { Connecting, Connected, Reconnecting, Offline, Revoked }
@@ -28,8 +57,9 @@ public enum WorkerActivity { Idle, Syncing, BackingUp, Maintenance }
 
 /// <summary>One folder as the running agent sees it (see <see cref="SyncAgent.Folders"/>).</summary>
 /// <param name="Waiting">Why automatic runs wait now (the run conditions), or null.</param>
+/// <param name="ChangesWaitingUntil">Local changes wait for the folder's quiet period (task 26): when they will run; null when none wait.</param>
 public sealed record FolderState(DeviceFolderDto Folder, WorkerActivity Activity, ProgressSnapshot? Progress, FolderRunResult? LastResult,
-    DateTimeOffset? LastRunAt, DateTimeOffset? NextRunAt, string? Waiting = null);
+    DateTimeOffset? LastRunAt, DateTimeOffset? NextRunAt, string? Waiting = null, DateTimeOffset? ChangesWaitingUntil = null);
 
 /// <summary>
 /// Syncs every folder of this device, and keeps doing so. Each folder runs when its interval is due, when files in
@@ -39,8 +69,6 @@ public sealed record FolderState(DeviceFolderDto Folder, WorkerActivity Activity
 /// </summary>
 public sealed class SyncAgent : IAsyncDisposable
 {
-    private static readonly TimeSpan Debounce = TimeSpan.FromSeconds(5);
-
     private readonly AsyncApiClient _api;
     private readonly IClientStore _store;
     private readonly ILogger _logger;
@@ -167,6 +195,12 @@ public sealed class SyncAgent : IAsyncDisposable
 
     /// <summary>The device's network and power, for the folders' run conditions (null: conditions are not checked).</summary>
     public IDeviceConditionsProbe? Conditions { get; init; }
+
+    /// <summary>
+    /// What a folder's due full rescan waits for, on top of the folder's own run conditions (task 26): phones set Wi-Fi and the
+    /// charger, so the walk of a large folder does not spend battery or data; until they hold, runs stay incremental. Null: none.
+    /// </summary>
+    public RunConditionsDto? FullRescanConditions { get; init; }
 
     /// <summary>How long a just-modified file waits before it is uploaded (<see cref="SyncOptions.SettleTime"/>).</summary>
     public TimeSpan SettleTime { get; init; }
@@ -348,6 +382,23 @@ public sealed class SyncAgent : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Tells the server that a folder's local changes wait for its quiet period until <paramref name="until"/>, or that none wait
+    /// (null), for the web UI (task 26). Fire and forget: offline, or an older server without the method, it is only logged.
+    /// </summary>
+    private void ReportChangesWaiting(int folderId, DateTimeOffset? until)
+    {
+        if (_hub is not { State: HubConnectionState.Connected } hub) return;
+        _ = Task.Run(async () =>
+        {
+            try { await hub.InvokeAsync("ReportChangesWaiting", folderId, until, _stop.Token); }
+            catch (Exception e) when (e is HubException or InvalidOperationException or IOException or OperationCanceledException or ObjectDisposedException)
+            {
+                _logger.LogDebug("Could not report waiting changes: {Message}", e.Message);
+            }
+        });
+    }
+
     /// <summary>Raised after every folder run (for UIs and logs).</summary>
     public event Action<FolderRunResult>? FolderRan;
 
@@ -356,8 +407,9 @@ public sealed class SyncAgent : IAsyncDisposable
     /// <summary>Syncs (or backs up) one folder now and reports the outcome to the server.</summary>
     /// <param name="progress">Filled in while the run goes (see <see cref="RunProgress"/>).</param>
     /// <param name="allowMassDeletion">For this run, instead of <see cref="AllowMassDeletion"/>.</param>
+    /// <param name="settle">How files still changing are held back (the worker's quiet period and cap); null: <see cref="SettleTime"/>, no cap.</param>
     public async Task<FolderRunResult> RunFolderAsync(DeviceFolderDto folder, CancellationToken ct = default, RunProgress? progress = null,
-        bool? allowMassDeletion = null)
+        bool? allowMassDeletion = null, SettleRules? settle = null, LocalChanges? changes = null, string? fullRescan = null)
     {
         if (folder.Paused) return new FolderRunResult(folder.FolderId, folder.Name, true, "Paused", Skipped: true);
         var identity = _api.Identity ?? throw new InvalidOperationException("Not enrolled.");
@@ -381,14 +433,18 @@ public sealed class SyncAgent : IAsyncDisposable
                     : null;
                 var collection = folder.Kind is FolderKind.Contacts or FolderKind.Calendars ? CollectionTreeFor(folder) : null;
                 var repo = await RepositoryAccess.OpenAsync(_api, _store, folder, backend, ct);
-                var (snapshot, forgotten) = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName,
-                    (ILocalTree?)photos ?? (ILocalTree?)collection ?? LocalTrees.Open(folder.LocalPath)).RunAsync(progress, ct);
+                var backup = await new BackupJob(repo, folder, identity.DeviceId, identity.DeviceName,
+                    (ILocalTree?)photos ?? (ILocalTree?)collection ?? LocalTrees.Open(folder.LocalPath))
+                    { Changes = photos is null && collection is null ? changes : null }.RunAsync(progress, ct);
+                var (snapshot, forgotten) = backup;
                 var s = snapshot.Stats;
                 // Files the library could not give now (iCloud-only originals): kept from earlier snapshots, read next run, no error.
                 var errors = photos is null ? s.Errors : [.. s.Errors.Where(e => !photos.IsPostponed(e))];
                 var counts = photos?.Counts();
                 var items = collection?.Counts();
-                var message = $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: " +
+                var message = (backup.Unchanged
+                                  ? $"No changes since snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: "
+                                  : $"Snapshot {ASync.Engine.Repository.Repository.ShortSnapshotId(snapshot.Id)}: ") +
                               (counts is { } c
                                   ? $"{Plural(c.Photos, "photo")}, {Plural(c.Videos, "video")} ({Size(c.Bytes)}){(c.Access == MediaAccess.Partial ? " of those this phone lets ASync see" : "")}, "
                                   : "") +
@@ -401,7 +457,13 @@ public sealed class SyncAgent : IAsyncDisposable
                               $"{Size(s.BytesAdded)} added{(forgotten > 0 ? $", {forgotten} old snapshots forgotten" : "")}" +
                               (photos is { Postponed: > 0 } p ? $", {p.Postponed} left for the next run ({p.PostponedReason})" : "") +
                               (errors.Count > 0 ? $", {errors.Count} unreadable: {errors[0]}" : "");
-                outcome = new FolderRunResult(folder.FolderId, folder.Name, errors.Count == 0, message, Media: counts, Collections: items);
+                outcome = new FolderRunResult(folder.FolderId, folder.Name, errors.Count == 0, message, Media: counts, Collections: items)
+                {
+                    Scan = photos is null && collection is null ? backup.Scan : null,
+                    Retry = [],
+                    Snapshot = snapshot.Id,
+                    NextFull = s.Errors.Count > 0 ? "the last backup could not read every file" : null,
+                };
                 report = new SyncReportRequest(errors.Count == 0, message, Uploaded: s.FilesNew + s.FilesChanged, Bytes: s.BytesAdded, Media: counts,
                     Collections: items);
                 if (photos is not null) await ReportAlbumsAsync(ct);
@@ -422,7 +484,14 @@ public sealed class SyncAgent : IAsyncDisposable
                             Mode = folder.Mode, Direction = folder.Direction, Excludes = folder.Excludes, DeviceName = identity.DeviceName,
                             VersionsKeepDays = folder.VersionsKeepDays, TrashKeepDays = folder.TrashKeepDays,
                             AllowMassDeletion = allowMassDeletion ?? AllowMassDeletion,
-                            SettleTime = SettleTime,
+                            SettleTime = settle?.SettleTime ?? SettleTime,
+                            SettleCap = settle?.Cap,
+                            FirstSeenChanging = settle?.FirstSeen,
+                            ChangedSince = settle?.ChangedSince,
+                            Clock = Clock,
+                            LocalChanges = changes,
+                            RemoteFeed = new GatewayChangeFeed(_api, folder.FolderId),
+                            RemoteFullReason = fullRescan,
                             SamePlace = previous => LocalTrees.SamePlace(previous, folder.LocalPath),
                         }) { Progress = progress }.RunAsync(ct);
                     }
@@ -446,7 +515,8 @@ public sealed class SyncAgent : IAsyncDisposable
                                   : "") +
                               (result.Unsettled > 0 ? $", {result.Unsettled} still changing (next run)" : "") +
                               (result.Errors.Count > 0 ? $", {result.Errors.Count} errors: {result.Errors[0]}" : "");
-                outcome = new FolderRunResult(folder.FolderId, folder.Name, result.Ok, message, Conflicts: result.Conflicts, Unsettled: result.Unsettled);
+                outcome = new FolderRunResult(folder.FolderId, folder.Name, result.Ok, message, Conflicts: result.Conflicts, Unsettled: result.Unsettled,
+                    SettlesAt: result.SettlesAt) { Scan = result.Scan, Retry = result.Retry, RemoteScan = result.RemoteScan };
                 report = new SyncReportRequest(result.Ok, message, result.Uploaded, result.Downloaded, result.DeletedLocal + result.DeletedRemote,
                     result.Conflicts, result.Bytes);
             }
@@ -846,13 +916,19 @@ public sealed class SyncAgent : IAsyncDisposable
         private readonly CancellationTokenSource _cts;
         private readonly SemaphoreSlim _signal = new(0, 1);
         private readonly Task _loop;
-        private readonly FileSystemWatcher? _watcher;
-        private readonly Timer _debounce;
+        private readonly LocalWatcher? _watcher;
+        private readonly ITimer _debounce;
+        private readonly Lock _changesGate = new();
+        private readonly ChangeWait _changes;
+        private readonly Dictionary<string, DateTimeOffset> _firstSeenChanging = new(StringComparer.Ordinal);
+        private DateTimeOffset? _changesWaitingUntil;
+        private DateTimeOffset? _reported;
+        private string? _lastSnapshot;
         private readonly Lock _requestsGate = new();
         private List<TaskCompletionSource<FolderRunResult>> _requests = [];
         private bool _allowMassDeletionNext;
         private bool _manualNext;
-        private readonly Timer _settle;
+        private readonly ITimer _settle;
         private volatile CancellationTokenSource? _run;
         private volatile string? _waiting;
         private TimeSpan? _nextWait;
@@ -864,7 +940,74 @@ public sealed class SyncAgent : IAsyncDisposable
 
         public DeviceFolderDto Folder { get; }
 
-        public FolderState State() => new(Folder, _activity, _progress?.Snapshot(), _lastResult, _lastRunAt, _nextRunAt, _waiting);
+        public FolderState State()
+        {
+            DateTimeOffset? changes;
+            lock (_changesGate) changes = _changesWaitingUntil;
+            return new(Folder, _activity, _progress?.Snapshot(), _lastResult, _lastRunAt, _nextRunAt, _waiting, Folder.Paused ? null : changes);
+        }
+
+        /// <summary>The folder's quiet period after local changes (at least a second; the old fixed debounce was 5 s).</summary>
+        private TimeSpan Quiet => TimeSpan.FromSeconds(Math.Max(1, Folder.ChangeDelaySeconds));
+
+        /// <summary>
+        /// A local file event: the run waits for the quiet period, at most the cap after the first event not synced yet. Raises the
+        /// folder's status when changes start waiting or the time they run moves by more than a few seconds (not on every event).
+        /// </summary>
+        private void FileChanged()
+        {
+            var now = _agent.Clock.GetUtcNow();
+            bool raise;
+            DateTimeOffset due;
+            lock (_changesGate)
+            {
+                due = _changes.Record(now);
+                raise = _changesWaitingUntil is not { } shown || (due - shown).Duration() > TimeSpan.FromSeconds(5);
+                _changesWaitingUntil = due;
+                var delay = due - now;
+                try { _debounce.Change(delay > TimeSpan.Zero ? delay : TimeSpan.Zero, Timeout.InfiniteTimeSpan); }
+                catch (ObjectDisposedException) { return; }
+            }
+            if (!raise) return;
+            _agent.RaiseFolder(Folder.FolderId);
+            // The server hears of it only when the wait is worth showing (the old 5-second debounce never was), and on big moves.
+            if (Quiet >= TimeSpan.FromSeconds(30) && (_reported is not { } told || (due - told).Duration() > TimeSpan.FromSeconds(30)))
+            {
+                _reported = due;
+                _agent.ReportChangesWaiting(Folder.FolderId, due);
+            }
+        }
+
+        /// <summary>A run starts, whatever started it: the changes that waited are in it. Returns the first of them.</summary>
+        private DateTimeOffset? TakeChanges()
+        {
+            lock (_changesGate)
+            {
+                try { _debounce.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan); }
+                catch (ObjectDisposedException) { }
+                _changesWaitingUntil = null;
+                if (_reported is not null)
+                {
+                    _reported = null;
+                    _agent.ReportChangesWaiting(Folder.FolderId, null);
+                }
+                return _changes.Reset();
+            }
+        }
+
+        /// <summary>After a run that held back files still changing: when it runs for them (shown as changes waiting).</summary>
+        private void ScheduleSettled(DateTimeOffset? settlesAt)
+        {
+            var now = _agent.Clock.GetUtcNow();
+            var at = settlesAt ?? now + _agent.SettleTime;
+            var delay = at - now + TimeSpan.FromSeconds(1);
+            lock (_changesGate)
+            {
+                if (_changesWaitingUntil is null || at < _changesWaitingUntil) _changesWaitingUntil = at;
+            }
+            try { _settle.Change(delay > TimeSpan.Zero ? delay : TimeSpan.Zero, Timeout.InfiniteTimeSpan); }
+            catch (ObjectDisposedException) { }
+        }
 
         public bool Busy => _activity != WorkerActivity.Idle;
 
@@ -919,23 +1062,21 @@ public sealed class SyncAgent : IAsyncDisposable
                 _lastRunAt = previous._lastRunAt;
                 (_requests, _allowMassDeletionNext, _manualNext) = previous.TakeRequests();
             }
-            _settle = new Timer(_ => Trigger("settled"));
+            _changes = new ChangeWait(Quiet, TimeSpan.FromSeconds(Math.Max(folder.ChangeMaxDelaySeconds, 1)));
+            _settle = agent.Clock.CreateTimer(_ => Trigger("settled"), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            _debounce = new Timer(_ => Trigger("files changed"));
-            // Only trees on a file system can be watched (Android's document trees run on their interval and on demand).
-            if (!folder.Paused && folder.Mode != SyncMode.Backup && folder.Direction != MirrorDirection.Download
-                && WatchablePath(agent, folder.LocalPath) is { } watched)
+            _debounce = agent.Clock.CreateTimer(_ => Trigger("files changed"), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            // Only trees on a file system can be watched (Android's document trees, iOS, photo libraries and address books run in
+            // full each time). Every such folder records what changes (task 26: incremental scans); only TwoWay and Mirror Upload
+            // folders also run when files change.
+            if (!folder.Paused && folder.Kind == FolderKind.Files && WatchablePath(agent, folder.LocalPath) is { } watched)
             {
-                _watcher = new FileSystemWatcher(watched) { IncludeSubdirectories = true, EnableRaisingEvents = true };
-                FileSystemEventHandler changed = (_, e) =>
-                {
-                    if (e.FullPath.Contains($"{Path.DirectorySeparatorChar}.async", StringComparison.Ordinal)) return; // our own temp/trash
-                    _debounce.Change(Debounce, Timeout.InfiniteTimeSpan);
-                };
-                _watcher.Created += changed;
-                _watcher.Changed += changed;
-                _watcher.Deleted += changed;
-                _watcher.Renamed += (s, e) => changed(s, e);
+                _watcher = new LocalWatcher(watched, folder.Excludes);
+                if (folder.Mode == SyncMode.TwoWay || folder.Mode == SyncMode.Mirror && folder.Direction == MirrorDirection.Upload)
+                    _watcher.Changed += FileChanged;
+                _watcher.Failed += why => _logger.LogWarning("\"{Name}\": {Why}. It is scanned in full on every run.", folder.Name, why);
+                if (_watcher.Changes.Broken is { } broken)
+                    _logger.LogWarning("\"{Name}\": {Why}. It is scanned in full on every run.", folder.Name, broken);
             }
             _loop = Task.Run(LoopAsync);
         }
@@ -990,6 +1131,17 @@ public sealed class SyncAgent : IAsyncDisposable
                         _agent.RaiseFolder(Folder.FolderId);
                     }
 
+                    // Whatever started this run, the local changes that waited are in it. A person's run takes every file as it is
+                    // now; an automatic one leaves out files changed within the quiet period (at most the cap: see SettleRules).
+                    var changedSince = TakeChanges();
+                    var settle = new SettleRules(
+                        manual || Folder.Mode == SyncMode.Backup ? _agent.SettleTime : Max(_agent.SettleTime, Quiet),
+                        manual ? null : _changes.Cap, _firstSeenChanging, changedSince);
+
+                    // What changed locally since the last run (task 26): null without a watcher, a full scan when it cannot be trusted.
+                    var fullDue = Folder.Paused ? null : FullRescanDue();
+                    var localChanges = Folder.Paused ? null : _watcher?.Changes.Take(fullDue) is { } taken ? taken with { BaseSnapshot = _lastSnapshot } : null;
+
                     FolderRunResult result;
                     var progress = new RunProgress();
                     _progress = progress;
@@ -1000,7 +1152,7 @@ public sealed class SyncAgent : IAsyncDisposable
                     _run = run;
                     try
                     {
-                        result = await _agent.RunFolderAsync(Folder, run.Token, progress, allowMassDeletion ? true : null);
+                        result = await _agent.RunFolderAsync(Folder, run.Token, progress, allowMassDeletion ? true : null, settle, localChanges, fullDue);
                     }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested && run.IsCancellationRequested)
                     {
@@ -1010,6 +1162,7 @@ public sealed class SyncAgent : IAsyncDisposable
                     }
                     catch (Exception e)
                     {
+                        if (localChanges is not null) _watcher!.Changes.Restore(localChanges);
                         foreach (var r in requests)
                             if (e is OperationCanceledException) r.TrySetCanceled();
                             else r.TrySetException(e);
@@ -1021,14 +1174,25 @@ public sealed class SyncAgent : IAsyncDisposable
                         _activity = WorkerActivity.Idle;
                         _progress = null;
                     }
+                    if (localChanges is not null)
+                    {
+                        // A run that went through hands on only what it could not finish; any other counts as not having happened.
+                        if (result.Retry is { } retry) _watcher!.Changes.Carry(retry);
+                        else _watcher!.Changes.Restore(localChanges);
+                        if (result.NextFull is { } nextFull) _watcher.Changes.Lost(nextFull);
+                    }
+                    if (result.Snapshot is { } snapshotId) _lastSnapshot = snapshotId;
+                    // The schedule counts from the first run that went through, then from each due full rescan that did.
+                    if (result.Retry is not null && (_fullRescans is null || fullDue is not null)) ScheduleFullRescan();
                     _lastResult = result;
                     _lastRunAt = DateTimeOffset.UtcNow;
                     foreach (var r in requests) r.TrySetResult(result);
                     _agent.RaiseFolder(Folder.FolderId);
+                    var scan = result.Scan is { } how ? $" [{how}{(result.RemoteScan is { } remoteHow ? $"; {remoteHow}" : "")}]" : "";
                     if (result.Skipped) _logger.LogDebug("\"{Name}\": {Message}.", Folder.Name, result.Message);
-                    else if (result.Ok) _logger.LogInformation("\"{Name}\": {Message}.", Folder.Name, result.Message);
-                    else _logger.LogWarning("\"{Name}\" failed: {Message}", Folder.Name, result.Message);
-                    if (result.Unsettled > 0) _settle.Change(_agent.SettleTime + TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
+                    else if (result.Ok) _logger.LogInformation("\"{Name}\": {Message}.{Scan}", Folder.Name, result.Message, scan);
+                    else _logger.LogWarning("\"{Name}\" failed: {Message}{Scan}", Folder.Name, result.Message, scan);
+                    if (result.Unsettled > 0) ScheduleSettled(result.SettlesAt);
                     if (result.Deferred) continue;
                     if (result.Skipped && !Folder.Paused)
                     {
@@ -1062,6 +1226,23 @@ public sealed class SyncAgent : IAsyncDisposable
                     await Task.Delay(TimeSpan.FromMinutes(1), ct).ContinueWith(_ => { });
                 }
             }
+        }
+
+        private static TimeSpan Max(TimeSpan a, TimeSpan b) => a > b ? a : b;
+
+        private FullRescanSchedule? _fullRescans;
+
+        private void ScheduleFullRescan() =>
+            (_fullRescans ??= new FullRescanSchedule(Folder.FullRescanHours, _agent.Clock, _agent.FullRescanConditions, _agent.Conditions)).Done();
+
+        /// <summary>When the full-rescan schedule asks for a full scan now (and the device's conditions for one hold), why.</summary>
+        private string? FullRescanDue()
+        {
+            if (_fullRescans is not { } schedule) return null; // no full scan went through yet: the first one is full anyway
+            var due = schedule.Due(out var postponed);
+            if (postponed is not null)
+                _logger.LogInformation("\"{Name}\": the full rescan waits ({Why}); runs follow the recorded changes until then.", Folder.Name, postponed);
+            return due;
         }
 
         public async ValueTask DisposeAsync()

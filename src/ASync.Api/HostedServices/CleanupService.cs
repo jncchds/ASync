@@ -27,6 +27,8 @@ public class CleanupService(IServiceScopeFactory scopes, TimeProvider clock, ILo
                     .DeleteFinishedAsync(clock.GetUtcNow().UtcDateTime - PurgeRetention);
                 // Resumable uploads nobody continued: aborted on the back-end, then forgotten.
                 var uploads = await scope.ServiceProvider.GetRequiredService<UploadService>().AbortIdleAsync(stoppingToken);
+                // Plain folders' change logs (task 26): a month, at most 100,000 entries per folder.
+                await scope.ServiceProvider.GetRequiredService<FolderChangeLog>().TrimAsync();
                 if (sessions + codes + purges + uploads > 0)
                     logger.LogInformation("Cleanup deleted {Sessions} expired sessions, {Codes} expired device codes, {Purges} finished purge records " +
                                           "and {Uploads} abandoned uploads.", sessions, codes, purges, uploads);

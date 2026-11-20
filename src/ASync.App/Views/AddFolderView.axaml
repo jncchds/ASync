@@ -94,6 +94,16 @@
           </ComboBox>
           <TextBlock Classes="muted small" TextWrapping="Wrap" Text="Also when files change and on Sync now. Retention, excludes and the rest are in the web UI." />
         </StackPanel>
+
+        <StackPanel Spacing="4" IsVisible="{Binding ShowChangeDelay}">
+          <TextBlock Classes="label" Text="After local changes" />
+          <ComboBox Name="ChangeDelay" ItemsSource="{x:Static vm:AddFolderViewModel.ChangeDelays}" SelectedItem="{Binding SelectedChangeDelay}" MinWidth="180">
+            <ComboBox.ItemTemplate>
+              <DataTemplate DataType="vm:ChangeDelayChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <TextBlock Classes="muted small" TextWrapping="Wrap" Text="{Binding ChangeDelayHint}" />
+        </StackPanel>
       </StackPanel>
     </Border>
 

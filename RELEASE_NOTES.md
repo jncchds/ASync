@@ -1,7 +1,34 @@
 # Release notes
 
-## v0.1.6 — 2026-11-18
+## v0.1.6 — 2026-11-21
 
+- perf(sync): **a run that finds nothing changed writes nothing on the device.** A two-way or mirror folder's sync state
+  (`sync-state.json`, several MB on a large folder) was written at the end of every run, even when nothing changed: it is now
+  written only when something in it changed. A backup that finds nothing changed since its last snapshot makes no new snapshot
+  (and forgets none); it reports "No changes since snapshot …" and counts as a successful run, so overdue detection is
+  unaffected. Measured on 100,000 small files: see `docs/orchestration/test-records/task-26/`.
+- feat(sync): **wait after changes.** Two-way and mirror folders have a new setting in the web UI's folder form and in the apps'
+  *New folder…*: how long a device waits after you change files before it syncs them (*Immediately*, as before, or 1, 5, 15 or
+  30 minutes). Every change restarts the wait, so a burst of saves becomes one sync, and files that keep changing still sync at
+  the latest after a cap (10 minutes, or four times the wait). Longer waits mean fewer runs and fewer stored versions, but on
+  two-way folders more chance of a conflict with another device. While changes wait, the apps and the web UI's *Folders* page
+  say *Changes waiting* and when they will sync. Also fixed: a file written without pause (a log) no longer keeps the watcher's
+  sync from ever starting.
+- perf(sync): **runs look only at what changed.** The agent records which files and directories change in each folder, and a run
+  looks at just those instead of reading through the whole folder; a backup reuses what it stored for directories nothing changed
+  in. On 100,000 files with 10 edited: a two-way sync 1.5 s → 0.9 s, a backup 1.3 s → 0.3 s (warm cache; much more on a phone
+  or a cold disk). The folder is still read in full when changes may have been missed (the first run after a start, an overflow
+  of the watcher, too many changes at once), with the reason in the log. A file that cannot be looked at is never taken for
+  deleted. On Linux, very large folders may need a higher `fs.inotify.max_user_watches`; the log says so.
+- perf(sync): **the storage is not listed on every run.** The server keeps a log of what changed in each two-way and mirror
+  folder (every change made through ASync: devices, the web UI's restores, the Android and iPhone Files apps), and devices ask
+  it what is new since their last run instead of listing the whole storage (on WebDAV one request per directory). On 100,000
+  files with 10 edited: 0.9 s → 0.4 s with the server in the same machine, far more over a network. The log is kept for a month
+  (at most 100,000 entries per folder); a device that missed more than that lists in full. Files put on the storage directly,
+  outside ASync, are seen at the next full rescan.
+- feat(sync): **an occasional full rescan.** A new folder setting, *Read the whole folder* (twice a day by default), makes
+  devices read through the whole folder now and then although they follow what changed, so a change watching missed shows
+  within hours. Devices spread it out so they do not all do it at once, and phones do it only on Wi-Fi and the charger.
 - feat(ios): **your ASync folders in the iPhone's Files app.** With a signed build (iOS 16 and later), *Files → Browse* has the
   location **ASync — <your server>** and every app's file picker reaches it: two-way folders to browse, open, save, rename, move
   and delete (an overwritten file keeps its old content as a version, a deleted one goes to the folder's trash), mirror folders

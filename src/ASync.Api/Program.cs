@@ -58,6 +58,8 @@ builder.Services.AddSingleton<SnapshotService>();
 builder.Services.AddSingleton<PlainFileService>();
 builder.Services.AddSingleton<UploadLimits>();
 builder.Services.AddScoped<IUploadSessionRepository, UploadSessionRepository>();
+builder.Services.AddScoped<IFolderChangeRepository, FolderChangeRepository>();
+builder.Services.AddScoped<FolderChangeLog>();
 builder.Services.AddScoped<UploadService>();
 builder.Services.AddHostedService<CleanupService>();
 builder.Services.AddSingleton<MaintenanceClaims>();

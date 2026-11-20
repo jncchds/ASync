@@ -135,6 +135,19 @@ public class SyncController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// The folder's change log after <paramref name="since"/> (task 26; Mirror and TwoWay folders): what the storage gateway changed,
+    /// so the device need not list the whole storage. Without <paramref name="since"/>: only where the log is now.
+    /// </summary>
+    [HttpGet("{id:int}/changes")]
+    public async Task<ActionResult<FolderChangesDto>> Changes(int id, [FromQuery] long? since, [FromQuery] int? limit,
+        [FromServices] FolderChangeLog log)
+    {
+        if (await MembershipAsync(id) is not { Folder: { } folder }) return NotFound();
+        if (folder.Mode == SyncMode.Backup) return BadRequest(new { message = "Backup folders have no change log." });
+        return await log.ReadAsync(folder, since, limit ?? FolderChangeLog.PageLimit);
+    }
+
     // ── Leases (Mirror/TwoWay) ────────────────────────────────────────────────
 
     [HttpPost("{id:int}/lease")]

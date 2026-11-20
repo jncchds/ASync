@@ -27,6 +27,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<UploadSession> UploadSessions => Set<UploadSession>();
     public DbSet<UploadSessionPart> UploadSessionParts => Set<UploadSessionPart>();
     public DbSet<FolderUsage> FolderUsages => Set<FolderUsage>();
+    public DbSet<FolderChange> FolderChanges => Set<FolderChange>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -89,6 +90,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(f => f.PruneIntervalDays).HasDefaultValue(MaintenanceDefaults.PruneIntervalDays).HasSentinel(-1);
             e.Property(f => f.CheckIntervalDays).HasDefaultValue(MaintenanceDefaults.CheckIntervalDays).HasSentinel(-1);
             e.Property(f => f.CheckReadDataPercent).HasDefaultValue(MaintenanceDefaults.CheckReadDataPercent).HasSentinel(-1);
+            e.Property(f => f.ChangeDelaySeconds).HasDefaultValue(ChangeDelayDefaults.QuietSeconds).HasSentinel(-1);
+            e.Property(f => f.ChangeMaxDelaySeconds).HasDefaultValue(ChangeDelayDefaults.MaxSeconds).HasSentinel(-1);
+            e.Property(f => f.FullRescanHours).HasDefaultValue(ChangeDelayDefaults.FullRescanHours).HasSentinel(-1);
             e.Property(f => f.LastPruneMessage).HasMaxLength(1000);
             e.Property(f => f.LastPruneBy).HasMaxLength(100);
             e.Property(f => f.LastCheckMessage).HasMaxLength(1000);
@@ -100,6 +104,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         });
 
         // One resumable upload per device and path; gone with its folder or device (CleanupService aborts idle ones).
+        b.Entity<FolderChange>(e =>
+        {
+            e.Property(c => c.Path).HasMaxLength(1000);
+            e.HasIndex(c => new { c.FolderId, c.Id });
+            e.HasIndex(c => c.At);
+            e.HasOne<Folder>().WithMany().HasForeignKey(c => c.FolderId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<UploadSession>(e =>
         {
             e.Property(s => s.Path).HasMaxLength(1000);
