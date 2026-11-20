@@ -344,6 +344,16 @@ namespace ASync.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("ChangeDelaySeconds")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(5);
+
+                    b.Property<int>("ChangeMaxDelaySeconds")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(600);
+
                     b.Property<int>("CheckIntervalDays")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")

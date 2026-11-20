@@ -27,7 +27,27 @@ public record FolderDto(
     int PruneIntervalDays = MaintenanceDefaults.PruneIntervalDays, int CheckIntervalDays = MaintenanceDefaults.CheckIntervalDays,
     int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent,
     MaintenanceStatusDto? LastPrune = null, MaintenanceStatusDto? LastCheck = null,
-    DateTime? RecoveryKeyCreatedAt = null, string? RecoveryKey = null, FolderUsageDto? Usage = null, string? AddedFromDevice = null);
+    DateTime? RecoveryKeyCreatedAt = null, string? RecoveryKey = null, FolderUsageDto? Usage = null, string? AddedFromDevice = null,
+    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds);
+
+/// <summary>
+/// The wait after local changes (task 26; TwoWay and Mirror Upload folders): a run starts once no file changed for the quiet
+/// period, but no later than the cap after the first change not synced yet. The defaults are the behaviour before the setting
+/// (a 5-second debounce) plus a cap, so a folder whose files change without pause still syncs every 10 minutes.
+/// </summary>
+public static class ChangeDelayDefaults
+{
+    public const int QuietSeconds = 5;
+    public const int MaxSeconds = 600;
+    /// <summary>The longest quiet period and cap a folder may have (one day).</summary>
+    public const int Limit = 86400;
+
+    /// <summary>The cap the forms choose for a quiet period: four times it, at least the default 10 minutes, at most a day.</summary>
+    public static int CapFor(int quietSeconds) => Math.Min(Limit, Math.Max(MaxSeconds, quietSeconds * 4));
+
+    /// <summary>The forms' presets (seconds of quiet): "Immediately" is the default 5 seconds.</summary>
+    public static readonly int[] Presets = [QuietSeconds, 60, 300, 900, 1800];
+}
 
 /// <summary>Defaults of a Backup folder's housekeeping schedule (days between runs; 0 = off).</summary>
 public static class MaintenanceDefaults
@@ -45,7 +65,7 @@ public record FolderDeviceDto(
     Guid DeviceId, string DeviceName, DevicePlatform Platform, string LocalPath, MirrorDirection? Direction, bool Paused,
     DateTime? LastSyncAt, bool? LastSyncOk, string? LastSyncMessage, RunConditionsDto? Conditions = null,
     MediaSelectionDto? Media = null, MediaCountsDto? MediaCounts = null,
-    CollectionSelectionDto? Collections = null, CollectionCountsDto? CollectionCounts = null);
+    CollectionSelectionDto? Collections = null, CollectionCountsDto? CollectionCounts = null, DateTimeOffset? ChangesWaitingUntil = null);
 
 /// <summary>
 /// When a device may run a folder by itself (its interval, file changes, wake-ups): only on unmetered networks, only
@@ -70,7 +90,8 @@ public record SaveFolderRequest(
     int IntervalMinutes = 60, string[]? Excludes = null, RetentionDto? Retention = null, int VersionsKeepDays = 30, int TrashKeepDays = 30,
     long? ExpectedRevision = null,
     int PruneIntervalDays = MaintenanceDefaults.PruneIntervalDays, int CheckIntervalDays = MaintenanceDefaults.CheckIntervalDays,
-    int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent, string? RecoveryKey = null);
+    int CheckReadDataPercent = MaintenanceDefaults.CheckReadDataPercent, string? RecoveryKey = null,
+    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds);
 
 /// <summary>
 /// Make a new recovery key for a Transport Backup folder (it replaces the previous one). People with a password
@@ -97,7 +118,8 @@ public record DeviceFolderDto(
     int FolderId, string Name, SyncMode Mode, FolderEncryption Encryption, FolderKind Kind,
     int IntervalMinutes, string[] Excludes, RetentionDto Retention, int VersionsKeepDays, int TrashKeepDays,
     long Revision, bool RepositoryReady, string LocalPath, MirrorDirection? Direction, bool Paused, RunConditionsDto? Conditions = null,
-    MediaSelectionDto? Media = null, CollectionSelectionDto? Collections = null);
+    MediaSelectionDto? Media = null, CollectionSelectionDto? Collections = null,
+    int ChangeDelaySeconds = ChangeDelayDefaults.QuietSeconds, int ChangeMaxDelaySeconds = ChangeDelayDefaults.MaxSeconds);
 
 /// <summary>A device changing its own settings for a folder (from the device's UI or CLI). Null = unchanged.</summary>
 /// <summary>

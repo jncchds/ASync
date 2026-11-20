@@ -39,6 +39,13 @@ public class Folder
     public int CheckIntervalDays { get; set; } = MaintenanceDefaults.CheckIntervalDays;
     /// <summary>The share of packs (0–100) a scheduled check downloads and verifies.</summary>
     public int CheckReadDataPercent { get; set; } = MaintenanceDefaults.CheckReadDataPercent;
+    /// <summary>
+    /// Wait after local changes (task 26, TwoWay and Mirror Upload): a run starts once no file changed for this many seconds
+    /// (each change restarts the wait)…
+    /// </summary>
+    public int ChangeDelaySeconds { get; set; } = ChangeDelayDefaults.QuietSeconds;
+    /// <summary>…but no later than this many seconds after the first change that is not synced yet (≥ the quiet period).</summary>
+    public int ChangeMaxDelaySeconds { get; set; } = ChangeDelayDefaults.MaxSeconds;
     /// <summary>The last prune: by the server (Transport) or reported by a device.</summary>
     public DateTime? LastPruneAt { get; set; }
     public bool? LastPruneOk { get; set; }

@@ -7,6 +7,13 @@
   written only when something in it changed. A backup that finds nothing changed since its last snapshot makes no new snapshot
   (and forgets none); it reports "No changes since snapshot …" and counts as a successful run, so overdue detection is
   unaffected. Measured on 100,000 small files: see `docs/orchestration/test-records/task-26/`.
+- feat(sync): **wait after changes.** Two-way and mirror folders have a new setting in the web UI's folder form and in the apps'
+  *New folder…*: how long a device waits after you change files before it syncs them (*Immediately*, as before, or 1, 5, 15 or
+  30 minutes). Every change restarts the wait, so a burst of saves becomes one sync, and files that keep changing still sync at
+  the latest after a cap (10 minutes, or four times the wait). Longer waits mean fewer runs and fewer stored versions, but on
+  two-way folders more chance of a conflict with another device. While changes wait, the apps and the web UI's *Folders* page
+  say *Changes waiting* and when they will sync. Also fixed: a file written without pause (a log) no longer keeps the watcher's
+  sync from ever starting.
 - feat(ios): **your ASync folders in the iPhone's Files app.** With a signed build (iOS 16 and later), *Files → Browse* has the
   location **ASync — <your server>** and every app's file picker reaches it: two-way folders to browse, open, save, rename, move
   and delete (an overwritten file keeps its old content as a version, a deleted one goes to the folder's trash), mirror folders

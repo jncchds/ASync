@@ -655,6 +655,8 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
             Alerts = _alerts.GetValueOrDefault(f.FolderId),
             Conditions = f.Conditions,
             Waiting = f.Paused ? null : s.Waiting,
+            ChangesWaitingUntil = f.Paused ? null : s.ChangesWaitingUntil,
+            ChangeDelaySeconds = f.ChangeDelaySeconds,
         };
     }
 

@@ -31,7 +31,11 @@ public class SyncHub(DeviceConnections connections, ISyncNotifier notifier) : Hu
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         if (connections.Remove(Context.ConnectionId) is { } gone)
+        {
             await notifier.ToUserAsync(gone.UserId, SyncEvents.DeviceStatus, gone.DeviceId);
+            foreach (var folderId in connections.ClearChangesWaitingIfOffline(gone.DeviceId))
+                await notifier.ToUserAsync(gone.UserId, SyncEvents.FolderStatus, folderId, gone.DeviceId);
+        }
         await base.OnDisconnectedAsync(exception);
     }
 
@@ -44,6 +48,17 @@ public class SyncHub(DeviceConnections connections, ISyncNotifier notifier) : Hu
         if (Context.User?.DeviceId() is not Guid deviceId) throw new HubException("Only devices report their browsing state.");
         connections.SetBrowse(Context.ConnectionId, state);
         await notifier.ToUserAsync(Context.User.UserId(), SyncEvents.DeviceStatus, deviceId);
+    }
+
+    /// <summary>
+    /// A device telling that local changes of a folder wait for its quiet period (task 26) and when they will run, or (null) that
+    /// none wait any more. Devices only; kept in memory while the device is connected, shown on the person's Folders page.
+    /// </summary>
+    public async Task ReportChangesWaiting(int folderId, DateTimeOffset? until)
+    {
+        if (Context.User?.DeviceId() is not Guid deviceId) throw new HubException("Only devices report their folders' state.");
+        connections.SetChangesWaiting(deviceId, folderId, until);
+        await notifier.ToUserAsync(Context.User.UserId(), SyncEvents.FolderStatus, folderId, deviceId);
     }
 }
 
@@ -69,6 +84,29 @@ public class DeviceConnections(ILogger<DeviceConnections> logger)
     public void Add(DeviceConnection connection) => _open[connection.ConnectionId] = connection;
 
     public DeviceConnection? Remove(string connectionId) => _open.TryRemove(connectionId, out var gone) ? gone : null;
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(Guid Device, int Folder), DateTimeOffset> _changesWaiting = new();
+
+    /// <summary>A device's report that a folder's local changes wait until <paramref name="until"/> (null: none wait).</summary>
+    public void SetChangesWaiting(Guid deviceId, int folderId, DateTimeOffset? until)
+    {
+        if (until is { } at) _changesWaiting[(deviceId, folderId)] = at;
+        else _changesWaiting.TryRemove((deviceId, folderId), out _);
+    }
+
+    /// <summary>When the device's local changes of the folder run, as it last reported (null: none wait, or it is offline).</summary>
+    public DateTimeOffset? ChangesWaiting(Guid deviceId, int folderId) =>
+        _changesWaiting.TryGetValue((deviceId, folderId), out var at) ? at : null;
+
+    /// <summary>The device went offline (no connection left): what it reported is forgotten. Returns the folders it was about.</summary>
+    public List<int> ClearChangesWaitingIfOffline(Guid deviceId)
+    {
+        if (IsConnected(deviceId)) return [];
+        var folders = new List<int>();
+        foreach (var key in _changesWaiting.Keys)
+            if (key.Device == deviceId && _changesWaiting.TryRemove(key, out _)) folders.Add(key.Folder);
+        return folders;
+    }
 
     public void SetBrowse(string connectionId, DeviceBrowseState state)
     {

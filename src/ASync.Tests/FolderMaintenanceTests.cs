@@ -391,4 +391,26 @@ public class FolderMaintenanceTests : IAsyncLifetime
         Assert.False((await _folderService.ReportMaintenanceAsync(mirrored, new MaintenanceReportRequest(MaintenanceKind.Prune, true, "x"), "laptop")).Success);
         Assert.Null(mirror.LastPruneAt);
     }
+
+    [Fact]
+    public async Task TheWaitAfterChanges_IsValidated_KeptAndSentToDevices()
+    {
+        SaveFolderRequest Request(int quiet, int cap) =>
+            new("work", SyncMode.TwoWay, FolderEncryption.Transport, FolderKind.Files, _backend.Id, "work", ChangeDelaySeconds: quiet, ChangeMaxDelaySeconds: cap);
+        Assert.Contains("between 1 second and 1 day", (await _folderService.CreateAsync(Alice, Request(0, 600), default)).Error);
+        Assert.Contains("between 1 second and 1 day", (await _folderService.CreateAsync(Alice, Request(86401, 86401), default)).Error);
+        Assert.Contains("at least the wait itself", (await _folderService.CreateAsync(Alice, Request(1800, 600), default)).Error);
+        Assert.Contains("at most 1 day", (await _folderService.CreateAsync(Alice, Request(60, 86401), default)).Error);
+
+        var defaults = (await _folderService.CreateAsync(Alice, new SaveFolderRequest("plain", SyncMode.TwoWay, FolderEncryption.Transport,
+            FolderKind.Files, _backend.Id, "plain"), default)).Value!.Folder;
+        Assert.Equal((5, 600), (defaults.ChangeDelaySeconds, defaults.ChangeMaxDelaySeconds));
+
+        var created = await _folderService.CreateAsync(Alice, Request(1800, 7200), default);
+        Assert.True(created.Success, created.Error);
+        var folder = created.Value!.Folder;
+        Assert.Equal((1800, 7200), (FolderService.ToDto(folder).ChangeDelaySeconds, FolderService.ToDto(folder).ChangeMaxDelaySeconds));
+        var device = FolderService.ToDeviceDto(folder, Attach(folder, "laptop"));
+        Assert.Equal((1800, 7200), (device.ChangeDelaySeconds, device.ChangeMaxDelaySeconds));
+    }
 }

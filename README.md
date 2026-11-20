@@ -54,6 +54,14 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
   device's last sync went. The list updates live as devices report.
   - Add and edit folders (Backup, Mirror or two-way), then attach devices with their local folder. Mirror
     folders also get a direction for each device. Devices can be paused.
+  - **Wait after changes** (two-way and mirror folders): how long a device waits after you change files before it
+    syncs them: *Immediately* (a few seconds, the default), 1, 5, 15 or 30 minutes. Every change restarts the wait, so a burst
+    of saves becomes one sync, but files that keep changing still sync at the latest after a cap (10 minutes, or four times
+    the wait: 2 hours for 30 minutes). Longer waits mean fewer runs and fewer stored versions of files you save constantly (a
+    work folder), but on two-way folders more chance of a conflict with another device that edits the same file meanwhile.
+    A file that changed within the wait is left for the next run even when something else starts one (the interval, or
+    another device's change), up to the same cap; *Sync now* on a device takes everything as it is. While changes wait, the
+    device's row on *Folders* and the folder in the apps say *Changes waiting* and when they will sync.
   - **Browse…** next to the local folder picks it on the device itself instead of typing the path: see
     [Choosing a device's folder from the web](#choosing-a-devices-folder-from-the-web).
   - Folders can also be created from the apps, which then show *added from <device>*: see
@@ -167,7 +175,8 @@ You don't need a computer to start syncing a new folder from your phone. The And
 
 - **New folder…** above the folder cards: a name; *Two-way*, *Mirror* (and which side is the original) or *Backup*;
   end-to-end encryption for backups; which of your storage to put it on; the directory there (filled in from the name);
-  how often it runs; and where it lives on the device, chosen with the folder picker (on a phone with
+  how often it runs; how long it waits after local changes (two-way and mirror, see *Wait after changes* above); and where it
+  lives on the device, chosen with the folder picker (on a phone with
   [All files access](#folders-anywhere-on-the-phone) anywhere on the phone, otherwise with Android's picker). A new
   end-to-end backup asks for its passphrase right away and shows its recovery key once; a standard backup shows its
   recovery key once.

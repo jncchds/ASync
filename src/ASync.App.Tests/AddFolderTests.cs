@@ -92,6 +92,31 @@ public sealed class AddFolderTests : IDisposable
     }
 
     [Fact]
+    public async Task NewFolder_TheWaitAfterChanges_IsAPresetWithItsCap_OnlyForSyncedFolders()
+    {
+        await using var f = await StartAsync();
+        f.Platform.NextPick = "/home/me/Work";
+        var page = await OpenAsync(f);
+        Assert.True(page.ShowChangeDelay);
+        Assert.Equal(ChangeDelayDefaults.QuietSeconds, page.SelectedChangeDelay.Seconds); // "Immediately", as before
+        Assert.Equal("Changed files sync within seconds.", page.ChangeDelayHint);
+
+        page.SelectedChangeDelay = AddFolderViewModel.ChangeDelays.Single(d => d.Seconds == 1800);
+        Assert.Contains("at the latest 120 minutes after the first change", page.ChangeDelayHint);
+        Assert.Contains("conflict", page.ChangeDelayHint); // TwoWay
+        page.IsMirror = true;
+        Assert.DoesNotContain("conflict", page.ChangeDelayHint);
+        page.IsBackup = true;
+        Assert.False(page.ShowChangeDelay);
+        page.IsTwoWay = true;
+
+        page.Name = "Work";
+        await page.ChooseLocalCommand.ExecuteAsync(null);
+        await page.SubmitCommand.ExecuteAsync(null);
+        Assert.Equal((1800, 7200), (f.Agent.LastCreate!.Folder.ChangeDelaySeconds, f.Agent.LastCreate.Folder.ChangeMaxDelaySeconds));
+    }
+
+    [Fact]
     public async Task NewFolder_EndToEnd_IsBackupOnly_AndGoesStraightIntoTheEncryptionSetup()
     {
         await using var f = await StartAsync();

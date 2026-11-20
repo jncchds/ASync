@@ -28,6 +28,19 @@ public sealed record SyncOptions
     /// the same content). Zero = off (the default; the Android agent uses a few seconds).
     /// </summary>
     public TimeSpan SettleTime { get; init; }
+    /// <summary>
+    /// The longest a file may be held back by <see cref="SettleTime"/> (task 26, the folder's cap of the wait after changes): a file
+    /// first seen changing longer ago than this goes in the run anyway, so a file saved all day still syncs at least every cap.
+    /// Null: no cap (a file modified within the settle time always waits).
+    /// </summary>
+    public TimeSpan? SettleCap { get; init; }
+    /// <summary>
+    /// When each held-back path was first seen changing, kept by the caller across runs (the agent's worker; in memory: after a
+    /// restart the next run starts counting afresh). Paths are removed once they are synced or no longer changing.
+    /// </summary>
+    public IDictionary<string, DateTimeOffset>? FirstSeenChanging { get; init; }
+    /// <summary>The first local change event the run was waiting for (the agent's watcher), as the earliest "first seen" of a path.</summary>
+    public DateTimeOffset? ChangedSince { get; init; }
     /// <summary>The clock <see cref="SettleTime"/> is measured with.</summary>
     public TimeProvider Clock { get; init; } = TimeProvider.System;
     /// <summary>
@@ -51,6 +64,8 @@ public sealed record SyncResult
     public List<string> Errors { get; } = [];
     /// <summary>Paths left for the next run because their local file changed moments ago (<see cref="SyncOptions.SettleTime"/>).</summary>
     public int Unsettled { get; set; }
+    /// <summary>When the first of the <see cref="Unsettled"/> paths may go (settled, or held back for the cap): when to run again.</summary>
+    public DateTimeOffset? SettlesAt { get; set; }
     /// <summary>True when this run changed the storage (other devices should sync).</summary>
     public bool ChangedRemote => Uploaded > 0 || DeletedRemote > 0;
     public bool Ok => Errors.Count == 0;
@@ -146,11 +161,13 @@ public sealed class FolderSyncer
             _state.Files.TryGetValue(path, out var b);
             if (b is not null && _excludes.Matches(path)) { plan.Add((path, Action.Forget)); continue; }
             var action = Decide(l, r, b);
-            if (action is not (Action.None or Action.Forget) && l is not null && Unsettled(l))
+            if (action is not (Action.None or Action.Forget) && l is not null && Unsettled(path, l) is { } settlesAt)
             {
                 result.Unsettled++;
+                if (result.SettlesAt is null || settlesAt < result.SettlesAt) result.SettlesAt = settlesAt;
                 continue; // as if the path were not there this run: its state stays as it was
             }
+            _options.FirstSeenChanging?.Remove(path);
             plan.Add((path, action));
         }
         CheckMassDeletion(plan);
@@ -210,12 +227,26 @@ public sealed class FolderSyncer
         return result;
     }
 
-    /// <summary>Modified within the settle time (a time in the future, a wrong clock, does not count as unsettled).</summary>
-    private bool Unsettled(LocalFile l)
+    /// <summary>
+    /// Modified within the settle time (a time in the future, a wrong clock, does not count as unsettled), and not held back for
+    /// longer than the cap yet: then when it may go; null when it goes in this run.
+    /// </summary>
+    private DateTimeOffset? Unsettled(string path, LocalFile l)
     {
-        if (_options.SettleTime <= TimeSpan.Zero) return false;
-        var age = _options.Clock.GetUtcNow().ToUnixTimeMilliseconds() - l.Modified;
-        return age >= 0 && age < _options.SettleTime.TotalMilliseconds;
+        if (_options.SettleTime <= TimeSpan.Zero) return null;
+        var now = _options.Clock.GetUtcNow();
+        var age = now.ToUnixTimeMilliseconds() - l.Modified;
+        if (age < 0 || age >= _options.SettleTime.TotalMilliseconds) return null;
+        var settles = DateTimeOffset.FromUnixTimeMilliseconds(l.Modified) + _options.SettleTime;
+        if (_options.SettleCap is not { } cap) return settles;
+        var seen = _options.FirstSeenChanging;
+        if (seen is null || !seen.TryGetValue(path, out var first))
+        {
+            first = _options.ChangedSince is { } since && since < now ? since : now;
+            seen?.TryAdd(path, first);
+        }
+        if (now - first >= cap) return null; // held back long enough: it goes now, even while it still changes
+        return settles < first + cap ? settles : first + cap;
     }
 
     private Action Decide(LocalFile? l, RemoteFile? r, BaseEntry? b)

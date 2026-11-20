@@ -401,6 +401,8 @@ export interface FolderDevice {
   /** Contacts and Calendars folders: which accounts or calendars the device backs up, and what its last backup holds. */
   collections?: CollectionSelection | null
   collectionCounts?: CollectionCounts | null
+  /** Local changes on the device wait for the folder's quiet period: when they will sync (live, while the device is online). */
+  changesWaitingUntil?: string | null
 }
 
 // ── Photos and videos (task 19) ───────────────────────────────────────────────
@@ -546,6 +548,9 @@ export interface Folder {
   usage: FolderUsage | null
   /** Set when a device created it from its app: that device's name then (null = made here). */
   addedFromDevice?: string | null
+  /** TwoWay and Mirror (uploading devices): a run starts once no file changed for this long, at most the cap after the first change. */
+  changeDelaySeconds: number
+  changeMaxDelaySeconds: number
 }
 
 /**
@@ -629,6 +634,8 @@ export interface SaveFolder {
   pruneIntervalDays: number
   checkIntervalDays: number
   checkReadDataPercent: number
+  changeDelaySeconds?: number
+  changeMaxDelaySeconds?: number
   expectedRevision?: number
   /** Creating a standard-encryption Backup folder: take over the repository already in the directory. */
   recoveryKey?: string

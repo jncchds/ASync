@@ -344,6 +344,10 @@ public sealed record FolderStatusDto
     public RunConditionsDto? Conditions { get; init; }
     /// <summary>Why automatic runs wait now ("Waiting for Wi-Fi…"), or null.</summary>
     public string? Waiting { get; init; }
+    /// <summary>Local changes wait for the folder's quiet period (task 26): when they run; null when none wait (or an older agent).</summary>
+    public DateTimeOffset? ChangesWaitingUntil { get; init; }
+    /// <summary>The folder's wait after local changes, in seconds (task 26; 0 from an older agent).</summary>
+    public int ChangeDelaySeconds { get; init; }
 }
 
 /// <summary>

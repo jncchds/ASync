@@ -225,6 +225,14 @@ Implemented (task 20, contacts and calendars; migration `ContactsCalendarsCollec
 - **Device**: CollectionListsJson (jsonb, the last contact-account and calendar lists it reported, keyed by kind: `{collections, access,
   items, at}`; names and counts only).
 
+Implemented (task 26, the wait after local changes; migration `FolderChangeDelay`; see "Change tracking and full rescans"):
+
+- **Folder.ChangeDelaySeconds** (the quiet period, default 5 = the old fixed debounce, 1 s–1 day) and
+  **ChangeMaxDelaySeconds** (the cap after the first unsynced change, default 600, between the quiet period and 1 day;
+  `ChangeDelayDefaults`). Database defaults, so folders from before the migration behave as before plus the cap. In
+  `FolderDto`, `SaveFolderRequest` and `DeviceFolderDto`. The devices' "changes waiting until" is not stored: it is kept with
+  their hub connection (`DeviceConnections`) and added to `FolderDeviceDto.ChangesWaitingUntil` by `GET /api/folders`.
+
 ## Auth
 
 - **People** (web UI): copied from abook. A 15-minute JWT access token is kept in page memory. An httpOnly
@@ -568,7 +576,9 @@ the folder's root on its back-end, inside the owner's area when the back-end is 
   through `ISyncNotifier`. Devices join `device:<id>` and people join `user:<id>`. The events are
   `config.changed`, `folder.changed` (folderId, originDeviceId), `folder.status`, `device.revoked` (to the
   device being removed), `alerts.changed` (to people, when incidents open, change or close) and `device.status`
-  (deviceId, to its owner: it connected, disconnected or reported a new browsing state). Since task 17 the hub also
+  (deviceId, to its owner: it connected, disconnected or reported a new browsing state). Task 26 adds the device-only hub
+  method `ReportChangesWaiting(folderId, until?)` (local changes wait for the quiet period until then, or none wait any
+  more): kept in memory with the device's connections, forgotten when it goes offline, sent to the owner as `folder.status`. Since task 17 the hub also
   carries the two device-only calls of "Web UI: browsing a device's folders": the device's `ReportBrowse` and the
   server's `browse` client result.
 
@@ -642,7 +652,9 @@ locked by a prune is not a failed run: the agent retries it after 30 seconds and
 control channel"):
 - One worker per folder, triggered by:
   - its interval;
-  - local file changes (FileSystemWatcher, 5-second debounce; TwoWay and Mirror Upload);
+  - local file changes (FileSystemWatcher; TwoWay and Mirror Upload), after the folder's **wait after changes** (task 26: a
+    quiet period restarted by every event, at most the cap after the first unsynced event; `ChangeWait`, timers on the agent's
+    `Clock`; see "Change tracking and full rescans");
   - `folder.changed` (TwoWay and Mirror Download);
   - `config.changed`, which reloads the folder list.
 - A folder busy on another device (a lease, or a repository locked by a prune) is retried after 30 seconds.
@@ -689,6 +701,44 @@ private key in `identity.json` and the folder keys in `keys/` are written as
   with a message naming where it can be read. `ASYNC_SECRET_STORE=file` chooses the file on every OS (a Mac without
   a login Keychain, e.g. a LaunchDaemon). The Keychain and DPAPI paths are only compiled on Linux; CI runs the DPAPI
   round trip on Windows.
+
+### Change tracking and full rescans (task 26)
+
+A run on a large folder costs a walk of the local tree, a listing of the storage and the state's bookkeeping. This section is
+what decides when runs happen and how much of that they do.
+
+**What triggers what.** Only local file events wait; everything else runs at once, as before:
+
+| Trigger | TwoWay | Mirror Upload | Mirror Download | Backup |
+|---|---|---|---|---|
+| Local file event (watcher) | after the wait | after the wait | — | — |
+| Interval (`RunOnInterval`), WorkManager / BGTask | at once | at once | at once | at once |
+| `folder.changed`, reconnect | at once | — | at once | — |
+| *Sync now*, `async-cli sync`, requests | at once | at once | at once | at once |
+| Settings change (a new worker) | at once | at once | at once | at once |
+
+**The wait after local changes** (`Folder.ChangeDelaySeconds` = quiet period, `ChangeMaxDelaySeconds` = cap; `ChangeWait` in
+`ASync.Client.Core/Sync`): each watcher event restarts the quiet period; the run is due at `min(last event + quiet, first event +
+cap)`, so a burst of saves is one run, and a folder whose files are saved without pause still runs every cap. A run, whatever
+started it, takes what waited (`TakeChanges`: the timer is cleared). The defaults (5 s, 10 min) are the old fixed 5-second debounce
+plus a cap; the old debounce had none, so a file written every few seconds (a log) never let the watcher's run start and only the
+interval synced it. The forms offer presets (Immediately = 5 s, 1, 5, 15, 30 min) with the cap derived from them
+(`ChangeDelayDefaults.CapFor`: four times the quiet period, at least 10 minutes, at most a day): one choice for people, two
+numbers for the API. The quiet period is at most a day.
+
+**Files still changing** (the per-file settle time with the same cap): an automatic run (any trigger but a person's) of a
+TwoWay or Mirror folder holds back files modified within `max(SyncOptions.SettleTime, quiet period)` (Android keeps its 10 s
+minimum), so a run the interval or another device started does not upload a file in the middle of a burst. Each held-back path's
+"first seen changing" is kept by the worker across runs (`SettleRules.FirstSeen`, in memory; after a restart the next run counts
+afresh), and the first watcher event the run waited for counts as the earliest sighting (`ChangedSince`): a path held back for
+the cap goes anyway, still changing, and counts afresh from then. The run's `SyncResult.SettlesAt` (the earliest a held-back path
+may go: settled, or capped) sets when the worker runs again. A person's run (*Sync now*) holds back only for the platform's
+`SettleTime` (Android's 10 s, nothing elsewhere), as before: it takes every file as it is now. Backups are never held back.
+
+**Status.** While changes wait, `FolderState.ChangesWaitingUntil` (control channel `FolderInfo.ChangesWaitingUntil`) says when
+they run: the apps show the pill *Changes waiting* and "Changes waiting: syncs in 25 min". Folders with a quiet period of 30 s or
+more also tell the server (`ReportChangesWaiting` over the hub, when the wait starts, moves by more than 30 s, or ends), so the
+web UI's device row shows it; the default 5-second wait is never reported (it would only flicker).
 
 ### Large files (resumable transfers)
 
@@ -1916,8 +1966,9 @@ download folders, since events were missed while the process was frozen), and th
   `async-reminders`). Every successful run replaces it (`AgentRuntime.FolderRan`); a new folder gets one from now. It
   needs neither the server nor push ("Working without push").
 
-**Settle time** (`SyncOptions.SettleTime`, Android 10 s; 0 elsewhere, unchanged): a path whose local file was modified
-less than that long ago is left out of the run entirely (no upload, download, delete or conflict; its sync state stays) and
+**Settle time** (`SyncOptions.SettleTime`, Android 10 s; 0 elsewhere; since task 26 an automatic run of a TwoWay or Mirror
+folder uses the folder's quiet period when that is longer, with the folder's cap, see "Change tracking and full rescans"): a
+path whose local file was modified less than that long ago is left out of the run entirely (no upload, download, delete or conflict; its sync state stays) and
 counted as `SyncResult.Unsettled`; the agent triggers the folder again after the settle time, and a worker runs it once
 more. That closes M4-1's open item: Android touches a new file's modification time again a few seconds after it was closed,
 which uploaded it twice (tested: `RunConditionsTests.AFileModifiedMomentsAgo_WaitsForTheNextRun_AndIsUploadedOnce`).
