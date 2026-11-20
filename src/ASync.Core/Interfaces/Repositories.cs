@@ -114,6 +114,22 @@ public interface IFolderRepository
     Task RemoveDeviceAsync(FolderDevice membership);
 }
 
+/// <summary>Plain folders' change logs (task 26, <see cref="FolderChange"/>).</summary>
+public interface IFolderChangeRepository
+{
+    /// <summary>Appends one entry per path (in this order), all with the same time and device.</summary>
+    Task AppendAsync(int folderId, IReadOnlyCollection<string> paths, Guid? deviceId, DateTime at);
+    /// <summary>Up to <paramref name="limit"/> entries of the folder after <paramref name="since"/>, oldest first.</summary>
+    Task<List<FolderChange>> SinceAsync(int folderId, long since, int limit);
+    /// <summary>The folder's newest sequence (0 when its log is empty); with <paramref name="before"/>, of entries made before then.</summary>
+    Task<long> LatestAsync(int folderId, DateTime? before = null);
+    /// <summary>
+    /// Removes entries older than <paramref name="olderThan"/>, and beyond the newest <paramref name="keepPerFolder"/> of each
+    /// folder, recording the highest removed sequence in <see cref="Folder.ChangesTrimmedThrough"/>. Returns how many folders lost entries.
+    /// </summary>
+    Task<int> TrimAsync(DateTime olderThan, int keepPerFolder);
+}
+
 public interface IUploadSessionRepository
 {
     /// <summary>The device's session for <paramref name="path"/> in the folder, with its parts.</summary>

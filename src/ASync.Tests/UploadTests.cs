@@ -86,6 +86,8 @@ public class UploadTests : IAsyncLifetime
     private readonly FakeUserRepository _users = new();
     private FakeUsageRepository _usage = null!;
     private UsageService _usageService = null!;
+    private readonly FakeFolderChangeRepository _changes = new();
+    private FolderChangeLog _changeLog = null!;
     private readonly MaintenanceClaims _claims;
 
     public UploadTests() => _claims = new MaintenanceClaims(_clock);
@@ -121,6 +123,7 @@ public class UploadTests : IAsyncLifetime
         _limits = new UploadLimits(config);
         _users.Add("me");
         _usage = new FakeUsageRepository(_folders);
+        _changeLog = new FolderChangeLog(_changes, TimeProvider.System);
         _usageService = new UsageService(_usage, _users, _folders, _services.GetRequiredService<IStorageBackendRepository>(), _cache, null!, _claims,
             new UsageOptions(config), new UsageScanSignal(), _clock, NullLogger<UsageService>.Instance);
         _uploads = new UploadService(_sessions, _limits, _cache, _clock, NullLogger<UploadService>.Instance, _usageService);
@@ -528,7 +531,7 @@ public class UploadTests : IAsyncLifetime
             http.Request.Body = body;
             http.Request.ContentLength = request.Content is null ? null : body.Length;
             foreach (var h in request.Headers) http.Request.Headers[h.Key] = h.Value.ToArray();
-            var controller = new FolderStorageController(t._folders, t._cache, null!, t._uploads, t._limits, t._usageService)
+            var controller = new FolderStorageController(t._folders, t._cache, null!, t._uploads, t._limits, t._usageService, t._changeLog)
             {
                 ControllerContext = new ControllerContext { HttpContext = http },
             };

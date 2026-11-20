@@ -199,6 +199,19 @@ public record DeviceFolderCreatedDto(DeviceFolderDto Folder, string? RecoveryKey
 public record DeviceJoinFolderRequest(string LocalPath, MirrorDirection? Direction = null, long? ExpectedRevision = null, MediaSelectionDto? Media = null,
     CollectionSelectionDto? Collections = null);
 
+// ── Change feed of plain folders (task 26; GET /api/sync/folders/{id}/changes?since=N) ──
+
+/// <summary>One path the storage gateway changed. <paramref name="DeviceId"/>: whose request it was (null: the server, e.g. a web restore).</summary>
+public record FolderChangeDto(long Seq, string Path, Guid? DeviceId);
+
+/// <summary>
+/// A page of a plain folder's change log. <paramref name="Next"/>: where the next page starts (ask again with it while
+/// <paramref name="Complete"/> is false). <paramref name="Cursor"/>: what the device keeps once it has handled every page (it may
+/// be a little behind <paramref name="Next"/>: recent entries are read again next time). <paramref name="Trimmed"/>: the log no
+/// longer reaches back to the cursor asked for: list the storage in full.
+/// </summary>
+public record FolderChangesDto(long Next, long Cursor, bool Complete, bool Trimmed, List<FolderChangeDto> Changes);
+
 // ── Storage gateway ───────────────────────────────────────────────────────────
 
 /// <summary>An entry of a folder's storage, as the gateway returns it.</summary>

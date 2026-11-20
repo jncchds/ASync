@@ -55,6 +55,13 @@ public sealed record SyncOptions
     /// walked, as before.
     /// </summary>
     public LocalChanges? LocalChanges { get; init; }
+    /// <summary>
+    /// What changed on the storage since the last run (task 26, the server's change log): with a usable cursor, only those paths are
+    /// looked at on the storage. Null: the storage is listed in full every run, as before.
+    /// </summary>
+    public IRemoteChangeFeed? RemoteFeed { get; init; }
+    /// <summary>List the storage in full this run, for this reason (the full-rescan schedule), whatever the change log says.</summary>
+    public string? RemoteFullReason { get; init; }
 }
 
 public sealed record SyncResult
@@ -74,6 +81,8 @@ public sealed record SyncResult
     public DateTimeOffset? SettlesAt { get; set; }
     /// <summary>How the local side was scanned: "full scan (reason)" or "N changed paths" (for the run's log line).</summary>
     public string Scan { get; set; } = "full scan";
+    /// <summary>How the remote side was read: "full listing (reason)" or "N remote changes" (task 26).</summary>
+    public string RemoteScan { get; set; } = "full listing";
     /// <summary>Paths the run could not finish (still changing, failed, not readable): the next incremental run looks at them again.</summary>
     public HashSet<string> Retry { get; } = new(StringComparer.Ordinal);
     /// <summary>True when this run changed the storage (other devices should sync).</summary>
@@ -204,10 +213,37 @@ public sealed class FolderSyncer
             local = ScanLocal();
             result.Scan = $"full scan ({full})";
         }
-        var remote = new Dictionary<string, RemoteFile>(StringComparer.Ordinal);
-        await foreach (var e in _remote.ListFilesAsync(ct))
-            if (!e.IsDirectory && !_excludes.Matches(e.Path))
-                remote[e.Path] = new RemoteFile(e.Size, e.LastModified?.ToUnixTimeMilliseconds() ?? 0);
+        // The remote side (task 26): the server's change log since the cursor, or a full listing.
+        var excludesKey = string.Join('\n', _options.Excludes);
+        var remoteFull = _options.RemoteFullReason;
+        RemoteChanges? feed = null;
+        if (_options.RemoteFeed is { } source)
+        {
+            var usable = remoteFull is null && hadState && _state.RemoteCursor is not null && _state.RemoteExcludes == excludesKey;
+            feed = await source.ReadAsync(usable ? _state.RemoteCursor : null, ct);
+            remoteFull ??= !hadState ? "no sync state yet"
+                : _state.RemoteCursor is not null && _state.RemoteExcludes != excludesKey ? "the excludes changed"
+                : feed.FullReason;
+        }
+        else remoteFull ??= "no change log";
+        Dictionary<string, RemoteFile> remote;
+        if (remoteFull is null)
+        {
+            var changed = new HashSet<string>(feed!.Paths!, StringComparer.Ordinal);
+            changed.UnionWith(_state.RemoteRetry);
+            remote = await ScanRemoteChangedAsync(changed, ct);
+            result.RemoteScan = $"{changed.Count} remote change{(changed.Count == 1 ? "" : "s")}";
+        }
+        else
+        {
+            remote = new Dictionary<string, RemoteFile>(StringComparer.Ordinal);
+            await foreach (var e in _remote.ListFilesAsync(ct))
+                if (!e.IsDirectory && !_excludes.Matches(e.Path))
+                    remote[e.Path] = new RemoteFile(e.Size, e.LastModified?.ToUnixTimeMilliseconds() ?? 0);
+            result.RemoteScan = $"full listing ({remoteFull})";
+        }
+        _remoteCursor = feed?.Cursor;
+        _remoteExcludes = excludesKey;
 
         var plan = new List<(string Path, Action Action)>();
         foreach (var path in local.Keys.Union(remote.Keys).Union(_state.Files.Keys).Distinct().Order(StringComparer.Ordinal))
@@ -277,9 +313,63 @@ public sealed class FolderSyncer
         if (refusedByQuota > 0) result.Errors.Add($"{refusedByQuota} file(s) not uploaded: over the storage quota.");
 
         _state.LastSync = DateTimeOffset.UtcNow;
+        var cursorMoved = false;
+        if (_options.RemoteFeed is not null)
+        {
+            // Where the log was before this run looked: what changed during the run is read again next time. What the run could
+            // not finish is looked at on the storage again next run, whatever the log says then (task 26).
+            cursorMoved = _state.RemoteCursor != _remoteCursor || _state.RemoteExcludes != _remoteExcludes;
+            _state.RemoteCursor = _remoteCursor;
+            _state.RemoteExcludes = _remoteExcludes;
+            _state.RemoteRetry = [.. result.Retry.Order(StringComparer.Ordinal)];
+        }
         await CleanUpIfDueAsync(ct);
+        var dirty = _state.Dirty;
         SaveState();
+        if (cursorMoved && !dirty) _state.SaveCursor(_statePath); // a few bytes, not the whole state
         return result;
+    }
+
+    private long? _remoteCursor;
+    private string? _remoteExcludes;
+
+    /// <summary>
+    /// The remote side from the change log (task 26): every path the sync state knows, as it was after the last sync, with the
+    /// changed paths looked at on the storage: a file stat'ed, a directory (moved as a whole) listed, a missing one gone with what
+    /// was under it.
+    /// </summary>
+    private async Task<Dictionary<string, RemoteFile>> ScanRemoteChangedAsync(HashSet<string> changed, CancellationToken ct)
+    {
+        var remote = new Dictionary<string, RemoteFile>(_state.Files.Count, StringComparer.Ordinal);
+        foreach (var (path, b) in _state.Files) remote[path] = new RemoteFile(b.RemoteSize, b.RemoteModified);
+        var known = _state.Files.Keys.Order(StringComparer.Ordinal).ToArray();
+        IEnumerable<string> KnownUnder(string dir)
+        {
+            var prefix = dir + "/";
+            var i = Array.BinarySearch(known, prefix, StringComparer.Ordinal);
+            if (i < 0) i = ~i;
+            for (; i < known.Length && known[i].StartsWith(prefix, StringComparison.Ordinal); i++) yield return known[i];
+        }
+        foreach (var path in changed.Order(StringComparer.Ordinal))
+        {
+            if (path.Length == 0 || PlainStore.IsMeta(path) || _excludes.Matches(path)) continue;
+            var e = await _remote.Backend.StatAsync(path, ct);
+            if (e is null || e.IsDirectory)
+            {
+                remote.Remove(path);
+                foreach (var k in KnownUnder(path)) remote.Remove(k);
+            }
+            if (e is null) continue;
+            if (!e.IsDirectory)
+            {
+                remote[path] = new RemoteFile(e.Size, e.LastModified?.ToUnixTimeMilliseconds() ?? 0);
+                continue;
+            }
+            await foreach (var f in _remote.Backend.ListAsync(path, recursive: true, ct))
+                if (!f.IsDirectory && !PlainStore.IsMeta(f.Path) && !_excludes.Matches(f.Path))
+                    remote[f.Path] = new RemoteFile(f.Size, f.LastModified?.ToUnixTimeMilliseconds() ?? 0);
+        }
+        return remote;
     }
 
     /// <summary>

@@ -46,7 +46,7 @@ HashSet<string> Edit()
         var relative = $"d{i / 10000:000}/e{i / 100 % 100:00}/f{i:000000}.txt";
         var full = Path.Combine(src, relative);
         File.WriteAllText(full, $"file {i} edit {editRound}\n");
-        File.SetLastWriteTimeUtc(full, new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(editRound * 1000 + k));
+        File.SetLastWriteTimeUtc(full, DateTime.UtcNow.AddMinutes(-10).AddMilliseconds(k)); // a new time every run (and past any settle time)
         paths.Add(relative);
     }
     return paths;
@@ -131,6 +131,26 @@ if (mode is "sync" or "both")
             var r = await new FolderSyncer(backend, src, state, options with { LocalChanges = new LocalChanges(new HashSet<string>(), new HashSet<string>(), null) }).RunAsync();
             return $"{r.Uploaded} up, {r.Scan}";
         });
+        // Step 4: the remote side from a change log (here: nothing changed elsewhere) instead of a listing of 100,000 entries.
+        var feed = new QuietFeed();
+        await new FolderSyncer(backend, src, state, options with { RemoteFeed = feed }).RunAsync(); // takes a cursor (full listing)
+        await Measure($"sync {changed} edited, incremental + change log", async () =>
+        {
+            var paths = Edit();
+            var r = await new FolderSyncer(backend, src, state, options with
+            {
+                LocalChanges = new LocalChanges(paths, new HashSet<string>(), null), RemoteFeed = feed,
+            }).RunAsync();
+            return $"{r.Uploaded} up, {r.Scan}; {r.RemoteScan}";
+        });
+        await Measure("sync no-change, incremental + change log", async () =>
+        {
+            var r = await new FolderSyncer(backend, src, state, options with
+            {
+                LocalChanges = new LocalChanges(new HashSet<string>(), new HashSet<string>(), null), RemoteFeed = feed,
+            }).RunAsync();
+            return $"{r.Uploaded} up, {r.Scan}; {r.RemoteScan}";
+        });
     }
 }
 
@@ -177,4 +197,11 @@ if (mode is "backup" or "both")
             return $"{r.Snapshot.Stats.FilesChanged} changed, {job.Scan}";
         });
     }
+}
+
+/// <summary>A change log in which nothing ever happens elsewhere (the bench's own uploads are known to its state).</summary>
+sealed class QuietFeed : IRemoteChangeFeed
+{
+    public Task<RemoteChanges> ReadAsync(long? since, CancellationToken ct) =>
+        Task.FromResult(since is null ? RemoteChanges.Full("no change-log cursor yet", 1) : new RemoteChanges(new HashSet<string>(), 1, null));
 }

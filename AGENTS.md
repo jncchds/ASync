@@ -234,6 +234,9 @@ Implemented (task 26, the wait after local changes; migration `FolderChangeDelay
   their hub connection (`DeviceConnections`) and added to `FolderDeviceDto.ChangesWaitingUntil` by `GET /api/folders`.
 - **Folder.FullRescanHours** (migration `FolderFullRescan`, default 12, 1–720): how often devices that follow recorded changes
   scan the folder in full anyway (see "Change tracking and full rescans"). In the same three DTOs.
+- **FolderChange** (migration `FolderChangeLog`; `src/ASync.Core/Models/FolderChange.cs`): Id (bigint identity: the sequence),
+  FolderId (cascade with the folder), Path (up to 1000), DeviceId (null = the server), At; indexes (FolderId, Id) and At. Plus
+  **Folder.ChangesTrimmedThrough** (bigint, the highest sequence trimmed from the folder's log).
 
 ## Auth
 
@@ -666,7 +669,8 @@ control channel"):
 - A folder busy on another device (a lease, or a repository locked by a prune) is retried after 30 seconds.
 - After a run of an end-to-end Backup folder it does the prune or check the server hands it (see "Prune and
   check").
-- Results go to `POST .../report`. Runs that changed the storage call `POST .../changed`.
+- Results go to `POST .../report`. Runs that changed the storage call `POST .../changed`. Mirror and TwoWay runs read what
+  changed on the storage from `GET .../changes` (task 26) instead of listing it, see "Change tracking and full rescans".
 - **State for status displays:** `Connection` (Connecting, Connected, Reconnecting, Offline, Revoked) and
   `Folders` (each worker's activity, progress, last result and time, next run), with `StatusChanged` and
   `FolderStatusChanged` events. `RequestRunAsync(folder)` asks a worker for a run that starts after the request and
@@ -778,6 +782,35 @@ may go: settled, or capped) sets when the worker runs again. A person's run (*Sy
   device's newest snapshot (one forgotten or made elsewhere meanwhile means a full walk), and a run with unreadable files makes the
   next one full (they are not in the set any more). Stats of a reused directory are not counted ("N unchanged" counts only what was
   looked at).
+
+**Remote changes from the server's change log** (`FolderChangeLog`, `FolderChange`, `GET /api/sync/folders/{id}/changes`;
+client `GatewayChangeFeed`, `FolderSyncer.ScanRemoteChangedAsync`):
+- **What is logged:** the storage gateway appends every path it writes, deletes or moves for a Mirror or TwoWay folder: a device's
+  `PUT file`, `DELETE file`, `move` (both names), a completed part upload (its path), and the web UI's restores (device id null).
+  Everything devices write goes through the gateway, so their syncs, the Android documents provider and the iOS File Provider are
+  all in it without the devices reporting anything; `POST .../changed` stays the "wake the others" signal it was. The folder's
+  `.async/` is not logged (a move from `.async/incoming` into place logs the place; versions and trash moves log the file).
+  Backup folders have no log. Each entry has a sequence (`FolderChange.Id`, growing over all folders, hence within each), the
+  path, the device and the time.
+- **Reading it:** `GET .../changes?since=N&limit=M` (devices only, members only; at most 1,000 per page) answers
+  `FolderChangesDto {next, cursor, complete, trimmed, changes}`; without `since`, only where the log is. Sequences are handed out at
+  insert and committed a moment later, so concurrent writes can become visible out of order: the `cursor` a device keeps stays
+  behind entries younger than 10 s (`FolderChangeLog.Settle`), which it reads again next time, so one that committed late is never
+  skipped. A cursor older than the trimmed part, or newer than the log (a restored database), answers `trimmed`.
+- **Kept:** 30 days and at most 100,000 entries per folder, trimmed hourly by `CleanupService` in one SQL statement that also sets
+  `Folder.ChangesTrimmedThrough` (the highest sequence removed).
+- **The device** keeps its cursor in `SyncState.RemoteCursor` (with the excludes it was taken under, `RemoteExcludes`). A run with a
+  usable cursor takes every path the state knows as the storage had it after the last sync and stats only the logged paths (a
+  directory that was moved as a whole is listed; a missing path takes what was under it), plus `SyncState.RemoteRetry`: what the
+  previous run could not finish (still settling, failed), whose remote side is looked at again whatever the log says (else a
+  remote change to a file that was busy here would be lost). It lists in full when: no cursor (a new device, a new state), the log
+  was trimmed past it, the excludes changed, more than 5,000 paths changed (`GatewayChangeFeed.Limit`), the full-rescan schedule
+  is due, or the server has no log or cannot answer. The cursor kept is where the log was **before** the run looked, so the run's
+  own uploads are read once more next time (a stat each). When only the cursor moved, it is written to `sync-state.json.cursor` (a
+  few bytes) rather than the whole state; the next full save folds it in. The run's log line says how: `[3 changed paths; 0 remote
+  changes]`, `[full scan (…); full listing (…)]`.
+- **Not seen without a full listing:** writes made straight to the storage, outside ASync (another WebDAV client, `aws s3 cp`,
+  editing the server's directory): the full-rescan schedule (twice a day by default) and every run without a cursor pick them up.
 
 **The full-rescan schedule** (`Folder.FullRescanHours`, default 12, 1 h–30 days; `FullRescanSchedule`): a folder that follows
 recorded changes is still walked in full (and, with the change feed, its storage listed in full) every `FullRescanHours` after the

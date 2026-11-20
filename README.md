@@ -68,6 +68,10 @@ users, each with their own storage: local disk, S3-compatible, WebDAV/Nextcloud,
     the first run after the agent starts, after the watcher missed changes (too many at once), and on the occasional full rescan.
     On Linux every directory needs one inotify watch: with very large folders raise `fs.inotify.max_user_watches` (the log
     says so; until then the folder is read in full on each run, as before).
+  - **The storage is not listed every time either:** the server keeps a log of what changed in each two-way and mirror folder
+    (whatever its devices, the web UI, the Android Files app and the iPhone's Files app changed), and devices ask it what is new
+    instead of listing the whole storage. Files put on the storage directly, outside ASync (another WebDAV or S3 client), are
+    seen at the next full rescan.
   - **Read the whole folder** (every folder of files; default *twice a day*, from every 6 hours to once a week): how often a
     device reads through the whole folder anyway, to catch what watching cannot see. Phones do it only on Wi-Fi and the charger;
     until then their runs look only at what changed.

@@ -39,6 +39,9 @@ public sealed record FolderRunResult(int FolderId, string Name, bool Ok, string 
 
     /// <summary>A backup run: the snapshot it ended with (new, or the unchanged newest one).</summary>
     public string? Snapshot { get; init; }
+
+    /// <summary>How the storage was read ("full listing (why)", "N remote changes"; task 26), for the log line.</summary>
+    public string? RemoteScan { get; init; }
 }
 
 /// <summary>
@@ -406,7 +409,7 @@ public sealed class SyncAgent : IAsyncDisposable
     /// <param name="allowMassDeletion">For this run, instead of <see cref="AllowMassDeletion"/>.</param>
     /// <param name="settle">How files still changing are held back (the worker's quiet period and cap); null: <see cref="SettleTime"/>, no cap.</param>
     public async Task<FolderRunResult> RunFolderAsync(DeviceFolderDto folder, CancellationToken ct = default, RunProgress? progress = null,
-        bool? allowMassDeletion = null, SettleRules? settle = null, LocalChanges? changes = null)
+        bool? allowMassDeletion = null, SettleRules? settle = null, LocalChanges? changes = null, string? fullRescan = null)
     {
         if (folder.Paused) return new FolderRunResult(folder.FolderId, folder.Name, true, "Paused", Skipped: true);
         var identity = _api.Identity ?? throw new InvalidOperationException("Not enrolled.");
@@ -487,6 +490,8 @@ public sealed class SyncAgent : IAsyncDisposable
                             ChangedSince = settle?.ChangedSince,
                             Clock = Clock,
                             LocalChanges = changes,
+                            RemoteFeed = new GatewayChangeFeed(_api, folder.FolderId),
+                            RemoteFullReason = fullRescan,
                             SamePlace = previous => LocalTrees.SamePlace(previous, folder.LocalPath),
                         }) { Progress = progress }.RunAsync(ct);
                     }
@@ -511,7 +516,7 @@ public sealed class SyncAgent : IAsyncDisposable
                               (result.Unsettled > 0 ? $", {result.Unsettled} still changing (next run)" : "") +
                               (result.Errors.Count > 0 ? $", {result.Errors.Count} errors: {result.Errors[0]}" : "");
                 outcome = new FolderRunResult(folder.FolderId, folder.Name, result.Ok, message, Conflicts: result.Conflicts, Unsettled: result.Unsettled,
-                    SettlesAt: result.SettlesAt) { Scan = result.Scan, Retry = result.Retry };
+                    SettlesAt: result.SettlesAt) { Scan = result.Scan, Retry = result.Retry, RemoteScan = result.RemoteScan };
                 report = new SyncReportRequest(result.Ok, message, result.Uploaded, result.Downloaded, result.DeletedLocal + result.DeletedRemote,
                     result.Conflicts, result.Bytes);
             }
@@ -1134,7 +1139,8 @@ public sealed class SyncAgent : IAsyncDisposable
                         manual ? null : _changes.Cap, _firstSeenChanging, changedSince);
 
                     // What changed locally since the last run (task 26): null without a watcher, a full scan when it cannot be trusted.
-                    var localChanges = Folder.Paused ? null : _watcher?.Changes.Take(FullRescanDue()) is { } taken ? taken with { BaseSnapshot = _lastSnapshot } : null;
+                    var fullDue = Folder.Paused ? null : FullRescanDue();
+                    var localChanges = Folder.Paused ? null : _watcher?.Changes.Take(fullDue) is { } taken ? taken with { BaseSnapshot = _lastSnapshot } : null;
 
                     FolderRunResult result;
                     var progress = new RunProgress();
@@ -1146,7 +1152,7 @@ public sealed class SyncAgent : IAsyncDisposable
                     _run = run;
                     try
                     {
-                        result = await _agent.RunFolderAsync(Folder, run.Token, progress, allowMassDeletion ? true : null, settle, localChanges);
+                        result = await _agent.RunFolderAsync(Folder, run.Token, progress, allowMassDeletion ? true : null, settle, localChanges, fullDue);
                     }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested && run.IsCancellationRequested)
                     {
@@ -1176,12 +1182,13 @@ public sealed class SyncAgent : IAsyncDisposable
                         if (result.NextFull is { } nextFull) _watcher.Changes.Lost(nextFull);
                     }
                     if (result.Snapshot is { } snapshotId) _lastSnapshot = snapshotId;
-                    if (result.Retry is not null && result.Scan?.StartsWith("full scan", StringComparison.Ordinal) == true) ScheduleFullRescan();
+                    // The schedule counts from the first run that went through, then from each due full rescan that did.
+                    if (result.Retry is not null && (_fullRescans is null || fullDue is not null)) ScheduleFullRescan();
                     _lastResult = result;
                     _lastRunAt = DateTimeOffset.UtcNow;
                     foreach (var r in requests) r.TrySetResult(result);
                     _agent.RaiseFolder(Folder.FolderId);
-                    var scan = result.Scan is { } how ? $" [{how}]" : "";
+                    var scan = result.Scan is { } how ? $" [{how}{(result.RemoteScan is { } remoteHow ? $"; {remoteHow}" : "")}]" : "";
                     if (result.Skipped) _logger.LogDebug("\"{Name}\": {Message}.", Folder.Name, result.Message);
                     else if (result.Ok) _logger.LogInformation("\"{Name}\": {Message}.{Scan}", Folder.Name, result.Message, scan);
                     else _logger.LogWarning("\"{Name}\" failed: {Message}{Scan}", Folder.Name, result.Message, scan);

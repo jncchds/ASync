@@ -39,6 +39,25 @@ public sealed class SyncState
         set { if (field != value) { field = value; Dirty = true; } }
     }
 
+    /// <summary>
+    /// Where the server's change log was when the storage last matched this state (task 26): the next run asks for the changes
+    /// after it instead of listing the storage. It does not make the state dirty by itself: when only the cursor moved, it is
+    /// written to a small file beside the state (<see cref="SaveCursor"/>), which the next full save folds in.
+    /// </summary>
+    public long? RemoteCursor { get; set; }
+
+    /// <summary>The excludes the remote side was last listed in full with: other excludes mean a full listing (paths that were left out).</summary>
+    public string? RemoteExcludes { get; set; }
+
+    /// <summary>
+    /// Paths the last run could not finish (task 26): their remote side is looked at again by the next run, whatever the change log says.
+    /// </summary>
+    public List<string> RemoteRetry
+    {
+        get;
+        set { if (!field.SequenceEqual(value)) { field = value; Dirty = true; } }
+    } = [];
+
     /// <summary>Something changed since the state was loaded or last saved.</summary>
     [JsonIgnore]
     public bool Dirty { get; private set; }
@@ -67,8 +86,26 @@ public sealed class SyncState
         if (!File.Exists(path)) return new SyncState();
         var state = JsonSerializer.Deserialize<SyncState>(File.ReadAllBytes(path), Json) ?? new SyncState();
         state.Files = new Dictionary<string, BaseEntry>(state.Files, StringComparer.Ordinal);
+        // A cursor that moved on after the state was last written (only written beside it when nothing else changed).
+        try
+        {
+            if (File.Exists(path + CursorSuffix) && JsonSerializer.Deserialize<CursorFile>(File.ReadAllBytes(path + CursorSuffix), Json) is { } c)
+                (state.RemoteCursor, state.RemoteExcludes) = (c.Cursor, c.Excludes);
+        }
+        catch (JsonException) { /* a torn write: the state's own cursor is older, and only means changes are looked at twice */ }
         state.Dirty = false;
         return state;
+    }
+
+    private const string CursorSuffix = ".cursor";
+    private sealed record CursorFile(long? Cursor, string? Excludes);
+
+    /// <summary>Writes only the cursor (a few bytes), for a run that moved it on and changed nothing else.</summary>
+    public void SaveCursor(string path)
+    {
+        var temp = path + CursorSuffix + ".tmp";
+        File.WriteAllBytes(temp, JsonSerializer.SerializeToUtf8Bytes(new CursorFile(RemoteCursor, RemoteExcludes), Json));
+        File.Move(temp, path + CursorSuffix, overwrite: true);
     }
 
     public void Save(string path)
@@ -77,6 +114,7 @@ public sealed class SyncState
         if (Path.GetDirectoryName(path) is { Length: > 0 } dir) Directory.CreateDirectory(dir);
         File.WriteAllBytes(temp, JsonSerializer.SerializeToUtf8Bytes(this, Json));
         File.Move(temp, path, overwrite: true);
+        File.Delete(path + CursorSuffix); // folded in
         Dirty = false;
         Saves++;
     }

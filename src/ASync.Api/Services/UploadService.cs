@@ -153,7 +153,8 @@ public class UploadService(IUploadSessionRepository sessions, UploadLimits limit
     }
 
     /// <summary>Puts the file in place (atomically) once every part is there, and forgets the session.</summary>
-    public async Task CompleteAsync(Folder folder, Guid deviceId, IStorageBackend backend, Guid id, CancellationToken ct)
+    /// <summary>Puts the uploaded file in place; returns its path (for the change log).</summary>
+    public async Task<string> CompleteAsync(Folder folder, Guid deviceId, IStorageBackend backend, Guid id, CancellationToken ct)
     {
         var session = await OwnedAsync(folder, deviceId, id);
         var parts = session.Parts.OrderBy(p => p.Number).ToList();
@@ -173,6 +174,7 @@ public class UploadService(IUploadSessionRepository sessions, UploadLimits limit
         }
         await sessions.DeleteAsync(session.Id);
         logger.LogInformation("Upload {Id} completed: {Path} ({Size} bytes)", session.Id, session.Path, session.Size);
+        return session.Path;
     }
 
     public async Task AbortAsync(Folder folder, Guid deviceId, IStorageBackend backend, Guid id)

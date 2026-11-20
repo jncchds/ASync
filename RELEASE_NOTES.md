@@ -20,6 +20,12 @@
   or a cold disk). The folder is still read in full when changes may have been missed (the first run after a start, an overflow
   of the watcher, too many changes at once), with the reason in the log. A file that cannot be looked at is never taken for
   deleted. On Linux, very large folders may need a higher `fs.inotify.max_user_watches`; the log says so.
+- perf(sync): **the storage is not listed on every run.** The server keeps a log of what changed in each two-way and mirror
+  folder (every change made through ASync: devices, the web UI's restores, the Android and iPhone Files apps), and devices ask
+  it what is new since their last run instead of listing the whole storage (on WebDAV one request per directory). On 100,000
+  files with 10 edited: 0.9 s → 0.4 s with the server in the same machine, far more over a network. The log is kept for a month
+  (at most 100,000 entries per folder); a device that missed more than that lists in full. Files put on the storage directly,
+  outside ASync, are seen at the next full rescan.
 - feat(sync): **an occasional full rescan.** A new folder setting, *Read the whole folder* (twice a day by default), makes
   devices read through the whole folder now and then although they follow what changed, so a change watching missed shows
   within hours. Devices spread it out so they do not all do it at once, and phones do it only on Wi-Fi and the charger.

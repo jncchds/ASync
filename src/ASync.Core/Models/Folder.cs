@@ -51,6 +51,11 @@ public class Folder
     /// feed, list the whole storage) this often, with a random spread, to catch what change tracking cannot see.
     /// </summary>
     public int FullRescanHours { get; set; } = ChangeDelayDefaults.FullRescanHours;
+    /// <summary>
+    /// The highest change-log sequence trimmed from this folder's log (<see cref="FolderChange"/>; 0 = nothing trimmed): a device
+    /// asking for changes since an older one must list the storage in full.
+    /// </summary>
+    public long ChangesTrimmedThrough { get; set; }
     /// <summary>The last prune: by the server (Transport) or reported by a device.</summary>
     public DateTime? LastPruneAt { get; set; }
     public bool? LastPruneOk { get; set; }

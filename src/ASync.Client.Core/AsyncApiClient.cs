@@ -205,6 +205,12 @@ public sealed class AsyncApiClient : IDisposable
     public Task ReportCollectionsAsync(ReportCollectionsRequest report, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Put, "api/sync/collections", report, ct);
 
+    /// <summary>A plain folder's change log after <paramref name="since"/> (task 26); null: only where it is now.</summary>
+    public Task<FolderChangesDto> GetChangesAsync(int folderId, long? since, CancellationToken ct = default) =>
+        SendAsync<FolderChangesDto>(HttpMethod.Get,
+            $"api/sync/folders/{folderId}/changes{(since is long s ? $"?since={s.ToString(System.Globalization.CultureInfo.InvariantCulture)}" : "")}",
+            null, true, ct);
+
     public Task NotifyChangedAsync(int folderId, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Post, $"api/sync/folders/{folderId}/changed", null, ct);
 

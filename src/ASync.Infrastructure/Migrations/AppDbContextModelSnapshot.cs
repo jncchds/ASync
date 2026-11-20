@@ -354,6 +354,9 @@ namespace ASync.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(600);
 
+                    b.Property<long>("ChangesTrimmedThrough")
+                        .HasColumnType("bigint");
+
                     b.Property<int>("CheckIntervalDays")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -482,6 +485,37 @@ namespace ASync.Infrastructure.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("Folders");
+                });
+
+            modelBuilder.Entity("ASync.Core.Models.FolderChange", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("FolderId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("At");
+
+                    b.HasIndex("FolderId", "Id");
+
+                    b.ToTable("FolderChanges");
                 });
 
             modelBuilder.Entity("ASync.Core.Models.FolderDevice", b =>
@@ -1034,6 +1068,15 @@ namespace ASync.Infrastructure.Migrations
                     b.Navigation("StorageBackend");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ASync.Core.Models.FolderChange", b =>
+                {
+                    b.HasOne("ASync.Core.Models.Folder", null)
+                        .WithMany()
+                        .HasForeignKey("FolderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ASync.Core.Models.FolderDevice", b =>
