@@ -120,8 +120,10 @@ Commit in sensible steps, push the branch `task/26-incremental-sync` to origin, 
 ## When you finish (or stop blocked)
 Report to the orchestrator: what you built per step, decisions taken (defaults, bounds, what you left out and why), the
 measurements, test results, migrations added, open items. Send it with SendMessage to the orchestrator session: name
-"ASync iOS orchestrator", id 31c6ab0b, session id 31c6ab0b-1102-4fde-8cf1-be1e72862775 (if the session that started
-you is a different orchestrator, report to the `from` address of its messages instead). Several sessions are named
-"ASync", so find its row in ListAgents by the ref/id and send to that exact "name [ref]". Then check
-`claude agents --json`; only if the orchestrator is not running, resume it with
-`~/.claude/skills/start-code-session/start.sh /mnt/git/ASync --resume 31c6ab0b-1102-4fde-8cf1-be1e72862775 "Report from task 26: <report>"`.
+"ASync", id 0fda13f6, session id 0fda13f6-8564-4569-abad-a58b79f6f676 (a background session whose cwd is
+`/mnt/git/ASync/.claude/worktrees/sync-scan-brief`; or reply to the `from` address of its messages). Many sessions are
+named "ASync", so find its row in ListAgents by its ref/id and send to that exact "name [ref]". Then check
+`claude agents --json | jq '.[] | select(.id=="0fda13f6")'`; only if the orchestrator is not running (missing, or not
+working/idle/blocked), resume it with
+`~/.claude/skills/start-code-session/start.sh /mnt/git/ASync --resume 0fda13f6-8564-4569-abad-a58b79f6f676 "Report from task 26: <report>"`.
+Resuming a running session starts a copy, so check first.
