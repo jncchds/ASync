@@ -62,7 +62,7 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SyncNowCommand), nameof(TogglePauseCommand), nameof(ChooseFolderCommand), nameof(ChooseSystemFolderCommand),
         nameof(SwitchToRealPathCommand), nameof(SaveConditionsCommand), nameof(ChoosePhotosCommand), nameof(RestorePhotosCommand),
-        nameof(ChooseCollectionsCommand))]
+        nameof(ChooseCollectionsCommand), nameof(ConfirmLeaveCommand))]
     public partial bool Working { get; private set; }
 
     public string PauseText => Paused ? "Resume" : "Pause";
@@ -374,6 +374,8 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         OnPropertyChanged(nameof(RestoreHint));
         RestorePhotosCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ChooseFolderText));
+        OnPropertyChanged(nameof(LeaveQuestion));
+        OnPropertyChanged(nameof(LeaveHint));
         RefreshStorage();
         SyncNowCommand.NotifyCanExecuteChanged();
         OpenFolderCommand.NotifyCanExecuteChanged();
@@ -426,6 +428,39 @@ public sealed partial class FolderViewModel(ShellViewModel shell, int id) : Obse
         Working = true;
         try { await shell.RunAsync((s, ct) => s.SetPausedAsync(Id, !Paused, ct)!); }
         finally { Working = false; }
+    }
+
+    // ── Stop syncing here (leave the folder) ──────────────────────────────────
+
+    /// <summary>The question before this device leaves the folder is shown.</summary>
+    [ObservableProperty] public partial bool ConfirmingLeave { get; private set; }
+
+    public string LeaveQuestion => $"Stop syncing \"{Name}\" on this {shell.Platform.DeviceNoun}?";
+
+    public string LeaveHint => IsPhotos || IsCollection
+        ? $"Nothing on this {shell.Platform.DeviceNoun} is deleted, and the backups on the server stay. To back it up here again, use Add to a folder."
+        : "Its files stay, here and on the server; they just stop syncing. To sync it here again, use Add to a folder.";
+
+    [RelayCommand]
+    private void AskLeave() => ConfirmingLeave = true;
+
+    [RelayCommand]
+    private void CancelLeave() => ConfirmingLeave = false;
+
+    /// <summary>The agent detaches this device (a folder already gone on the server counts as left); the card goes with the next status.</summary>
+    [RelayCommand(CanExecute = nameof(CanChange))]
+    private async Task ConfirmLeave()
+    {
+        var previous = _folder.LocalPath;
+        Working = true;
+        try
+        {
+            if (!await shell.RunAsync((s, ct) => s.LeaveFolderAsync(Id, ct)!)) return;
+        }
+        finally { Working = false; }
+        ConfirmingLeave = false;
+        // A document tree's permission is not needed any more (the in-app picker's paths have none).
+        if (previous.StartsWith("content://", StringComparison.Ordinal)) shell.Platform.Storage?.ReleaseTree(previous);
     }
 
     [RelayCommand(CanExecute = nameof(HasLocalPath))]

@@ -200,6 +200,12 @@ The folder follows the same rules as in the web UI (no folder inside another on 
 use) and appears there at once, marked *added from <device>*; retention, excludes and the other settings, and deleting
 it, are done in the web UI as usual.
 
+**Stopping a folder on one device** works from either side. In the app, each folder card has *Stop syncing here…*: after
+you confirm, this device leaves the folder. Nothing is deleted: the files stay on the device and on the server, and the
+folder carries on for your other devices. In the web UI, *Folders* → the folder's device list → *Remove* does the same. If
+the folder was already deleted or detached on the server, the app just drops it without an error. *Stop syncing here…* works
+even with *Adds folders* off. To sync the folder on that device again, use *Add to a folder…*.
+
 <p>
   <img src="docs/screenshots/light-17-devices-adds-folders.png" alt="The Devices page with the Adds folders switch" width="64%">
   <img src="docs/screenshots/phone-17-devices-adds-folders.png" alt="The Devices page on a phone-sized screen, dark theme" width="28%">

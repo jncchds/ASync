@@ -96,12 +96,15 @@ public class SyncController : ControllerBase
         return FolderService.ToDeviceDto(folder, folder.Devices.Single(d => d.DeviceId == device.Id));
     }
 
-    /// <summary>Detaches this device from a folder (the folder and its data stay).</summary>
+    /// <summary>
+    /// Detaches this device from a folder (the folder and its data stay). Not behind <c>MayAddFolders</c>: leaving only takes
+    /// this device's own access away, which it could already stop by pausing the folder.
+    /// </summary>
     [HttpPost("{id:int}/leave")]
     public async Task<IActionResult> Leave(int id)
     {
-        var device = await _devices.GetAsync(DeviceId);
-        if (FolderService.DeviceMayAddFolders(device) is { } refused) return StatusCode(StatusCodes.Status403Forbidden, new { message = refused });
+        if (await _devices.GetAsync(DeviceId) is not { RevokedAt: null })
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "This device was removed from the account." });
         if (await MembershipAsync(id) is null) return NotFound(new { message = "This device is not part of that folder." });
         var folder = await _folders.GetAsync(id);
         var result = await _service.DetachDeviceAsync(folder!, DeviceId);

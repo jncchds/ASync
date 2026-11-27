@@ -168,7 +168,20 @@
                         IsVisible="{Binding CanImport}" />
                 <Button Classes="small secondary" Name="EditConditions" Content="Conditions…" Command="{Binding EditConditionsCommand}"
                         IsVisible="{Binding !EditingConditions}" />
+                <Button Classes="small secondary" Name="AskLeave" Content="Stop syncing here…" Command="{Binding AskLeaveCommand}"
+                        IsVisible="{Binding !ConfirmingLeave}" />
               </WrapPanel>
+
+              <Border Classes="notice danger" Name="LeaveConfirm" IsVisible="{Binding ConfirmingLeave}">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="small" FontWeight="SemiBold" Text="{Binding LeaveQuestion}" TextWrapping="Wrap" />
+                  <TextBlock Classes="small" Text="{Binding LeaveHint}" TextWrapping="Wrap" />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button Classes="small danger" Name="ConfirmLeave" Content="Stop syncing" Command="{Binding ConfirmLeaveCommand}" />
+                    <Button Classes="small secondary" Content="Cancel" Command="{Binding CancelLeaveCommand}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
             </StackPanel>
           </Border>
         </DataTemplate>

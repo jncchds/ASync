@@ -1281,8 +1281,10 @@ had to wait for a computer. Now the shared app (`ASync.App`, so the Android and 
 - `POST /api/sync/folders/{id}/join {localPath, direction, expectedRevision}` → `DeviceFolderDto`: `FolderService.JoinAsync`
   = `AttachDeviceAsync` (the web UI's) for the calling device only; a folder of someone else is 404, one it is already in
   409 ("already syncs"), a stale revision 409.
-- `POST /api/sync/folders/{id}/leave` → 204: `DetachDeviceAsync` for itself (404 when it is not in the folder).
-- With `Device.MayAddFolders` off, create, join and leave answer **403** `{message: "Adding folders from this device is
+- `POST /api/sync/folders/{id}/leave` → 204: `DetachDeviceAsync` for itself (404 when it is not in the folder). Not behind
+  the flag: leaving only takes this device's own access away, which it could already stop by pausing the folder (its own
+  `PATCH`), so a device attached in the web UI can always stop a folder from its side. A revoked device: 403.
+- With `Device.MayAddFolders` off, create and join answer **403** `{message: "Adding folders from this device is
   turned off. Allowed in the web UI under Devices (\"May add folders\")."}` (`FolderService.DeviceMayAddFolders`). A revoked
   device's token is refused before (401, `OnTokenValidated`).
 - **Live:** creating sends `config.changed` to the device (its agent loads the folder) and to the owner's pages (people's
@@ -1295,7 +1297,8 @@ had to wait for a computer. Now the shared app (`ASync.App`, so the Android and 
 **Why widening a device's rights is acceptable, and where it stops.** A device token could already read and change every
 file of every folder it is in (the gateway), so a stolen token was already serious; what it could not do was reach
 anything else. With the flag, a device can additionally (1) create folders for its own owner, (2) attach *itself* to the
-owner's other folders and so read their data, (3) detach itself. It still cannot: attach or detach another device
+owner's other folders and so read their data; (3) detaching itself needs no flag (it only narrows what the token
+reaches). It still cannot: attach or detach another device
 (the request names no device; the caller's id comes from the token), see or use another person's folders or back-ends
 (ownership is checked as for people: someone else's folder is 404, someone else's back-end "Choose one of your storage
 back-ends"), see a back-end's settings or secrets (names and types only), change a back-end, a folder's settings after
@@ -1313,7 +1316,9 @@ device stops all of it at once, as before. Every create is logged with the devic
 platform's `ILocalTreeFactory.Validate` first (a relative path, a phone path without All files access, Android/data…); the
 server's refusals come back as the agent's message (`ControlException`), an unreachable server as "Cannot reach the
 server, so nothing was changed: …", an older server (a bare 404/405) as "The server cannot add folders from devices yet:
-update it."; then the agent reloads its folders, so the new one runs at once. The desktop app reaches these over the
+update it."; then the agent reloads its folders, so the new one runs at once. `leave-folder` treats a folder the server no
+longer lists for this device (deleted, or detached in the web UI meanwhile), or a 404 with our message from the leave
+itself, as already left: it reloads (the worker stops) and answers "… it was already removed on the server", not an error. The desktop app reaches these over the
 control channel, the Android app in process (`InProcessAgentConnector`); an older agent answers "Unknown operation".
 
 **App** (`AddFolderViewModel`, `Views/AddFolderView.axaml`, shown over the page like the settings: `ShellViewModel.
@@ -1336,6 +1341,10 @@ AddFolderPage`, opened by the dashboard's *New folder…* and *Add to a folder�
   setup when its repository is not made yet). Refusals (overlapping roots, a changed folder, offline) stay on the form,
   which keeps what was typed.
 - The dashboard's hint for an empty device names the two buttons.
+- **Stop syncing here…** on every folder card (`FolderViewModel.AskLeave`/`ConfirmLeave`/`CancelLeave`): an inline danger
+  notice asks first ("Stop syncing "Docs" on this phone?", nothing deleted, *Add to a folder* brings it back), then
+  `leave-folder`; a refusal stays on the card with the agent's message, success closes it and the card goes with the next
+  status. A document-tree (`content://`) folder gives its permission back (`IStorageAccess.ReleaseTree`).
 
 **Web UI:** the Devices page has an *Adds folders* column (a checkbox per device, "Allowed"/"Off", a tooltip) with one
 line of explanation above the table; the Folders page shows "added from <device>" among a folder's details (tooltip: when).
@@ -1350,14 +1359,15 @@ owner with only this device attached and "added from", the live `config.changed`
 UI's rules — overlap, another person's back-end, Mirror without a direction, end-to-end Mirror, no local path, nothing
 left on the storage —, a Transport Backup's recovery key with no-store, an end-to-end one not ready; editing and deleting
 it in the web UI; join for itself only (a smuggled `deviceId` ignored, the other device's row unchanged), twice and a
-stale revision 409, another person's device 404, leave; with the flag off 403 with the message on all three and empty
-options; revoked → 401), `ApiSecurityTests` (the new endpoints classified as device endpoints from the routing table:
+stale revision 409, another person's device 404, leave; with the flag off 403 with the message on create and join and empty
+options, while leave still works (204, then 404); revoked → 401), `ApiSecurityTests` (the new endpoints classified as device endpoints from the routing table:
 403 for people, 404 for another person's device), `DeviceBrowserTests` (a hidden place's mounts not offered).
 `ASync.App.Tests`: `AddFolderTests` (options asked, defaults, the root following the name, everything sent, end-to-end
 into the setup, the recovery key shown and dropped, the server's refusals and offline kept on the form, the flag off and
 *Try again*, a 403 later, an old agent, joining with a direction and an end-to-end folder's unlock, nothing to join, the
 phone's All files access picker and the system picker filling the form, Back, the view wired and fitting 360 px, the
-refusal in the view). `scripts/e2e-sync.cs`: B (one-time code) creates a TwoWay folder through the device endpoints,
+refusal in the view), `LeaveFolderTests` (asked first, cancel, the agent's leave, the card gone with the next status, a
+refusal kept, a document tree released, the Photos wording, the view at 360 px). `scripts/e2e-sync.cs`: B (one-time code) creates a TwoWay folder through the device endpoints,
 "added from B", an overlapping root refused, A joins it with its device token and both sync, A leaves, the flag off →
 403; the Docker agent (reusable code) has it off and offers `/data` but not `/config`. `scripts/smoke-android.sh`: New
 folder at a real path through the in-app picker, synced both ways with async-cli; Add to a folder made in the web UI;

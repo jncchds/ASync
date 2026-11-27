@@ -1,6 +1,12 @@
 # Release notes
 
-## v0.1.6 — 2026-11-21
+## v0.1.6 — 2026-11-27
+
+- feat(apps): **stop syncing a folder from the device.** Each folder card in the Android, desktop and iOS apps has *Stop
+  syncing here…*: after you confirm, this device leaves the folder. Its files stay on the device and on the server, and the
+  folder carries on for your other devices. It works even with *Adds folders* off; the server no longer needs that switch for
+  a device to leave. A folder that was already deleted or detached on the server is dropped from the device, where before
+  this gave an error.
 
 - perf(sync): **a run that finds nothing changed writes nothing on the device.** A two-way or mirror folder's sync state
   (`sync-state.json`, several MB on a large folder) was written at the end of every run, even when nothing changed: it is now
