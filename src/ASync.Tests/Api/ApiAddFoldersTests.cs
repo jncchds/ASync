@@ -224,7 +224,7 @@ public class ApiAddFoldersTests(ApiWorld world) : IClassFixture<ApiWorld>
     }
 
     [SkippableFact]
-    public async Task WithTheFlagOff_EveryChangeIs403_WithWhereToAllowIt_AndARevokedDeviceIsOut()
+    public async Task WithTheFlagOff_CreateAndJoinAre403_WithWhereToAllowIt_LeaveStillWorks_AndARevokedDeviceIsOut()
     {
         Skip.If(ApiWorld.Connection is null, "Set ASYNC_TEST_POSTGRES.");
         var (agent, agentToken) = await world.EnrollAsync(world.AliceToken, "scripted", reusable: true);
@@ -241,13 +241,21 @@ public class ApiAddFoldersTests(ApiWorld world) : IClassFixture<ApiWorld>
                  {
                      (HttpMethod.Post, "api/sync/folders", new DeviceCreateFolderRequest(Folder("No", "no", world.AliceBackend), "/x")),
                      (HttpMethod.Post, $"api/sync/folders/{world.AliceFolder}/join", new DeviceJoinFolderRequest("/x")),
-                     (HttpMethod.Post, $"api/sync/folders/{world.AliceFolder}/leave", null),
                  })
         {
             using var refused = await world.SendAsync(method, url, agentToken, body);
             Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
             Assert.Contains("Allowed in the web UI under Devices", await MessageAsync(refused));
         }
+
+        // Leaving is not behind the flag: attached in the web UI, it can still stop syncing a folder by itself.
+        using (var attach = await world.SendAsync(HttpMethod.Put, $"api/folders/{world.AliceFolder}/devices", world.AliceToken,
+                   new AttachDeviceRequest(agent, "/data/docs")))
+            Assert.Equal(HttpStatusCode.OK, attach.StatusCode);
+        using (var leave = await world.SendAsync(HttpMethod.Post, $"api/sync/folders/{world.AliceFolder}/leave", agentToken))
+            Assert.Equal(HttpStatusCode.NoContent, leave.StatusCode);
+        using (var again = await world.SendAsync(HttpMethod.Post, $"api/sync/folders/{world.AliceFolder}/leave", agentToken))
+            Assert.Equal(HttpStatusCode.NotFound, again.StatusCode);
 
         // Allowed, then removed: its token stops at once.
         await SetMayAddAsync(agent, true);

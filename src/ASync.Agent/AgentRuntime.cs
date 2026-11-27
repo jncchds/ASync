@@ -1142,13 +1142,35 @@ public sealed class AgentRuntime : IControlHandler, IAsyncDisposable
         return $"Restoring snapshot {shortId} of \"{folder.Name}\" into the {What(kind)}…";
     }
 
+    /// <summary>
+    /// Stops syncing a folder on this device (the server detaches it; files here and on the storage stay). A folder the server
+    /// no longer has for this device (deleted, or detached in the web UI meanwhile) is already left: that is not an error.
+    /// </summary>
     public async Task<string> LeaveFolderAsync(int folderId, CancellationToken ct)
     {
         var (agent, api) = Running();
-        var folder = await FolderAsync(api, folderId, ct);
-        await AskServerAsync(async () => { await api.LeaveFolderAsync(folderId, ct); return true; });
+        var folder = (await AskServerAsync(() => api.GetFoldersAsync(ct))).FirstOrDefault(f => f.FolderId == folderId);
+        var name = folder?.Name ?? agent.Folders.FirstOrDefault(f => f.Folder.FolderId == folderId)?.Folder.Name;
+        var left = folder is not null;
+        if (left)
+        {
+            try { await api.LeaveFolderAsync(folderId, ct); }
+            // Gone between the two requests (ours says why; an older server's bare 404 has no such route).
+            catch (ApiException e) when (e.Status == System.Net.HttpStatusCode.NotFound && !e.Message.StartsWith("The server answered", StringComparison.Ordinal))
+            {
+                left = false;
+            }
+            catch (ApiException e) when (e.Status is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.MethodNotAllowed)
+            {
+                throw new ControlException("The server cannot detach a device from its side yet: update it, or remove the device from the folder in the web UI.");
+            }
+            catch (ApiException e) { throw new ControlException(e.Message); }
+            catch (HttpRequestException e) { throw new ControlException($"Cannot reach the server, so nothing was changed: {e.Message}"); }
+        }
         await agent.ReloadAsync(ct);
-        return $"This device no longer syncs \"{folder.Name}\". Its files here and on the server stay.";
+        var what = name is null ? $"folder {folderId}" : $"\"{name}\"";
+        return left ? $"This device no longer syncs {what}. Its files here and on the server stay."
+            : $"This device no longer syncs {what}: it was already removed on the server. Its files here stay.";
     }
 
     public Task<string> CancelAsync(int? folderId, CancellationToken ct)
